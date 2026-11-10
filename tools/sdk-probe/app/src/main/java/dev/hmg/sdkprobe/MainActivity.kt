@@ -161,13 +161,17 @@ class MainActivity : Activity() {
 
     // ---------------------------------------------------------------- Vehicle SDK
 
+    // 모든 Vehicle 리스너는 VehicleListener.onFailed(e: Exception)도 구현해야 한다
     private val doorListener = object : DoorPositionListener {
         override fun onPositionUpdated(pos: Int?) = ok("vehicle", "event.doorPosition.ROW_1_LEFT", pos)
+        override fun onFailed(e: Exception) = fail("vehicle", "event.doorPosition.ROW_1_LEFT", e)
     }
 
     private val recircListener = object : HvacRecirculationStateListener {
         override fun onHvacAutoRecirculationStateUpdated(state: Boolean?) =
             ok("vehicle", "event.hvacRecirculation", state)
+
+        override fun onFailed(e: Exception) = fail("vehicle", "event.hvacRecirculation", e)
     }
 
     private fun probeVehicle() {
