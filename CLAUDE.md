@@ -35,13 +35,16 @@
   - 노트북의 PowerShell 실행 정책이 Restricted라 스크립트는 `-ExecutionPolicy Bypass`로 실행한다
   - 최신 cmdline-tools의 `sdkmanager`는 "Android CLI"로 위임되며(사용 통계 수집이 기본으로 켜짐) Pleos 이미지 경로를 처리하지 못한다. 이미지는 `tools/laptop/install-image.ps1`로 설치한다
   - 노트북에서 Google·Pleos 서버로의 단일 연결 다운로드가 매우 느리다(초당 0.1~0.2MB). 큰 파일은 분할 병렬 다운로드를 쓴다
-- SDK 검증용 앱: `tools/sdk-probe/` (각 SDK 호출 결과를 logcat `PleosProbe` 태그로 출력)
+- SDK 검증용 앱: `tools/sdk-probe/` (각 SDK 호출 결과를 logcat `PleosProbe` 태그로 출력). 노트북에서 `run-probe.ps1`로 빌드·설치·실행하고 결과는 `logs\probe-result.log`(전체 logcat은 `probe-full.log`)
+  - 에뮬레이터가 띄운 adb 서버가 에뮬레이터 로그 파일 핸들을 물려받아 계속 잡는다. 그래서 `start-emulator.ps1`은 실행할 때마다 새 로그 파일(`logs\emulator-날짜-시각.log`)을 쓴다
+  - 노트북 RAM이 빠듯해서(여유 3~5GB) 에뮬레이터는 `-Memory 3072`로 띄우고, 부팅이 끝난 뒤에 빌드한다
+  - 노트북이 4코어에 GPU 소프트웨어 렌더링이라, 내비가 길안내 화면을 그리는 동안 에뮬레이터가 과부하(load 30 이상)가 되어 SDK 호출이 수십 초씩 밀린다. 부팅 직후 빌드가 겹치면 `carwatchdogd`가 VHAL을 재시작시켜 앱 Activity가 종료되기도 한다. 이럴 때는 `run-probe.ps1 -SkipBuild`로 다시 실행한다
 - GitHub private repo: https://github.com/ezhyeok/hmg-appdev-challenge (기본 브랜치 `main`)
 
 ## SDK 사용 조건 (설명회 기준, Playground 문서보다 우선)
 - 공모전 개발 단계에서는 SDK 권한 신청이나 승인이 필요 없다. Vehicle, NaviHelper, STT, TTS, FusedLocation 모두 AndroidManifest에 문서의 uses-permission을 선언하기만 하면 에뮬레이터에서 호출할 수 있다
 - Playground 문서(`pleos-connect/create-my-project.md`)의 "준비 중(Coming Soon)" 표기는 App Market 배포용 신청 절차 기준이다. 공모전 개발에는 해당하지 않는다
-- Vehicle 제어 API(`set*`/`move*`/`select*`, `CONTROL_CAR_*` 권한)까지 에뮬레이터에서 동작하는지는 설명회에서 명시되지 않았다. 직접 호출해 확인하기 전까지 핵심 기능을 제어 API에 의존하지 말 것
+- Vehicle 제어 API: 에뮬레이터에서 `setHvacRecirculation`(`CONTROL_CAR_CLIMATE`)으로 값이 실제로 바뀌고 변경 이벤트도 온다 (2026-11-11 sdk-probe, Virtual Console 시뮬레이터가 켜진 상태). 시뮬레이터가 꺼져 있으면 성공 콜백만 오고 값은 그대로다. 다른 제어 API는 쓰기 전에 같은 방식으로 직접 확인할 것
 - TTS/STT: SERVER·HYBRID 모드는 `registerApp()`에 Playground 프로젝트의 Client ID/Secret이 필요하고, ON_DEVICE 모드는 등록이 필요 없다 (각 SDK의 `app-registration.md`). 막히면 사무국에 문의
 - 설명회에서 "현재 공개되지 않은 SDK도 공모전에 제공할 예정"이라고 했지만 구체적인 방식은 안내되지 않았다. 공개된 SDK 기준으로 설계할 것
 
@@ -49,8 +52,20 @@
 - 차속과 기어는 Vehicle SDK에 없다 (`VehicleSpeedListener`는 2.3.2에서 삭제). AAOS `CarPropertyManager`의 `PERF_VEHICLE_SPEED`, `GEAR_SELECTION`을 쓴다. Virtual Console에 기어 카드는 있지만 차속 카드는 없다
 - 텔테일 API(`checkTelltalesCapabilities`, `registerTelltales`, `getTelltalesInfo`)는 `PRIVATE_CAR_SAFETY`(signature|privileged) 권한이라 서드파티 앱에서 쓸 수 없다
 - `getLowTirePressure`는 현재 공기압이 아니라 저압 경고 임계값(kPa)을 반환한다
+- **SDK 호출은 백그라운드 스레드에서 한다.** Vehicle·NaviHelper 호출은 서비스 연결을 기다리며 호출 스레드를 수 초간 막는다(sdk-probe 측정, Vehicle 호출 합계 약 9초). 메인 스레드에서 부르면 ANR로 앱이 종료된다
+- `android.car.permission.CAR_SPEED`, `pleos.car.permission.FUSED_LOCATION`은 위험(dangerous) 권한이다. Manifest 선언만으로는 SecurityException이 나므로 실행 중에 `requestPermissions`로 요청한다. adb로 줄 때는 AAOS 포그라운드 사용자(user 10)에게 줘야 한다: `adb shell pm grant --user current <패키지> <권한>`
+- NaviHelper `requestRoute`를 보내면 Pleos 내비 앱이 포그라운드로 올라오고 실제 길안내가 시작된다. 경로 계산은 서버에서 하므로 네트워크가 필요하다
+- **내비가 떠 있는 동안에도 이벤트를 받으려면 포그라운드 서비스가 필요하다.** Activity만 있는 앱은 내비가 앞으로 오면 cached 프로세스가 되어 Android 14 freezer에 얼려지고(logcat `ActivityManager: freezing <pid> <패키지>`), 그동안 Vehicle·NaviHelper 이벤트를 받지 못한다. 포그라운드 서비스에서 리스너를 유지하면 받는다 (sdk-probe `ProbeService`로 확인)
+- NaviHelper 정보 조회(`getTBTInfo`, `getWaypointInfo`, `getDestinationInfo`, `getRouteStateInfo`, `getChargerOperatorInfo`)는 호출해야 응답 이벤트가 온다. 길안내 중 `onTBTInfo`는 앞으로의 회전 목록(type, distance, description)을 준다. `onRouteCancelled`, `onNavigationStatus`, `onDrivingInfo`, `onCurrentRoadSpeedLimit`는 내비가 먼저 보낸다. `onRouteStarted`는 내비 앱 로그에 `notifyRouteStarted`가 찍혀도 앱에서 받지 못했다(원인 미확인). 길안내 여부는 `RouteStateInfo.naviMode`(`ROUTE_GUIDING`/`SAFE_GUIDING`)로 판단할 것
+- `requestTrip(TripRequest)`는 길안내를 시작하지 않고 `onTripInfo`로 거리(m), ETA(초), 도착 시 예상 SOC(%), 소모 에너지, 구간별 교통 정보를 준다 (성남→서울역: 27.5km, 약 31분, SOC 95%)
+- 내비 요청을 1초 안에 연달아 보내면(trip, route, waypoint) 시작된 경로가 곧바로 취소되는 일이 있었다. 요청 사이에 응답을 기다릴 것
 - NaviHelper에는 POI 검색 API가 없다. 목적지·경유지의 좌표와 poiId는 앱이 외부에서 구해야 한다. 요청은 Pleos 내비 앱으로 전달되고, 어떤 이벤트가 오는지는 내비 앱 구현에 따라 다르다
 - 에뮬레이터에서 재현할 수 있는 차량 상태는 `docs/contest/02_Pleos_개발가이드/pleos-connect/app-test-guide/virtual-console-guide.md`의 카드 목록이 기준이다
+- Virtual Console은 에뮬레이터 8088 포트의 HTTP API로도 조작할 수 있다 (`adb forward tcp:8088 tcp:8088`). 시연 시나리오를 스크립트로 재생할 수 있다
+  - 차량 시뮬레이터는 브라우저 세션이 있을 때만 켜진다. 페이지를 열어 두거나 `POST /browser/session?client=<이름>`을 1초마다 보낸다(3초 동안 없으면 꺼짐). 꺼져 있으면 제어 API 결과와 VC 변경이 반영되지 않는다
+  - `GET /vehicle/catalog`(조작 가능한 63개 항목과 요청 형식), `GET /vehicle/state`(현재 상태). 변경은 PUT + 쿼리스트링. 예: `/vehicle/gear?gear=Drive`, `/vehicle/controls?speed=40&accelerator=20&brake=0`, `/vehicle/body?door_fl=true`, `/vehicle/hvac?recirc=false`, `/vehicle/odometer?usage_time_min=120`
+  - 문서의 카드 목록에는 차속이 없지만 `/vehicle/controls`로 차속을 바꿀 수 있다. 앱에서 확인한 것: 기어 D + 40km/h → `GEAR_SELECTION`=8, `PERF_VEHICLE_SPEED`=11.1m/s, `CarUxRestrictions` requiresDO=true(active=0x50). P로 돌리면 해제. 도어 열림·닫힘도 `registerDoorPosition` 리스너로 온다
+  - 좌석 점유는 VC 상태(모두 비어 있음)와 SDK 조회값(대부분 true)이 달랐다. 쓰기 전에 다시 확인할 것
 - 주행 규제 테스트: `adb shell cmd hmg_car_service --service drivingstate driving_regulation on` / `off` (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/adb-command-reference-guide.md`)
 
 ## 설계·구현 원칙

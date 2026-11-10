@@ -1,15 +1,18 @@
 ﻿# sdk-probe 빌드 → 설치 → 실행 → 결과(logcat) 출력
 # 실행: powershell -ExecutionPolicy Bypass -File run-probe.ps1   (이 PC는 실행 정책이 Restricted)
-param([int]$WaitSeconds = 25)
+# -SkipBuild: 이미 빌드한 APK로 설치·실행만 한다 (에뮬레이터 부팅 직후 빌드하면 CPU 부족으로 차량 서비스가 재시작될 수 있음)
+param([int]$WaitSeconds = 50, [switch]$SkipBuild)
 . "$PSScriptRoot\env.ps1"
 if (-not $P) { throw "env.ps1 not loaded" }
 $proj = "$P\repo\tools\sdk-probe"
 Set-Location -LiteralPath $proj -ErrorAction Stop
 "sdk.dir=$($env:ANDROID_HOME.Replace('\','\\'))" | Set-Content -Encoding ASCII "$proj\local.properties"
 # PowerShell 5.1은 네이티브 stderr를 오류로 감싸므로 cmd로 합쳐서 로그에 남긴다
-cmd /c "gradlew.bat --no-daemon assembleDebug > `"$P\logs\probe-build.log`" 2>&1"
-if ($LASTEXITCODE -ne 0) { "BUILD FAILED (exit $LASTEXITCODE)"; Get-Content "$P\logs\probe-build.log" -Tail 40; exit 1 }
-"BUILD OK"
+if (-not $SkipBuild) {
+  cmd /c "gradlew.bat --no-daemon assembleDebug > `"$P\logs\probe-build.log`" 2>&1"
+  if ($LASTEXITCODE -ne 0) { "BUILD FAILED (exit $LASTEXITCODE)"; Get-Content "$P\logs\probe-build.log" -Tail 40; exit 1 }
+  "BUILD OK"
+}
 $apk = "$proj\app\build\outputs\apk\debug\app-debug.apk"
 cmd /c "`"$ADB`" install -r `"$apk`" 2>&1"
 # 위험(dangerous) 권한은 AAOS 포그라운드 사용자(user 10)에게 부여해야 한다
@@ -21,4 +24,6 @@ cmd /c "`"$ADB`" logcat -c"
 cmd /c "`"$ADB`" shell am start -n dev.hmg.sdkprobe/.MainActivity 2>&1"
 Start-Sleep -Seconds $WaitSeconds
 cmd /c "`"$ADB`" logcat -d -s PleosProbe:I > `"$P\logs\probe-result.log`" 2>&1"
+# 내비 앱 쪽 동작을 같이 보기 위해 전체 logcat도 남긴다
+cmd /c "`"$ADB`" logcat -d > `"$P\logs\probe-full.log`" 2>&1"
 Get-Content "$P\logs\probe-result.log"

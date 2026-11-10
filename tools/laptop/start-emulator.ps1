@@ -4,9 +4,10 @@ param([int]$Memory = 4096)
 . "$PSScriptRoot\env.ps1"
 if (-not $P) { throw "env.ps1 not loaded" }
 $emuArgs = "-avd $AVD -memory $Memory -no-window -no-snapshot -no-boot-anim -no-audio -gpu swiftshader_indirect"
-$cmd = "cmd /c `"`"$EMU`" $emuArgs > `"$P\logs\emulator.log`" 2>&1`""
+# 에뮬레이터가 띄운 adb 서버가 로그 파일 핸들을 물려받아 계속 잡고 있으므로, 실행마다 새 로그 파일을 쓴다
+$log = "$P\logs\emulator-$(Get-Date -Format yyyyMMdd-HHmmss).log"
 # 에뮬레이터는 ANDROID_* 환경변수가 필요하므로 cmd 안에서 설정한다 (WMI 프로세스는 환경변수를 물려받지 않음)
 $envSet = "set ANDROID_HOME=$env:ANDROID_HOME&& set ANDROID_SDK_ROOT=$env:ANDROID_SDK_ROOT&& set ANDROID_USER_HOME=$env:ANDROID_USER_HOME&& set ANDROID_AVD_HOME=$env:ANDROID_AVD_HOME&& "
-$cmd = "cmd /c `"$envSet`"$EMU`" $emuArgs > `"$P\logs\emulator.log`" 2>&1`""
+$cmd = "cmd /c `"$envSet`"$EMU`" $emuArgs > `"$log`" 2>&1`""
 $r = Invoke-CimMethod -ClassName Win32_Process -MethodName Create -Arguments @{ CommandLine = $cmd; CurrentDirectory = $P }
-"emulator launched pid=$($r.ProcessId) rc=$($r.ReturnValue)"
+"emulator launched pid=$($r.ProcessId) rc=$($r.ReturnValue) log=$log"

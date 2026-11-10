@@ -23,6 +23,9 @@
     <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
     <uses-permission android:name="android.car.permission.CAR_SPEED" />
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 내비 앱이 화면 앞에 있어도 이벤트를 받기 위한 포그라운드 서비스 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="false"
@@ -37,5 +40,13 @@
             <!-- 주행 중에도 화면을 유지해 CarUxRestrictions 변화를 관찰 -->
             <meta-data android:name="distractionOptimized" android:value="true" />
         </activity>
+        <service
+            android:name=".ProbeService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse">
+            <property
+                android:name="android.app.PROPERTY_SPECIAL_USE_FGS_SUBTYPE"
+                android:value="Keeps Pleos SDK listeners alive while the navigation app is in the foreground" />
+        </service>
     </application>
 </manifest>
