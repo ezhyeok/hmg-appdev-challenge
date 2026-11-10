@@ -31,6 +31,11 @@
 - 이 개발 서버에서는 Pleos Connect Emulator를 돌릴 수 없다. 에뮬레이터 실행과 검증은 사용자의 로컬 PC에서 한다
   - Google은 Android Emulator를 linux-x64, macOS(x64/arm64), windows-x64용으로만 배포한다. 이 서버는 aarch64 Linux라 공식 바이너리가 없다 (SDK repository XML 확인)
   - 이 서버 자체가 KVM 게스트 VM(Neoverse-N1)이고 중첩 가상화를 지원하지 않아 `/dev/kvm`이 없다. 하드웨어 가속 없이는 Android 14 Automotive를 실용적인 속도로 돌릴 수 없다
+- 에뮬레이터 실행과 빌드는 사용자의 Windows 노트북에서 SSH로 한다. 노트북 작업은 `C:\Users\User\hmg-appdev-challenge` 안에서만 한다 (프로젝트 전용 SDK `sdk\`, `android-home\`, `gradle-home\`). 노트북용 스크립트는 `tools/laptop/` (`sync.sh`로 코드 복사, `start-emulator.ps1`, `run-probe.ps1`)
+  - 노트북의 PowerShell 실행 정책이 Restricted라 스크립트는 `-ExecutionPolicy Bypass`로 실행한다
+  - 최신 cmdline-tools의 `sdkmanager`는 "Android CLI"로 위임되며(사용 통계 수집이 기본으로 켜짐) Pleos 이미지 경로를 처리하지 못한다. 이미지는 `tools/laptop/install-image.ps1`로 설치한다
+  - 노트북에서 Google·Pleos 서버로의 단일 연결 다운로드가 매우 느리다(초당 0.1~0.2MB). 큰 파일은 분할 병렬 다운로드를 쓴다
+- SDK 검증용 앱: `tools/sdk-probe/` (각 SDK 호출 결과를 logcat `PleosProbe` 태그로 출력)
 - GitHub private repo: https://github.com/ezhyeok/hmg-appdev-challenge (기본 브랜치 `main`)
 
 ## SDK 사용 조건 (설명회 기준, Playground 문서보다 우선)

@@ -1,0 +1,10 @@
+# 노트북 공통 환경: 모든 경로는 프로젝트 폴더 안 (C:\Users\User\hmg-appdev-challenge)
+$P = "$env:USERPROFILE\hmg-appdev-challenge"
+$env:ANDROID_HOME      = "$P\sdk"
+$env:ANDROID_SDK_ROOT  = "$P\sdk"
+$env:ANDROID_USER_HOME = "$P\android-home"
+$env:ANDROID_AVD_HOME  = "$P\android-home\avd"
+$env:GRADLE_USER_HOME  = "$P\gradle-home"
+$ADB = "$P\sdk\platform-tools\adb.exe"
+$EMU = "$P\sdk\emulator\emulator.exe"
+$AVD = "pleos_connect_21"
