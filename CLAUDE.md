@@ -1,0 +1,81 @@
+# CLAUDE.md — 현대자동차그룹 차량용 앱 개발 공모전 (Code your App into Pleos App Market)
+
+공모전 자료는 `docs/contest/`에 있다. 공모전 공식 사이트(appdevchallenge.auto-hmg.io), 온라인 설명회 영상, Pleos 개발자 문서(document.pleos.ai)를 2026-11-10(KST)에 수집해 정리한 것이다. 이 파일의 경로는 모두 repo 루트 기준이다.
+
+## 먼저 읽을 파일
+1. `docs/contest/00_핵심요약.md` — 일정, 제출물, 심사 기준, 규정 요약 (설명회 내용 반영)
+2. `docs/contest/01_공모전/OT_설명회_정리.md` — 온라인 설명회 내용. 홈페이지에 없는 운영 규칙(SDK 승인 불필요, 실차 시연 없음, 생성형 AI 사용 조건, 외부 API 허용, 복수 출품, 혼합 팀 부문 등)이 여기에 있다
+3. `docs/contest/01_공모전/접수양식/접수양식_원문.md` — 기획서(=접수양식) 8개 항목 구조. 실제 제출은 같은 폴더의 `contest-application-consent.docx`에 작성
+4. `docs/contest/02_Pleos_개발가이드/pleos-connect/getting-started.md` — 프로젝트 생성 → 에뮬레이터 → Vehicle SDK 첫 호출. 단, 예제의 `Vehicle:2.3.1`은 Maven에 없으므로 2.3.2를 쓴다
+5. `docs/contest/02_Pleos_개발가이드/INDEX.md` — 전체 가이드 목록
+6. `docs/contest/03_SDK_API_레퍼런스/INDEX.md` — SDK별·패키지별 API 명세 (메서드 시그니처, 권한, 콜백). 코드 작성 전에 반드시 여기서 실제 시그니처를 grep해서 확인하고, 존재하지 않는 API를 지어내지 말 것
+
+## 확정된 기술 조건
+- 플랫폼: Pleos Connect (Android Automotive OS 기반 인포테인먼트). 앱은 일반 Android 앱 (Kotlin 권장, Java 가능)
+- minSdk 28 이상 (차량 사이버보안 요건), Gradle 8.0 이상. 에뮬레이터는 Pleos Connect Emulator v2.1.0 (API 34, Automotive AVD, Cold boot, RAM 4GB)
+- 에뮬레이터 이미지: Windows/Linux는 x86_64(`crp-sys-img.xml`), Mac은 arm64(`crp-arm64-sys-img.xml`). 설치 URL과 절차는 `docs/contest/02_Pleos_개발가이드/connect-guide/getting-started/application-development/setup-connect-sdk-emulator.md`
+- Maven 저장소: `https://nexus-playground.pleos.ai/repository/maven-releases/` (로그인 없이 접근 가능)
+- SDK 좌표 (Maven 최신 버전, 2026-11-10 확인)
+  - `ai.pleos.playground:Vehicle:2.3.2`
+  - `ai.pleos.playground:NaviHelper:3.0.5`
+  - `ai.pleos.playground:TextToSpeech:3.3.1`
+  - `ai.pleos.playground:SpeechToText:3.3.1`
+  - `ai.pleos.playground:FusedLocation:1.1.3`
+  - 참고: `ai.pleos.playground:LLM:2.1.3.2`도 있지만 API 레퍼런스만 공개됐고 공모전 안내에는 없는 SDK다
+- Vehicle SDK 사용 패턴: `Vehicle(context).initialize()` → `vehicle.getXxx()`로 도메인 객체 획득 → `checkXxxCapabilities` / `getCurrentXxx` / `setXxx` / `registerXxx` 호출 → 결과는 onComplete/onFailed 비동기 콜백 → 사용 종료 시 `release()` (콜백이 끝나기 전에 release 금지)
+- 권한: AndroidManifest에 `pleos.car.permission.*` 선언. 조회는 `CAR_*`, 제어는 `CONTROL_CAR_*`. 도메인별 권한은 `docs/contest/03_SDK_API_레퍼런스/Vehicle/_misc.md`와 각 API의 `@RequiresPermission` 참고
+- AAOS 표준 Car API로 얻을 수 있는 데이터(속도, 기어, 외기온도, 연료레벨 등)는 표준 API를 우선 쓰고, Pleos SDK는 특화 기능에 쓴다 (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-planning-guide/pleos-connect-sdk-api.md`)
+- 외부 API와 퍼블릭 네트워크 연결 사용 가능 (설명회)
+
+## 개발 환경 메모 (2026-11-10 확인)
+- 이 개발 서버는 aarch64 Linux이고 `/dev/kvm`이 없으며 Android SDK가 설치돼 있지 않다. Pleos Connect Emulator를 여기서 실용적으로 돌릴 수 없으므로 에뮬레이터 실행과 검증은 사용자의 로컬 PC에서 한다
+
+## SDK 사용 조건 (설명회 기준, Playground 문서보다 우선)
+- 공모전 개발 단계에서는 SDK 권한 신청이나 승인이 필요 없다. Vehicle, NaviHelper, STT, TTS, FusedLocation 모두 AndroidManifest에 문서의 uses-permission을 선언하기만 하면 에뮬레이터에서 호출할 수 있다
+- Playground 문서(`pleos-connect/create-my-project.md`)의 "준비 중(Coming Soon)" 표기는 App Market 배포용 신청 절차 기준이다. 공모전 개발에는 해당하지 않는다
+- Vehicle 제어 API(`set*`/`move*`/`select*`, `CONTROL_CAR_*` 권한)까지 에뮬레이터에서 동작하는지는 설명회에서 명시되지 않았다. 직접 호출해 확인하기 전까지 핵심 기능을 제어 API에 의존하지 말 것
+- TTS/STT: SERVER·HYBRID 모드는 `registerApp()`에 Playground 프로젝트의 Client ID/Secret이 필요하고, ON_DEVICE 모드는 등록이 필요 없다 (각 SDK의 `app-registration.md`). 막히면 사무국에 문의
+- 설명회에서 "현재 공개되지 않은 SDK도 공모전에 제공할 예정"이라고 했지만 구체적인 방식은 안내되지 않았다. 공개된 SDK 기준으로 설계할 것
+
+## API 사용 시 주의 (레퍼런스 확인 결과)
+- 차속과 기어는 Vehicle SDK에 없다 (`VehicleSpeedListener`는 2.3.2에서 삭제). AAOS `CarPropertyManager`의 `PERF_VEHICLE_SPEED`, `GEAR_SELECTION`을 쓴다. Virtual Console에 기어 카드는 있지만 차속 카드는 없다
+- 텔테일 API(`checkTelltalesCapabilities`, `registerTelltales`, `getTelltalesInfo`)는 `PRIVATE_CAR_SAFETY`(signature|privileged) 권한이라 서드파티 앱에서 쓸 수 없다
+- `getLowTirePressure`는 현재 공기압이 아니라 저압 경고 임계값(kPa)을 반환한다
+- NaviHelper에는 POI 검색 API가 없다. 목적지·경유지의 좌표와 poiId는 앱이 외부에서 구해야 한다. 요청은 Pleos 내비 앱으로 전달되고, 어떤 이벤트가 오는지는 내비 앱 구현에 따라 다르다
+- 에뮬레이터에서 재현할 수 있는 차량 상태는 `docs/contest/02_Pleos_개발가이드/pleos-connect/app-test-guide/virtual-console-guide.md`의 카드 목록이 기준이다
+- 주행 규제 테스트: `adb shell cmd hmg_car_service --service drivingstate driving_regulation on` / `off` (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/adb-command-reference-guide.md`)
+
+## 설계·구현 원칙
+- 실차 시연은 없다. 모든 검증과 2차 PT 시연은 Pleos Connect Emulator + Virtual Console 기준으로 준비한다 (기어, 도어, 배터리 잔량 등 상태를 바꿔가며 앱 반응을 보여줄 수 있게)
+- SDK를 많이 쓰는 것이 목적이 아니다. 차량 환경에서만 줄 수 있는 핵심 가치 하나를 정하고, 그 가치를 SDK로 실제 동작하게 만드는 것을 우선한다
+- 차량 모델별로 지원 API가 다를 수 있으므로 항상 capability를 확인한 뒤 UI를 활성화한다 (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-planning-guide/api-compatibility-availability.md`)
+- 주행 중 UX 제한: `CarUxRestrictions` 연동 필수 (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/driving-restriction-development-guide.md`, `docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-planning-guide/driver-distraction-guideline.md`). 심사 항목 "차량특화성"과 직결된다
+- 로터리 컨트롤러(CCP), 오디오 포커스, IME 리사이즈 같은 차량 특화 동작은 `docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/` 참고
+- UI는 `docs/contest/02_Pleos_개발가이드/connect-guide/docs-design/`의 Pleos Connect UI Design Guide(레이아웃, 컬러, 타이포, 컴포넌트)를 따른다
+- 생성형 AI 사용은 허용되지만, 참가자가 2차 PT 기술 Q&A에서 구조와 로직을 직접 설명해야 한다. 코드를 짤 때 아키텍처와 주요 흐름을 `docs/ARCHITECTURE.md` 같은 문서로 함께 정리하고, 과하게 복잡한 구조는 피할 것
+
+## 참가·제출 (공모전 규정 + 설명회)
+- 부문: 대학생 / 일반(스타트업 포함). 일반인이 한 명이라도 있는 팀은 일반 부문, 스타트업을 운영하는 대학생은 대학생 부문 (설명회)
+- 서로 다른 작품을 개수 제한 없이 여러 개 출품할 수 있다. 작품은 앱명으로 구분한다 (설명회)
+- 필수: 접수양식(기획서) docx + 참가자 전원 서명 동의서. 마감 2026-11-15(일) 23:59 KST, 이메일 appdevchallenge@hyundai-partners.com, 참가자 전원 CC
+- 메일 제목: 홈페이지는 "[차량용 앱 개발 공모전] 팀명(개인은 성명)_대표자명", 설명회는 앱명을 포함하라고 안내. 복수 출품이면 앱명을 반드시 넣을 것
+- 선택(가산점): 시연 영상(목업, 프로토타입, 에뮬레이터 화면 녹화 인정), GitHub 저장소(소스 + APK)
+- GitHub 저장소 규칙: APK는 저장소의 `apk/` 폴더에, 파일명은 `팀명_앱이름_release.apk`, 실행 가능한 release 빌드. 용량을 초과하면 GitHub Releases 링크. Private 저장소는 심사용 계정을 Collaborator로 초대
+- README.md 필수 내용: 앱 이름과 한 줄 소개 / 실행 방법 / 테스트 환경과 필요한 설정 / APK 파일 위치 또는 Release 링크
+- 2차 PT(2026-12-03~04, 오프라인) 대상 20팀은 실제 동작하는 앱 시연 필수. 아이디어 특별상을 포함한 모든 수상작은 개발 산출물이 있어야 한다
+- 기획서 02 "앱 프로젝트 소개"와 공유 링크, 첨부자료에 개인정보, 실명, 계정정보 노출 금지
+- 표절이나 다른 공모전 수상작은 금지. 오픈소스를 쓰면 라이선스를 지키고 출처를 표기
+
+## 심사 기준 (1차, 세부 배점 비공개)
+차량특화성 / 창의성 / 기술 활용성(Pleos Playground SDK·API 활용) / 사업성(타깃, 예상 MAU, Retention, 확장 계획) + 개발 산출물 가산점
+
+## 폴더 구조 (`docs/contest/`)
+- `00_핵심요약.md` 일정·제출물·심사·규정 요약
+- `01_공모전/pages/` 공모전 사이트 전체 페이지 원문 (가이드 8종, FAQ, 공지 3건, 약관, 개인정보방침)
+- `01_공모전/OT_설명회_정리.md` 온라인 설명회 정리
+- `01_공모전/접수양식/` 원본 docx와 텍스트 변환본
+- `01_공모전/images/` 포스터, 설명회 배너, 숏폼 예시 이미지
+- `02_Pleos_개발가이드/` document.pleos.ai 가이드 원문 (pleos-connect = Pleos Connect 개발자 가이드, connect-guide = 에뮬레이터·UI 디자인 가이드)
+- `03_SDK_API_레퍼런스/` Vehicle / NaviHelper / SpeechToText / TextToSpeech / FusedLocation / LLM SDK API 명세 (패키지별 1파일)
+
+`pages/`, `02_Pleos_개발가이드/`, `03_SDK_API_레퍼런스/`는 수집 원문이므로 수정하지 않는다. 각 파일 상단 주석에 원문 URL이 있다. 문서가 바뀌었을 수 있으니 중요한 결정 전에는 원문과 공모전 공지사항을 다시 확인할 것.
