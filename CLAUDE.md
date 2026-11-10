@@ -28,7 +28,10 @@
 - 외부 API와 퍼블릭 네트워크 연결 사용 가능 (설명회)
 
 ## 개발 환경 메모 (2026-11-10 확인)
-- 이 개발 서버는 aarch64 Linux이고 `/dev/kvm`이 없으며 Android SDK가 설치돼 있지 않다. Pleos Connect Emulator를 여기서 실용적으로 돌릴 수 없으므로 에뮬레이터 실행과 검증은 사용자의 로컬 PC에서 한다
+- 이 개발 서버에서는 Pleos Connect Emulator를 돌릴 수 없다. 에뮬레이터 실행과 검증은 사용자의 로컬 PC에서 한다
+  - Google은 Android Emulator를 linux-x64, macOS(x64/arm64), windows-x64용으로만 배포한다. 이 서버는 aarch64 Linux라 공식 바이너리가 없다 (SDK repository XML 확인)
+  - 이 서버 자체가 KVM 게스트 VM(Neoverse-N1)이고 중첩 가상화를 지원하지 않아 `/dev/kvm`이 없다. 하드웨어 가속 없이는 Android 14 Automotive를 실용적인 속도로 돌릴 수 없다
+- GitHub private repo: https://github.com/ezhyeok/hmg-appdev-challenge (기본 브랜치 `main`)
 
 ## SDK 사용 조건 (설명회 기준, Playground 문서보다 우선)
 - 공모전 개발 단계에서는 SDK 권한 신청이나 승인이 필요 없다. Vehicle, NaviHelper, STT, TTS, FusedLocation 모두 AndroidManifest에 문서의 uses-permission을 선언하기만 하면 에뮬레이터에서 호출할 수 있다
