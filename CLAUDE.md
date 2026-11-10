@@ -27,7 +27,7 @@
 - AAOS 표준 Car API로 얻을 수 있는 데이터(속도, 기어, 외기온도, 연료레벨 등)는 표준 API를 우선 쓰고, Pleos SDK는 특화 기능에 쓴다 (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-planning-guide/pleos-connect-sdk-api.md`)
 - 외부 API와 퍼블릭 네트워크 연결 사용 가능 (설명회)
 
-## 개발 환경 메모 (2026-11-10 확인)
+## 개발 환경 메모 (2026-11-11 확인)
 - 이 개발 서버에서는 Pleos Connect Emulator를 돌릴 수 없다. 에뮬레이터 실행과 검증은 사용자의 로컬 PC에서 한다
   - Google은 Android Emulator를 linux-x64, macOS(x64/arm64), windows-x64용으로만 배포한다. 이 서버는 aarch64 Linux라 공식 바이너리가 없다 (SDK repository XML 확인)
   - 이 서버 자체가 KVM 게스트 VM(Neoverse-N1)이고 중첩 가상화를 지원하지 않아 `/dev/kvm`이 없다. 하드웨어 가속 없이는 Android 14 Automotive를 실용적인 속도로 돌릴 수 없다
@@ -35,10 +35,16 @@
   - 노트북의 PowerShell 실행 정책이 Restricted라 스크립트는 `-ExecutionPolicy Bypass`로 실행한다
   - 최신 cmdline-tools의 `sdkmanager`는 "Android CLI"로 위임되며(사용 통계 수집이 기본으로 켜짐) Pleos 이미지 경로를 처리하지 못한다. 이미지는 `tools/laptop/install-image.ps1`로 설치한다
   - 노트북에서 Google·Pleos 서버로의 단일 연결 다운로드가 매우 느리다(초당 0.1~0.2MB). 큰 파일은 분할 병렬 다운로드를 쓴다
+- 공통 모듈과 앱: 루트가 Gradle 프로젝트다. `pleos-kit/`은 SDK를 코루틴/Flow로 감싼 공통 모듈(사용법은 `pleos-kit/README.md`), `app/`은 공모전 앱(지금은 뼈대: `DriveService` + `DriveState` + 개발용 상태판 + `KitSelfTest`). 노트북에서 `run-app.ps1`로 빌드·설치·실행한다. kit 점검 결과는 `docs/kit-selftest.md`
+- Virtual Console 조작 도구: `tools/vc/vc.sh` (개발 서버에서 실행. `up`으로 시뮬레이터를 켜고 `gear Drive`, `speed 40`, `play 시나리오.vc` 등으로 차량 상태를 바꾼다)
 - SDK 검증용 앱: `tools/sdk-probe/` (각 SDK 호출 결과를 logcat `PleosProbe` 태그로 출력). 노트북에서 `run-probe.ps1`로 빌드·설치·실행하고 결과는 `logs\probe-result.log`(전체 logcat은 `probe-full.log`)
   - 에뮬레이터가 띄운 adb 서버가 에뮬레이터 로그 파일 핸들을 물려받아 계속 잡는다. 그래서 `start-emulator.ps1`은 실행할 때마다 새 로그 파일(`logs\emulator-날짜-시각.log`)을 쓴다
-  - 노트북 RAM이 빠듯해서(여유 3~5GB) 에뮬레이터는 `-Memory 3072`로 띄우고, 부팅이 끝난 뒤에 빌드한다
-  - 노트북이 4코어에 GPU 소프트웨어 렌더링이라, 내비가 길안내 화면을 그리는 동안 에뮬레이터가 과부하(load 30 이상)가 되어 SDK 호출이 수십 초씩 밀린다. 부팅 직후 빌드가 겹치면 `carwatchdogd`가 VHAL을 재시작시켜 앱 Activity가 종료되기도 한다. 이럴 때는 `run-probe.ps1 -SkipBuild`로 다시 실행한다
+  - 에뮬레이터 이미지가 RAM을 4096MB 이상으로 올린다(`-memory 3072`를 줘도 4096). 노트북 여유 메모리가 1GB 안팎이면 호스트가 스왑을 쓰므로 Edge 같은 프로그램을 닫는 편이 좋다
+- 에뮬레이터 성능 (측정 결과). 아래 세 가지를 지키지 않으면 SDK 호출이 수십 초씩 밀리고 `carwatchdogd`가 VHAL을 죽인다
+  - **GPU 가속을 쓴다.** `start-emulator.ps1`의 기본값은 `-gpu host`다(SSH로 창 없이 띄워도 GeForce MX450을 쓴다). `swiftshader_indirect`(소프트웨어 렌더링)로 띄우면 에뮬레이터 프로세스가 호스트 CPU의 88%를 쓰고, `host`면 40% 정도다
+  - **노트북에 충전기를 꽂는다.** 배터리 모드에서는 CPU가 정격의 43% 수준으로 제한된다. 확인: `(Get-CimInstance Win32_Battery).BatteryStatus`가 2면 AC
+  - **부팅 후 `tools/laptop/wait-emulator.sh`로 기다린다**(가동 4분 이상, 운전자 프로필 user 10 활성). 그 전에 앱을 실행하거나 빌드하면 VHAL이 재시작되면서 시스템이 user 0으로 돌아가고 내비 앱이 조회에 응답하지 않는다. 그렇게 되면 에뮬레이터를 다시 부팅한다. 빌드는 에뮬레이터를 띄우기 전에 `run-app.ps1 -BuildOnly`로 해 둔다
+  - 노트북 화면에서 창으로 띄우려면(시연 영상 녹화용) `tools/laptop/start-emulator-gui.cmd`를 더블클릭한다
 - GitHub private repo: https://github.com/ezhyeok/hmg-appdev-challenge (기본 브랜치 `main`)
 
 ## SDK 사용 조건 (설명회 기준, Playground 문서보다 우선)
@@ -50,6 +56,10 @@
 
 ## API 사용 시 주의 (레퍼런스 확인 결과)
 - 차속과 기어는 Vehicle SDK에 없다 (`VehicleSpeedListener`는 2.3.2에서 삭제). AAOS `CarPropertyManager`의 `PERF_VEHICLE_SPEED`, `GEAR_SELECTION`을 쓴다. Virtual Console에 기어 카드는 있지만 차속 카드는 없다
+- **앱 코드는 SDK를 직접 부르지 말고 `pleos-kit`을 쓴다.** 아래 규칙(전용 스레드, 포그라운드 서비스, 제어 결과 확인, 내비 요청 간격)이 kit에 들어 있다. kit에 없는 API는 `VehicleKit.call`/`call2`/`observe`로 감싼다
+- 에뮬레이터에서 확인한 제어 API: 내기순환, 설정 온도(공조 전원이 켜져 있어야 함), 창문 위치, 실내등, 앰비언트 라이트 밝기, 시트 등받이 이동(`moveSeatBackrestAngle`, 방향 명령만 있고 위치 지정은 없음). 시트 등받이 위치 조회는 에뮬레이터에서 계속 0을 준다
+- 주행 시간(`getTripCurrentDrivingTime` 등 Trip 계열)은 에뮬레이터가 지원하지 않는다(`ERROR_NOT_SUPPORTED_PROPERTY`). 주행 시간이 필요하면 앱이 기어·차속으로 직접 잰다
+- 가속 페달 값을 주는 API는 Vehicle SDK에 없다. 조향각(`getCurrentSteeringWheelAngle`)과 브레이크 페달 on/off는 있다
 - 텔테일 API(`checkTelltalesCapabilities`, `registerTelltales`, `getTelltalesInfo`)는 `PRIVATE_CAR_SAFETY`(signature|privileged) 권한이라 서드파티 앱에서 쓸 수 없다
 - `getLowTirePressure`는 현재 공기압이 아니라 저압 경고 임계값(kPa)을 반환한다
 - **SDK 호출은 백그라운드 스레드에서 한다.** Vehicle·NaviHelper 호출은 서비스 연결을 기다리며 호출 스레드를 수 초간 막는다(sdk-probe 측정, Vehicle 호출 합계 약 9초). 메인 스레드에서 부르면 ANR로 앱이 종료된다
@@ -65,7 +75,7 @@
   - 차량 시뮬레이터는 브라우저 세션이 있을 때만 켜진다. 페이지를 열어 두거나 `POST /browser/session?client=<이름>`을 1초마다 보낸다(3초 동안 없으면 꺼짐). 꺼져 있으면 제어 API 결과와 VC 변경이 반영되지 않는다
   - `GET /vehicle/catalog`(조작 가능한 63개 항목과 요청 형식), `GET /vehicle/state`(현재 상태). 변경은 PUT + 쿼리스트링. 예: `/vehicle/gear?gear=Drive`, `/vehicle/controls?speed=40&accelerator=20&brake=0`, `/vehicle/body?door_fl=true`, `/vehicle/hvac?recirc=false`, `/vehicle/odometer?usage_time_min=120`
   - 문서의 카드 목록에는 차속이 없지만 `/vehicle/controls`로 차속을 바꿀 수 있다. 앱에서 확인한 것: 기어 D + 40km/h → `GEAR_SELECTION`=8, `PERF_VEHICLE_SPEED`=11.1m/s, `CarUxRestrictions` requiresDO=true(active=0x50). P로 돌리면 해제. 도어 열림·닫힘도 `registerDoorPosition` 리스너로 온다
-  - 좌석 점유는 VC 상태(모두 비어 있음)와 SDK 조회값(대부분 true)이 달랐다. 쓰기 전에 다시 확인할 것
+  - 좌석 점유는 VC 상태(모두 비어 있음)와 SDK 조회값(대부분 true)이 달랐다. 에뮬레이터에서는 좌석 점유 값을 믿을 수 없다
 - 주행 규제 테스트: `adb shell cmd hmg_car_service --service drivingstate driving_regulation on` / `off` (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/adb-command-reference-guide.md`)
 
 ## 설계·구현 원칙
@@ -75,9 +85,10 @@
 - 주행 중 UX 제한: `CarUxRestrictions` 연동 필수 (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/driving-restriction-development-guide.md`, `docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-planning-guide/driver-distraction-guideline.md`). 심사 항목 "차량특화성"과 직결된다
 - 로터리 컨트롤러(CCP), 오디오 포커스, IME 리사이즈 같은 차량 특화 동작은 `docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/` 참고
 - UI는 `docs/contest/02_Pleos_개발가이드/connect-guide/docs-design/`의 Pleos Connect UI Design Guide(레이아웃, 컬러, 타이포, 컴포넌트)를 따른다
-- 생성형 AI 사용은 허용되지만, 참가자가 2차 PT 기술 Q&A에서 구조와 로직을 직접 설명해야 한다. 코드를 짤 때 아키텍처와 주요 흐름을 `docs/ARCHITECTURE.md` 같은 문서로 함께 정리하고, 과하게 복잡한 구조는 피할 것
+- 생성형 AI 사용은 허용되지만, 참가자가 2차 PT 기술 Q&A에서 구조와 로직을 직접 설명해야 한다. 코드를 짤 때 아키텍처와 주요 흐름을 `docs/ARCHITECTURE.md` 같은 문서로 함께 정리한다. 참가자는 전산 전공이므로 구조는 설명하기 쉬운 쪽이 아니라 기술적으로 적절한 쪽으로 정한다
 
 ## 참가·제출 (공모전 규정 + 설명회)
+- 이 프로젝트는 개인으로 출전한다. 숏폼 링크는 내지 않는다. 기획서는 repo 루트의 `contest-application-consent.docx`에 작성한다 (개인정보가 들어가므로 커밋하지 않는다)
 - 부문: 대학생 / 일반(스타트업 포함). 일반인이 한 명이라도 있는 팀은 일반 부문, 스타트업을 운영하는 대학생은 대학생 부문 (설명회)
 - 서로 다른 작품을 개수 제한 없이 여러 개 출품할 수 있다. 작품은 앱명으로 구분한다 (설명회)
 - 필수: 접수양식(기획서) docx + 참가자 전원 서명 동의서. 마감 2026-11-15(일) 23:59 KST, 이메일 appdevchallenge@hyundai-partners.com, 참가자 전원 CC
