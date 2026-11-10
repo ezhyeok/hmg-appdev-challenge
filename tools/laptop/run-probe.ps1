@@ -1,4 +1,4 @@
-# sdk-probe 빌드 → 설치 → 실행 → 결과(logcat) 출력
+﻿# sdk-probe 빌드 → 설치 → 실행 → 결과(logcat) 출력
 # 실행: powershell -ExecutionPolicy Bypass -File run-probe.ps1   (이 PC는 실행 정책이 Restricted)
 param([int]$WaitSeconds = 25)
 . "$PSScriptRoot\env.ps1"

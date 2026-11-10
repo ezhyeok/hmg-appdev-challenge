@@ -1,5 +1,8 @@
-# Pleos Connect Emulator 2.1.0 system image 설치 (8개 연결로 분할 다운로드 → SHA-1 검증 → 프로젝트 SDK에 배치)
-$P    = "$env:USERPROFILE\hmg-appdev-challenge"
+﻿# Pleos Connect Emulator 2.1.0 system image 설치 (8개 연결로 분할 다운로드 → SHA-1 검증 → 프로젝트 SDK에 배치)
+# 프로젝트 루트 = 이 스크립트 위치에서 위로 올라가며 sdk\ 폴더가 있는 곳 (백그라운드 실행 시 환경변수가 비어 있을 수 있어 쓰지 않음)
+$P = $PSScriptRoot
+while ($P -and -not (Test-Path (Join-Path $P "sdk"))) { $P = Split-Path -Parent $P }
+if (-not $P) { throw "project root (folder containing sdk\) not found from $PSScriptRoot" }
 $log  = "$P\logs\image.log"
 function L($m) { "$(Get-Date -Format s) $m" | Add-Content -Encoding UTF8 $log }
 $u    = "https://nexus-playground.pleos.ai/repository/raw-releases/connect-avd/2.x/crp_car_emulator.zip"
