@@ -39,6 +39,8 @@ import android.car.hardware.property.CarPropertyManager
 import android.graphics.Typeface
 import android.os.Bundle
 import android.os.Handler
+import android.os.HandlerThread
+import android.os.SystemClock
 import android.os.Looper
 import android.util.Log
 import android.widget.ScrollView
@@ -58,10 +60,15 @@ import ai.pleos.playground.tts.listener.OnInitializeListener as TtsInitListener
  * 실행하면 각 SDK의 핵심 호출을 한 번씩 수행하고 결과를 화면과 logcat(tag: PleosProbe)에
  * `PROBE|영역|항목|OK/FAIL/INFO|상세` 형식으로 남긴다. 리스너도 등록해 두므로 Virtual Console이나
  * adb로 차량 상태를 바꾸면 `event.*` 줄이 추가로 찍힌다.
+ *
+ * Vehicle/NaviHelper 호출은 서비스 연결을 기다리며 수 초간 호출 스레드를 막는다(에뮬레이터에서 측정).
+ * 메인 스레드에서 부르면 ANR로 앱이 종료되므로 모든 SDK 호출은 worker 스레드에서 한다.
  */
 class MainActivity : Activity() {
 
     private val main = Handler(Looper.getMainLooper())
+    private val workerThread = HandlerThread("probe-worker").apply { start() }
+    private val worker = Handler(workerThread.looper)
     private lateinit var out: TextView
 
     private var car: Car? = null
@@ -84,13 +91,16 @@ class MainActivity : Activity() {
     private fun fail(area: String, name: String, e: Throwable) =
         log(area, name, "FAIL", "${e.javaClass.simpleName}: ${e.message}")
 
-    /** 각 probe를 감싸서 한 항목의 예외가 나머지 검사를 막지 않게 한다. */
+    /** 각 probe를 감싸서 한 항목의 예외가 나머지 검사를 막지 않게 하고, 300ms 넘게 걸리면 소요 시간을 남긴다. */
     private inline fun guard(area: String, name: String, block: () -> Unit) {
+        val start = SystemClock.elapsedRealtime()
         try {
             block()
         } catch (t: Throwable) {
             fail(area, name, t)
         }
+        val took = SystemClock.elapsedRealtime() - start
+        if (took > 300) info(area, "$name.blockedMs", took)
     }
 
     // ---------------------------------------------------------------- 생명주기
@@ -104,13 +114,13 @@ class MainActivity : Activity() {
         }
         setContentView(ScrollView(this).apply { addView(out) })
 
-        info("probe", "start", "sdk-probe 0.1")
-        guard("aaos", "probe") { probeAaos() }
-        guard("vehicle", "probe") { probeVehicle() }
-        guard("navi", "probe") { probeNavi() }
-        guard("tts", "probe") { probeTts() }
-        guard("stt", "probe") { probeStt() }
-        guard("fused", "probe") { probeFused() }
+        info("probe", "start", "sdk-probe 0.2 (worker thread)")
+        worker.post { guard("aaos", "probe") { probeAaos() } }
+        worker.post { guard("vehicle", "probe") { probeVehicle() } }
+        worker.post { guard("navi", "probe") { probeNavi() } }
+        worker.post { guard("tts", "probe") { probeTts() } }
+        worker.post { guard("stt", "probe") { probeStt() } }
+        worker.post { guard("fused", "probe") { probeFused() } }
     }
 
     override fun onDestroy() {
@@ -122,6 +132,7 @@ class MainActivity : Activity() {
             fused?.release()
             car?.disconnect()
         }
+        workerThread.quitSafely()
         super.onDestroy()
     }
 
@@ -180,7 +191,7 @@ class MainActivity : Activity() {
         v.initialize()
         ok("vehicle", "initialize", "called")
         // initialize()는 결과 콜백이 없으므로 서비스 연결 시간을 두고 호출한다
-        main.postDelayed({ guard("vehicle", "calls") { vehicleCalls(v) } }, 1500)
+        worker.postDelayed({ guard("vehicle", "calls") { vehicleCalls(v) } }, 1500)
     }
 
     private fun vehicleCalls(v: Vehicle) {
@@ -329,12 +340,14 @@ class MainActivity : Activity() {
         n.initialize(
             onConnected = {
                 ok("navi", "initialize", "connected")
-                n.addListener(naviListener)
-                guard("navi", "get.currentLocation") { n.getCurrentLocationInfo() }
-                guard("navi", "get.destination") { n.getDestinationInfo() }
-                guard("navi", "get.routeState") { n.getRouteStateInfo() }
-                main.postDelayed({ guard("navi", "requestRoute") { requestTestRoute(n) } }, 2000)
-                main.postDelayed({ guard("navi", "addWaypoint") { addTestWaypoint(n) } }, 10000)
+                worker.post {
+                    guard("navi", "addListener") { n.addListener(naviListener) }
+                    guard("navi", "get.currentLocation") { n.getCurrentLocationInfo() }
+                    guard("navi", "get.destination") { n.getDestinationInfo() }
+                    guard("navi", "get.routeState") { n.getRouteStateInfo() }
+                }
+                worker.postDelayed({ guard("navi", "requestRoute") { requestTestRoute(n) } }, 2000)
+                worker.postDelayed({ guard("navi", "addWaypoint") { addTestWaypoint(n) } }, 15000)
             },
             onFailed = { t -> fail("navi", "initialize", t) },
         )

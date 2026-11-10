@@ -12,7 +12,11 @@ if ($LASTEXITCODE -ne 0) { "BUILD FAILED (exit $LASTEXITCODE)"; Get-Content "$P\
 "BUILD OK"
 $apk = "$proj\app\build\outputs\apk\debug\app-debug.apk"
 cmd /c "`"$ADB`" install -r `"$apk`" 2>&1"
-cmd /c "`"$ADB`" shell pm grant dev.hmg.sdkprobe android.car.permission.CAR_SPEED 2>&1"
+# 위험(dangerous) 권한은 AAOS 포그라운드 사용자(user 10)에게 부여해야 한다
+cmd /c "`"$ADB`" shell am force-stop dev.hmg.sdkprobe 2>&1"
+foreach ($perm in "android.car.permission.CAR_SPEED", "pleos.car.permission.FUSED_LOCATION") {
+  cmd /c "`"$ADB`" shell pm grant --user current dev.hmg.sdkprobe $perm 2>&1"
+}
 cmd /c "`"$ADB`" logcat -c"
 cmd /c "`"$ADB`" shell am start -n dev.hmg.sdkprobe/.MainActivity 2>&1"
 Start-Sleep -Seconds $WaitSeconds
