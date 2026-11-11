@@ -214,6 +214,8 @@ private fun serviceCard(state: CoachUiState): StopCardModel {
  * 맥락 줄과 칩이 바뀌었다(닫힘 검증 UI-6). 급해 질문만 결과 목록의 이유(영업·방향)를 칩으로 쓴다.
  * 거리는 지금 값만 쓴다: 같은 곳의 엔진 추천(next) → 질문 장소의 지금 후보(promptStop). 둘 다 없으면 물은 때의 거리를
  * 지금 거리처럼 보이지 않고 위치("경로 위")만 둔다 (UI 감사 #1: 지나친 곳에 '3.9km'가 남았다).
+ * 시간은 주행 시간(etaS)이되, 급해 질문은 급해 목록의 합친 시간(주행 + 주차·걷기 + 유턴)을 쓴다: 문장과 목록이 말하는 시간이다
+ * (엔진 닫힘 검증 E1).
  */
 private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: String?): StopCardModel {
     val stop = prompt.stop
@@ -252,7 +254,14 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
         return StopCardModel(context, shortQuestion(prompt), promptLead(prompt), chips, icon, askingLevel = level, sentence = true)
     }
     val live = next?.stop?.takeIf { it.id == stop.id } ?: state.promptStop?.takeIf { it.id == stop.id }
-    val meta = if (live != null) Labels.stopMeta(live) else Labels.stopPosition(stop)
+    // 급해 질문의 문장("…까지 약 18분이에요")과 급해 목록은 주행 + 주차·걷기 + 유턴을 합친 시간을 말한다 (RankedStop.totalTimeS).
+    // 카드가 주행 시간(etaS)을 보이면 "약 18분"이라고 묻는 카드에 17분이 찍힌다: 목록에 그곳이 있으면 같은 시간을 보인다
+    val totalS = if (prompt.kind == PromptKind.URGENT_RESULT) state.urgent?.firstOrNull { it.stop.id == stop.id }?.totalTimeS else null
+    val meta = when {
+        live == null -> Labels.stopPosition(stop)
+        totalS != null -> Labels.stopMeta(live.copy(etaS = totalS))
+        else -> Labels.stopMeta(live)
+    }
     return StopCardModel(context, stop.name, meta, chips, icon, askingLevel = level)
 }
 
