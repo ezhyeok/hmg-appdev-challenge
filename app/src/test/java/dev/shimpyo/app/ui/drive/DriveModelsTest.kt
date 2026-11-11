@@ -60,6 +60,19 @@ class DriveModelsTest {
             ahead = listOf(stop("oksan", "옥산휴게소", 6.0)),
         )
         assertTrue(stopCard(other, driving = true).meta!!.startsWith("3.9km"))
+
+        // 추천이 다음 곳으로 넘어갔어도 질문 장소의 지금 위치를 알면 그 거리를 쓴다 (2026-11-11 에뮬레이터: 2.1km에 멈춰 있었다)
+        val moving = other.copy(promptStop = stop("oksan", "옥산휴게소", 0.8))
+        assertTrue(stopCard(moving, driving = true).meta!!.startsWith("800m"))
+    }
+
+    @Test
+    fun checkInLabelFollowsItsReason() {
+        // 연속 운전 시간으로 묻는 상태 확인에 '운전 패턴 변화'라고 붙었다 (2026-11-11 에뮬레이터)
+        fun label(speech: String) = stopCard(CoachUiState(serviceRunning = true, prompt = Prompt("c", PromptKind.CHECK_IN, speech, expiresAt = Long.MAX_VALUE)), driving = true).context
+        assertEquals("졸음 확인", label("1시간 35분째 운전 중이에요. 혹시 졸리세요?"))
+        assertEquals("운전 패턴 변화", label("운전 패턴이 이번 주행 초반과 조금 달라요. 혹시 졸리세요?"))
+        assertEquals("졸음 확인", label("지금은 졸음이 오기 쉬운 시간이에요. 혹시 졸리세요?"))
     }
 
     @Test

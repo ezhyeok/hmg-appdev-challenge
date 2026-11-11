@@ -89,7 +89,8 @@ class CoachService : PleosForegroundService() {
     private data class RouteSnap(val route: RouteState?, val odometerM: Double)
     /** TBT에서 읽은 경로 위 휴게소·졸음쉼터와 다음 회전 거리 */
     private data class TbtSnap(val opportunities: List<RouteOpportunity>, val nextManeuverM: Double?, val odometerM: Double)
-    private data class CandidateSnap(val list: List<StopCandidate>, val odometerM: Double)
+    /** untilM: 후보를 이 경로 거리까지만 넣었다(목록을 잘랐을 때, RouteState.candidatesUntilM). null이면 다 넣었다 */
+    private data class CandidateSnap(val list: List<StopCandidate>, val odometerM: Double, val untilM: Double? = null)
 
     @Volatile private var routeSnap = RouteSnap(null, 0.0)
     private val route: RouteState? get() = routeSnap.route
@@ -195,7 +196,7 @@ class CoachService : PleosForegroundService() {
                     samples = samples,
                     doorOpened = door,
                     cabin = CabinState(hvacOn = hub.hvacOn, recirculation = hub.recirculation, setTempC = hub.setTempC),
-                    route = liveRoute(),
+                    route = liveRouteWithHorizon(),
                     candidates = director.candidates(liveCandidates()),
                     intent = intent,
                     cabinAutoAllowed = app.settings.autoFreshAir,
@@ -239,12 +240,19 @@ class CoachService : PleosForegroundService() {
                 remainDistanceM = r?.remainDistanceM,
                 remainTimeS = r?.remainTimeS,
                 congestion = r?.congestion.orEmpty(),
+                promptStop = activePrompt?.stop?.let { s -> input.candidates.firstOrNull { it.id == s.id } },
                 demo = director.name,
             )
         }
     }
 
     private fun react(out: CoachOutput) {
+        activePrompt?.let { a ->
+            if (PromptRules.withdrawWhenParked(a.kind, out.parked)) {
+                activePrompt = null
+                CoachStore.update { copy(prompt = null) }
+            }
+        }
         val p = out.prompt
         if (p != null && p.id != lastPromptId && activePrompt == null) {
             lastPromptId = p.id
@@ -394,7 +402,7 @@ class CoachService : PleosForegroundService() {
     }
 
     private suspend fun makePlan() {
-        val input = director.apply(CoachInput(now = now(), gear = hub.gear, speedKph = hub.speedKph, route = liveRoute(), candidates = liveCandidates()))
+        val input = director.apply(CoachInput(now = now(), gear = hub.gear, speedKph = hub.speedKph, route = liveRouteWithHorizon(), candidates = liveCandidates()))
         val plan = engineLock.withLock { engine.plan(input) }
         CoachStore.update { copy(plan = plan) }
     }
@@ -456,8 +464,9 @@ class CoachService : PleosForegroundService() {
                 // 시연은 매번 같은 조건에서 시작하도록 빈 학습 상태의 새 엔진을 쓰고, 개인 학습 파일에는 쓰지 않는다
                 val restroomAt = t - r.lastRestroomMin * 60_000L
                 CoachEngine(
+                    // 시나리오의 '이미 달린 시간'은 휴식 리듬에도 채운다 (예전에는 출발 시각에만 들어가 피로 게이지가 0분부터 셌다)
                     profile = app.settings.tripProfile(t - r.drivenMin * 60_000L, occupants.associate { it.id to restroomAt })
-                        .copy(occupants = occupants),
+                        .copy(occupants = occupants, continuousDrivingMin = r.drivenMin.toDouble()),
                     memory = dev.shimpyo.engine.PersonalMemory(),
                 )
             } else {
@@ -632,6 +641,14 @@ class CoachService : PleosForegroundService() {
     /** 엔진에 넣을 후보: 후보를 만든 뒤 달린 만큼 경로 거리를 줄인다 */
     private fun liveCandidates(): List<StopCandidate> = candidateSnap.let { NaviPoll.advanceCandidates(it.list, moved(it.odometerM)) }
 
+    /** [liveRoute]에 후보를 넣은 범위를 더한다 (자른 목록의 마지막 후보 뒤를 목적지까지의 공백으로 보지 않게) */
+    private fun liveRouteWithHorizon(): RouteState? {
+        val r = liveRoute() ?: return null
+        val cs = candidateSnap
+        val until = cs.untilM ?: return r
+        return if (r.guiding) r.copy(candidatesUntilM = (until - moved(cs.odometerM)).coerceAtLeast(0.0)) else r
+    }
+
     /** 엔진에 넣을 경로 상태: 마지막 조회 뒤 달린 만큼 남은 거리·정체 위치·다음 회전 거리를 줄인다 */
     private fun liveRoute(): RouteState? {
         val rs = routeSnap
@@ -722,13 +739,16 @@ class CoachService : PleosForegroundService() {
         val opps = NaviPoll.advance(ts.opportunities, moved(ts.odometerM))
         if (opps.isNotEmpty() && !director.active) {
             val list = candidatesFromRoute(opps, lat, lon, t)
-            candidateSnap = CandidateSnap(list, at)
+            // TBT 기회를 ROUTE_OPP_MAX곳까지만 넣었으면 첫 번째로 뺀 기회 위치까지가 '아는 범위'다
+            val until = opps.getOrNull(ROUTE_OPP_MAX)?.routeDistanceM
+            candidateSnap = CandidateSnap(list, at, until)
             CoachStore.update { copy(ahead = list) }
             return
         }
+        // requestTrip으로 보정하는 상위 몇 곳만 쓴다. 시연은 requestTrip을 안 쓰고 경로 위 시설만 고르므로 다 넘긴다
         val raw = app.stops.ahead(lat, lon, hub.heading, AHEAD_RADIUS_M, PLANNED_KINDS)
             .filter { it.facilities.restroom }
-            .take(ORACLE_MAX)
+            .let { if (director.active) it else it.take(ORACLE_MAX) }
         // requestTrip은 후보마다 요청 시점의 위치에서 잰다: 요청 때 주행 거리를 같이 적어 두고 마지막에 같은 기준으로 맞춘다
         val refined = raw.map { c -> odometerM to oracle.refine(c, lat, lon, t) }
         val base = odometerM

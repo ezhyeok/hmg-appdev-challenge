@@ -27,6 +27,10 @@ internal class RouteContext(private val config: CoachConfig) {
     var vFreeMps = config.highwayAvgSpeedKph / 3.6
         private set
 
+    /** 정차 후보를 넣은 경로 거리 한계 (RouteState.candidatesUntilM). 목적지까지 다 넣었거나 모르면 NaN */
+    var horizonM = Double.NaN
+        private set
+
     /** 목적지까지 남은 거리·시간. 모르면 NaN */
     var destM = Double.NaN
         private set
@@ -72,6 +76,8 @@ internal class RouteContext(private val config: CoachConfig) {
         vFreeMps = v.coerceIn(MIN_V, MAX_V)
         destM = if (rd != null && rd > 0.0) rd else Double.NaN
         destS = if (rt != null && rt > 0.0) rt else Double.NaN
+        val h = route?.candidatesUntilM
+        horizonM = if (h != null && h >= 0.0 && (destM.isNaN() || h < destM)) h else Double.NaN
     }
 
     fun distanceOf(c: StopCandidate): Double =

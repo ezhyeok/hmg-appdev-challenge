@@ -34,6 +34,11 @@ data class TripProfile(
      * 그날 07:00으로 본다 (04~07시 출발이면 출발 1시간 전, 00~04시 출발이면 전날 07:00)
      */
     val driverWakeAt: Long? = null,
+    /**
+     * 엔진이 시작되기 전에 운전자가 이미 쉬지 않고 달린 시간(분). 휴식 리듬을 이만큼 채운 채 시작한다(시연, 주행 중 앱 재시작).
+     * 0이면 엔진이 시작될 때부터 센다. 예전에는 시연의 '연속 95분'이 출발 시각에만 들어가 피로 게이지가 0분부터 셌다(2026-11-11)
+     */
+    val continuousDrivingMin: Double = 0.0,
 )
 
 // ---------- 정차 후보 ----------
@@ -125,6 +130,12 @@ data class RouteState(
     val congestion: List<CongestionSegment> = emptyList(),
     /** 다음 회전까지 거리 (묻는 타이밍 판단용) */
     val nextManeuverDistanceM: Double? = null,
+    /**
+     * 정차 후보를 이 경로 거리까지만 넣었다(목록을 잘랐을 때). 그 사이에는 넣은 것 말고 기회가 없고, 그 뒤는 모른다.
+     * null이면 목적지까지 다 넣은 것. 예전에는 자른 목록의 마지막 기회 뒤를 목적지까지의 공백으로 봐서
+     * '이후 2시간 34분 공백' 같은 틀린 마지막 기회가 나왔다(2026-11-11 에뮬레이터, CandidateHorizonTest가 지킨다)
+     */
+    val candidatesUntilM: Double? = null,
 )
 
 // ---------- 음성 의도 ----------

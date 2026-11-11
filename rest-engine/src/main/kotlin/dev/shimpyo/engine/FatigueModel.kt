@@ -98,6 +98,22 @@ internal class FatigueModel(private val config: CoachConfig, private val local: 
         effMs += ms * rate(local.minuteOfDay(wallNow - ms / 2), awakeHours(mono - ms / 2), monotony)
     }
 
+    /**
+     * 엔진이 켜지기 전에 이미 쉬지 않고 [minutes]분 달렸다고 두고 휴식 리듬을 채운다(TripProfile.continuousDrivingMin).
+     * 지난 구간을 1분씩 [advance]와 같은 가중(시간대·깨어 있던 시간)으로 쌓는다. 단조로움은 몰라서 넣지 않는다.
+     */
+    fun seedContinuous(minutes: Double, wallNow: Long, mono: Long) {
+        if (minutes <= 0.0) return
+        var leftMs = (minutes * 60_000.0).toLong()
+        while (leftMs > 0L) {
+            val step = minOf(leftMs, 60_000L)
+            val mid = leftMs - step / 2 // 이 구간 가운데가 지금부터 몇 ms 전인지
+            drivingMs += step
+            effMs += step * rate(local.minuteOfDay(wallNow - mid), awakeHours(mono - mid), false)
+            leftMs -= step
+        }
+    }
+
     /** 15분 이상 휴식: 휴식 리듬을 0으로, 졸림 곡선은 60분 뒤 다시 본다 */
     fun onRest(mono: Long) {
         drivingMs = 0L

@@ -6,6 +6,7 @@ import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.PersonalMemory
 import dev.shimpyo.engine.PromptKind
+import dev.shimpyo.engine.RouteState
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 import dev.shimpyo.engine.TripProfile
@@ -38,7 +39,10 @@ class DemoScenarioTest {
         val t0 = director.now()
         val restroomAt = t0 - start.lastRestroomMin * 60_000L
         val engine = CoachEngine(
-            profile = TripProfile(start.occupants, tripStart = t0 - start.drivenMin * 60_000L, lastRestroomAt = start.occupants.associate { it.id to restroomAt }),
+            profile = TripProfile(
+                start.occupants, tripStart = t0 - start.drivenMin * 60_000L, lastRestroomAt = start.occupants.associate { it.id to restroomAt },
+                continuousDrivingMin = start.drivenMin.toDouble(),
+            ),
             memory = PersonalMemory(),
         )
         val oksanAt = checkNotNull(director.alongForTest(DemoDirector.Pt(oksan.lat, oksan.lon))) { "옥산이 시연 경로 위에 있어야 한다" }
@@ -57,8 +61,10 @@ class DemoScenarioTest {
             val travelled = director.travelledForTest()!!
             val toOksan = oksanAt - travelled
             if (toOksan < 1_000.0) break
+            // 실제 내비에 다른 경로가 켜져 있어도(에뮬레이터 내비는 서 있어 다음 회전이 늘 150m) 시연 질문이 나와야 한다
+            val realNaviRoute = RouteState(guiding = true, remainDistanceM = 383_000.0, nextManeuverDistanceM = 150.0)
             val out = engine.update(
-                director.apply(CoachInput(now = director.now(), gear = Gear.DRIVE, speedKph = 100f, candidates = director.candidates(candidates))),
+                director.apply(CoachInput(now = director.now(), gear = Gear.DRIVE, speedKph = 100f, route = realNaviRoute, candidates = director.candidates(candidates))),
             )
             if (recommendedAtM == null && out.next?.stop?.id == "oksan" && out.next!!.reasons.any { it.code.startsWith("LAST_CHANCE") }) {
                 recommendedAtM = toOksan
@@ -74,6 +80,38 @@ class DemoScenarioTest {
         assertNotNull("옥산휴게소 앞에서 마지막 기회를 추천해야 한다", recommendedAtM)
         val asked = checkNotNull(askedAtM) { "옥산휴게소 진입로 2~5km 전에 물어야 한다" }
         assertTrue("진입로까지 ${asked}m에서 물었다", asked in 2_000.0..5_000.0)
+    }
+
+    @Test
+    fun fatigueDemoSuggestsARestSoon() {
+        // 오후 졸음 시연: 오후 3시, 이미 95분 달림 → 몇 분(가상) 안에 휴식 제안 (예전에는 피로 게이지가 0분부터 세서 나오지 않았다)
+        var real = 1_700_000_000_000L
+        val director = DemoDirector { real }
+        val start = checkNotNull(director.start("fatigue"))
+        val t0 = director.now()
+        val engine = CoachEngine(
+            profile = TripProfile(
+                start.occupants, tripStart = t0 - start.drivenMin * 60_000L,
+                lastRestroomAt = start.occupants.associate { it.id to t0 - start.lastRestroomMin * 60_000L },
+                continuousDrivingMin = start.drivenMin.toDouble(),
+            ),
+            memory = PersonalMemory(),
+        )
+        // 시작 지점 앞 경로 위 시설 (공공데이터 부산방향 좌표). 그 뒤의 시설은 넣지 않았다(서비스도 60km 안만 찾는다)
+        val ahead = listOf(
+            restArea("ipjang", "입장졸음쉼터", 36.914432, 127.188465, StopKind.DROWSY_SHELTER),
+            restArea("manghyang", "망향휴게소(부산방향)", 36.855650, 127.180929),
+            restArea("cheonan", "천안호두휴게소(부산방향)", 36.730226, 127.263879),
+        )
+        var asked = false
+        repeat(180) { // 실제 3분 = 가상 30분 (10배속)
+            val out = engine.update(director.apply(CoachInput(now = director.now(), gear = Gear.DRIVE, speedKph = 90f, candidates = director.candidates(ahead))))
+            if (out.prompt?.kind == PromptKind.REST_SUGGESTION) asked = true
+            // 넣은 후보 뒤를 목적지까지의 공백으로 보면 '이후 2시간 34분 공백' 같은 틀린 마지막 기회가 나왔다
+            assertTrue("틀린 공백 경고: ${out.next}", out.next?.reasons.orEmpty().none { it.code == "LAST_CHANCE_GAP" })
+            real += 1_000L
+        }
+        assertTrue("오후 졸음 시연에서 휴식 제안이 나와야 한다", asked)
     }
 
     @Test

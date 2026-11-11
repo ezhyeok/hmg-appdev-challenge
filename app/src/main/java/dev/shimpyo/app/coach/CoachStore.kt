@@ -44,6 +44,8 @@ data class CoachUiState(
     val next: Recommendation? = null,
     /** 지금 대답을 기다리는 질문. 음성 대답이 없으면 화면 버튼으로 받는다 */
     val prompt: Prompt? = null,
+    /** 떠 있는 질문의 장소를 지금 후보 목록에서 찾은 것 (거리가 매초 줄어든다). 질문 카드가 이 거리를 보여 준다 */
+    val promptStop: StopCandidate? = null,
     val urgent: List<RankedStop>? = null,
     val plan: PitStopPlan? = null,
     val parked: Boolean = true,

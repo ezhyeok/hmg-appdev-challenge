@@ -71,8 +71,19 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
             return PitStopPlan(emptyList(), 0, notes)
         }
         val n = opps.size
-        val horizonS = if (hasDest) route.destS else opps[n - 1].arriveS
-        val horizonM = if (hasDest && !route.destM.isNaN()) route.destM else opps[n - 1].distanceM
+        // 후보 목록을 잘랐으면(RouteState.candidatesUntilM) 아는 범위까지만 계획한다. 예전에는 그 뒤를 화장실 없는 구간으로 봐서
+        // '화장실 사이가 먼 구간이 있어요'라고 틀리게 안내했다(2026-11-11 에뮬레이터, CandidateHorizonTest가 지킨다)
+        val cut = !route.horizonM.isNaN()
+        val horizonS = when {
+            cut -> route.arrivalAtDistance(route.horizonM)
+            hasDest -> route.destS
+            else -> opps[n - 1].arriveS
+        }
+        val horizonM = when {
+            cut -> route.horizonM
+            hasDest && !route.destM.isNaN() -> route.destM
+            else -> opps[n - 1].distanceM
+        }
         val fuelLimitM = needs.rangeM?.let { it - config.fuelReserveKm * 1000.0 }
         val fuelNeeded = fuelLimitM != null && horizonM > fuelLimitM
         val mealPossible = opps.any { it.stop.facilities.food && inMeal(local, wallNow + (it.arriveS * 1000).toLong()) }
@@ -94,6 +105,7 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
                 for (j in i + 1..n) {
                     val o = opps[j - 1]
                     if (hasDest && o.arriveS >= route.destS) continue
+                    if (cut && o.distanceM > route.horizonM) continue
                     val legS = maxOf(0.0, o.arriveS - arrI) + o.stop.detourS
                     var viol = maxOf(0.0, legS - legMax)
                     if (f == 0 && fuelLimitM != null && o.distanceM > fuelLimitM) {
@@ -162,12 +174,22 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
         }
         val totalMin = stops.sumOf { it.dwellMin }
 
-        if (end.violS > 0.5) notes += Reason("PLAN_GAP", texts.planGapTooLong())
-        if (stops.isEmpty() && end.violS <= 0.5) notes += Reason("PLAN_NONE_NEEDED", texts.planNoneNeeded(hasDest))
+        // 지금 이미 쉬어야 할 때가 지났으면(게이지 0) 가장 가까운 곳에 들러도 기준을 넘는다. 그것뿐이면 '먼 구간'이 아니라
+        // '바로 들르기'로 안내한다 (2026-11-11 에뮬레이터: 휴게소에 서 있는데 '화장실 사이가 먼 구간이 있어요'라고 했다)
+        val unavoidableS = maxOf(0.0, opps[0].arriveS + opps[0].stop.detourS - needs.firstLegMaxS)
+        val first = stops.firstOrNull()
+        when {
+            end.violS <= 0.5 -> Unit
+            unavoidableS > 0.5 && end.violS <= unavoidableS + 0.5 && first != null && first.stop.id == opps[0].stop.id ->
+                notes += Reason("PLAN_NOW", texts.planNow(first.stop.name))
+            else -> notes += Reason("PLAN_GAP", texts.planGapTooLong())
+        }
+        if (stops.isEmpty() && end.violS <= 0.5) notes += Reason("PLAN_NONE_NEEDED", texts.planNoneNeeded(hasDest && !cut))
         stops.firstOrNull { Purpose.MEAL in it.purposes }?.let { notes += Reason("PLAN_MEAL", texts.planMeal(it.stop.name)) }
         stops.firstOrNull { Purpose.FUEL in it.purposes }?.let { notes += Reason("PLAN_FUEL", texts.planFuel(it.stop.name)) }
         if (needs.sleepyCurveS < horizonS + end.accDwellS) notes += Reason("PLAN_SLEEPY_TIME", texts.planSleepyTime())
         if (!hasDest) notes += Reason("PLAN_NO_DESTINATION", texts.planNoDestination())
+        else if (cut) notes += Reason("PLAN_PARTIAL", texts.planPartial((route.horizonM / 1000.0).roundToInt()))
         return PitStopPlan(stops, totalMin, notes)
     }
 

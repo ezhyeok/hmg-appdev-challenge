@@ -117,7 +117,8 @@ fun stopCard(state: CoachUiState, driving: Boolean): StopCardModel {
             }
             PromptKind.REST_SUGGESTION -> if (prompt.speech.contains("식사")) "식사할 곳" else "쉬어 갈 곳"
             PromptKind.URGENT_RESULT -> "가장 빠른 화장실"
-            PromptKind.CHECK_IN -> "운전 패턴 변화"
+            // 상태 확인은 운전 패턴 편차 때문일 수도, 연속 운전 시간·졸음 시간대 때문일 수도 있다 (CoachTexts.checkIn)
+            PromptKind.CHECK_IN -> if (prompt.speech.contains("패턴")) "운전 패턴 변화" else "졸음 확인"
             PromptKind.FRESH_AIR -> "환기 권유"
             PromptKind.INFO -> "안내"
         }
@@ -141,7 +142,15 @@ fun stopCard(state: CoachUiState, driving: Boolean): StopCardModel {
         // 질문의 장소는 물은 순간의 값이다. 같은 곳을 엔진이 지금 추천하고 있으면 그 거리·시간(매초 갱신)을 보여 준다
         // (예전에는 질문하는 동안 3km를 더 가도 '3.9km'에 멈춰 있었다, 2026-11-11 에뮬레이터. DriveModelsTest가 지킨다).
         // 경로 앞 후보 목록(ahead)은 20초마다만 바뀌어 질문 때 값보다 오래될 수 있으니 쓰지 않는다
-        val live = next?.stop?.takeIf { it.id == stop.id } ?: stop
+        // 추천이 다음 곳으로 넘어가도(진입로 2km 안으로 들어오면) 질문 장소의 지금 위치(promptStop)로 거리를 보여 준다.
+        // 그 후보에 시간이 없으면 물을 때의 시간을 거리 비율로 줄인다
+        val live = next?.stop?.takeIf { it.id == stop.id }
+            ?: state.promptStop?.takeIf { it.id == stop.id }?.let { l ->
+                val askedD = stop.routeDistanceM
+                val nowD = l.routeDistanceM
+                if (l.etaS == null && stop.etaS != null && askedD != null && nowD != null && askedD > 1.0) l.copy(etaS = stop.etaS!! * nowD / askedD) else l
+            }
+            ?: stop
         return StopCardModel(context, stop.name, Labels.stopMeta(live), chips, icon, askingLevel = level)
     }
 

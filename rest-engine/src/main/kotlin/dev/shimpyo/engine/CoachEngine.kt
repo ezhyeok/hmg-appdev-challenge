@@ -89,7 +89,10 @@ class CoachEngine(
     fun update(input: CoachInput): CoachOutput {
         val firstUpdate = !clock.started
         val dtMs = clock.advance(input.now)
-        if (firstUpdate) syncProfile()
+        if (firstUpdate) {
+            syncProfile()
+            seedTrip(input.now)
+        }
         val mono = clock.mono
         currentCandidates = input.candidates
 
@@ -232,8 +235,15 @@ class CoachEngine(
                 userInitiated = true,
             )
         }
-        // 기어 P로 서 있는 동안에는 앞쪽 정차를 묻지 않는다 (이미 서 있다. 휴식은 15분, 화장실 시계는 3분 뒤에야 되돌아간다)
-        val moving = !stops.parked
+        // 기어 P로 서 있는 동안에는 앞쪽 정차를 묻지 않는다 (이미 서 있다. 휴식은 15분, 화장실 시계는 3분 뒤에야 되돌아간다).
+        // 달린다는 것이 확인돼야 묻는다: 앱이 막 켜져 기어 신호가 오기 전(UNKNOWN, 차속 모름)에 묻던 것을 막는다
+        // (2026-11-11 에뮬레이터: P로 서 있는데 시작 첫 초에 '혹시 졸리세요?'가 나왔다)
+        val movementKnown = when (input.gear) {
+            Gear.DRIVE, Gear.REVERSE, Gear.NEUTRAL -> true
+            Gear.PARK -> false
+            Gear.UNKNOWN -> speed != null && speed > StopTracker.MOVING_KPH
+        }
+        val moving = !stops.parked && movementKnown
         if (accepted == null && moving) {
             if (lastChance != null) {
                 promptCands += PromptPolicy.Candidate(
@@ -390,7 +400,10 @@ class CoachEngine(
             mealPromptPending = false
             styleMuteUntil = NONE
         }
-        if (clock.started) syncProfile()
+        if (clock.started) {
+            syncProfile()
+            if (newTrip) seedTrip(clock.wall)
+        }
     }
 
     /** 저장용 스냅샷 */
@@ -404,7 +417,13 @@ class CoachEngine(
         if (!clock.started) {
             clock.advance(now)
             syncProfile()
+            seedTrip(now)
         }
+    }
+
+    /** 새 여정을 시작할 때: 엔진 전에 이미 달린 시간을 휴식 리듬에 채운다 (TripProfile.continuousDrivingMin) */
+    private fun seedTrip(now: Long) {
+        fatigue.seedContinuous(profile.continuousDrivingMin, now, clock.monoAt(now))
     }
 
     private fun syncProfile() {

@@ -109,11 +109,16 @@ class DemoDirector(private val realClock: () -> Long = System::currentTimeMillis
             if (fromCar + len < 0) null else CongestionSegment(startDistanceM = fromCar, lengthM = len, durationS = dur, type = "HEAVY", roadName = "경부고속도로", startName = "청주IC", endName = "남이JC")
         }
         val remain = (s.routeTotalM - travelled).coerceAtLeast(0.0)
-        val route = (input.route ?: RouteState(guiding = true)).copy(
+        // 시연 경로는 시나리오가 정한다. 실제 내비에 경로가 켜져 있어도 그 값(다음 회전 거리 등)을 섞지 않는다:
+        // 에뮬레이터 내비는 판교에 서 있어 '다음 회전 수백 m'가 계속 와서 '회전 500m 안에는 묻지 않기'에 걸려 질문이 막혔다
+        // (2026-11-11, DemoScenarioTest가 지킨다)
+        val route = RouteState(
             guiding = true,
             remainDistanceM = remain,
             remainTimeS = remain / 25.0,
             congestion = congestion,
+            // 시연 후보는 직선 60km 안의 시설이라 경로 거리 55km까지만 다 들어 있다. 그 뒤를 목적지까지의 공백으로 보지 않게
+            candidatesUntilM = DEMO_CANDIDATES_UNTIL_M,
         )
         return input.copy(route = route)
     }
@@ -214,7 +219,8 @@ class DemoDirector(private val realClock: () -> Long = System::currentTimeMillis
 
     private fun stopDemo(): Scenario = Scenario(
         name = "stop",
-        path = listOf(Pt(37.01354, 127.14516), Pt(37.01300, 127.14530)), // 안성휴게소(부산방향)
+        // 안성휴게소(부산방향)에 서 있다(0m/s). 경로는 그 앞 경부선 남행이라 계획 화면에 앞쪽 휴게소가 나온다
+        path = listOf(Pt(37.01354, 127.14516)) + gyeongbuSouth.dropWhile { it.lat > 37.0 },
         metersPerSecond = 0.0,
         occupants = listOf(driver(), Occupant("kid", OccupantType.CHILD, ageYears = 7, label = "7살 아이")),
         timeOfDay = null,
@@ -229,6 +235,8 @@ class DemoDirector(private val realClock: () -> Long = System::currentTimeMillis
     private companion object {
         /** alongCache에서 '경로 밖'을 뜻하는 값 */
         const val NOT_ON_PATH = Double.NEGATIVE_INFINITY
+        /** 시연 후보가 빠짐없이 들어 있는 경로 거리 (서비스가 직선 60km 안을 찾는다. 경로 거리 ≥ 직선거리) */
+        const val DEMO_CANDIDATES_UNTIL_M = 55_000.0
     }
 
     private fun pointAt(path: List<Pt>, distance: Double): Triple<Double, Double, Float> {

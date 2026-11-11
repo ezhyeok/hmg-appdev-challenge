@@ -215,11 +215,13 @@ open class CoachTexts {
 
     open fun planNoCandidates(): String = "경로 앞 정차 후보가 없어요"
     open fun planGapTooLong(): String = "화장실 사이가 먼 구간이 있어 기준을 다 지킬 수는 없어요. 가장 덜 기다리는 계획이에요"
+    open fun planNow(stop: String): String = "지금 쉬어야 할 때예요. ${stop}에 바로 들르세요"
     open fun planNoneNeeded(hasDestination: Boolean): String =
         if (hasDestination) "목적지까지 쉬지 않고 가도 돼요" else "앞의 후보까지는 쉬지 않고 가도 돼요"
     open fun planMeal(stop: String): String = "식사 시간에 맞춰 ${stop}에서 식사해요"
     open fun planFuel(stop: String): String = "${stop}에서 주유해요"
     open fun planNoDestination(): String = "목적지가 없어 앞의 후보까지만 계획했어요"
+    open fun planPartial(km: Int): String = "앞 ${km}km 안의 휴게소까지만 계획했어요"
     open fun planSleepyTime(): String = "도착 전에 졸음이 오기 쉬운 시간에 들어가요. 쉬는 곳에서 커피와 짧은 낮잠을 계획해 보세요"
 
     // ---------------- 조사 ----------------

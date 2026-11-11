@@ -89,9 +89,16 @@ internal class GapAnalyzer(private val config: CoachConfig) {
     fun inAskWindow(lc: LastChance): Boolean =
         lc.opp.distanceM >= config.askWindowNearM && lc.opp.distanceM <= config.askWindowFarM
 
-    /** i 다음 기회의 도착 시간. 다음 기회가 없으면 목적지 도착 시간(모르면 NaN) */
+    /**
+     * i 다음 기회의 도착 시간. 다음 기회가 없으면 목적지 도착 시간(모르면 NaN).
+     * 후보 목록을 잘랐으면(horizonM) 그 한계까지는 기회가 없다는 것만 안다: 한계 도착 시간(공백의 아래 한계)을 쓴다.
+     */
     private fun nextArrival(opps: List<Opportunity>, i: Int, route: RouteContext): Double {
         if (i + 1 < opps.size) return opps[i + 1].arriveS
+        if (!route.horizonM.isNaN()) {
+            val h = route.arrivalAtDistance(maxOf(route.horizonM, opps[i].distanceM))
+            return if (h > opps[i].arriveS) h else Double.NaN
+        }
         val d = route.destinationS
         return if (!d.isNaN() && d > opps[i].arriveS) d else Double.NaN
     }
@@ -99,6 +106,8 @@ internal class GapAnalyzer(private val config: CoachConfig) {
     /** 정체 끝(endM) 뒤 첫 기회의 도착 시간. 없으면 목적지, 그것도 없으면 정체를 빠져나오는 시간 */
     private fun nextAfter(opps: List<Opportunity>, endM: Double, route: RouteContext): Double {
         for (o in opps) if (o.distanceM > endM) return o.arriveS
+        // 후보 목록을 잘랐으면 한계 너머는 모른다: 정체 끝과 한계 중 먼 쪽 도착 시간이 아래 한계다
+        if (!route.horizonM.isNaN()) return route.arrivalAtDistance(maxOf(endM, route.horizonM))
         if (!route.destM.isNaN() && route.destM > endM && !route.destS.isNaN()) return route.destS
         return route.arrivalAtDistance(endM)
     }
