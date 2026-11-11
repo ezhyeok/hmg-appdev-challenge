@@ -614,7 +614,8 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
         "stretchOver2hShare" to "15분 이상 쉬지 않고 이어 달린 시간이 2시간을 넘은 적이 있는 여정의 비율. 2시간을 넘긴 뒤 '다음' 휴게소에 서므로 " +
             "규칙대로 쉬어도 조금은 넘는다 → stretchOver2h30Share(2시간 30분)와 longestStretchMin도 함께 본다",
         "enginePromptsPerTrip" to "엔진이 먼저 건 질문 수(마지막 기회는 규칙별로 나눈다). needAnswers는 탑승자가 필요를 말한 순간 엔진이 바로 답한 " +
-            "다음 화장실 안내라 따로 센다(답에도 시뮬레이션 운전자는 같은 확률로 '응'한다)",
+            "다음 화장실 안내라 따로 센다(답에도 시뮬레이션 운전자는 같은 확률로 '응'한다). 답할 곳이 이미 들르기로 한 곳이면 엔진은 " +
+            "다시 묻지 않고 '…에 들르기로 했어요'라고만 하므로 세지 않는다",
         "ci95" to "비율은 윌슨 95% 구간, 평균은 ±1.96·표준오차",
     )
 
