@@ -108,10 +108,13 @@ interface TripEstimator {
 
     /**
      * [from]에서 [c]까지 잰 경로 거리·ETA(내비 값)·방향을 채워 돌려준다. 모르면 null: 꺼져 있거나, 내비가 실패·시간 초과했거나,
-     * 실패 뒤 다시 묻기를 미루는 중일 때. null은 '방향이 틀렸다'가 아니라 '모름'이다.
+     * 실패 뒤 다시 묻기를 미루는 중이거나, 내비가 다른 일로 바빠 차례가 오지 않았을 때. null은 '방향이 틀렸다'가 아니라 '모름'이다.
      * 부른 코루틴이 취소되면 CancellationException을 그대로 던진다 (실패로 세지 않는다).
+     *
+     * [permit]: 내비에 실제로 요청을 보내기 직전에 한 번 묻는다. false면 보내지 않고 null을 돌려준다. 캐시가 답할 때는 묻지 않는다.
+     * 갱신 하나의 요청 수 한도(CandidateProvider)가 캐시가 답한 것까지 세지 않게 하는 길이다 (서비스 감사 SV-N1).
      */
-    suspend fun refine(c: StopCandidate, from: Fix): StopCandidate?
+    suspend fun refine(c: StopCandidate, from: Fix, permit: () -> Boolean = { true }): StopCandidate?
 
     /** 캐시와 실패 기록을 비운다 (모드 전환) */
     fun clear()

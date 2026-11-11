@@ -57,14 +57,14 @@ class CongestionBasis {
 | 필드 | 뜻 |
 |---|---|
 | `epoch` | 경로가 바뀔 때마다 1씩 는다 (4장) |
-| `mode`, `route` | 마지막 경로 조회의 내비 모드와 엔진 입력(`RouteState`). 첫 조회 전에는 `route = null`(모름) |
+| `mode`, `route` | 마지막 경로 조회의 내비 모드와 엔진 입력(`RouteState`). `route = null`은 모름이다(길안내 아님 `guiding = false`와 다르다): 첫 조회 전, 그리고 내비가 1분 동안 답하지 않았을 때(6장) |
 | `routeOdometerM` | 경로를 받은 때의 주행 거리 |
 | `destination` | 목적지 (같은 조회에서 받은 것) |
 | `opportunities`, `nextManeuverM`, `tbtCoverageM`, `tbtReceived`, `tbtOdometerM`, `tbtEpoch` | 이번 epoch의 TBT |
 | `odometerTrusted` | 내비가 확인한 진행과 주행 거리가 맞는지 (맞을 때만 주행 거리로 거리를 줄인다) |
 
 불변식 (`NaviTrackerTest.everyPublishedSnapshotIsInternallyConsistent`가 섞인 대본 전체에서 확인한다):
-- 길안내가 아니면 목적지·TBT·보정 신뢰가 모두 비어 있다.
+- 길안내가 아니면(모름 포함) 목적지·TBT·보정 신뢰가 모두 비어 있다.
 - `tbtReceived`면 `tbtEpoch == epoch`. 받기 전에는 TBT 값이 모두 비어 있다.
 - `route.guiding == mode.hasRoute`. epoch는 줄지 않는다.
 - 옛 경로의 TBT가 새 경로의 목적지와 짝이 되지 않는다.
@@ -87,7 +87,7 @@ class CongestionBasis {
 | TBT | 경로가 있는 길안내(ROUTE_GUIDING, SIMULATION_GUIDING) 중에만. 기본 5초, 다음 화장실·회전이 8km 넘게 멀고 보정을 믿으면 20초. 내비가 서 있으면(차는 300m 넘게 달렸는데 남은 거리가 그대로: 에뮬레이터, 위치를 잃은 내비) 경로 조회와 같은 15초(TBT도 내비 위치에서 재므로 바뀌지 않는다, 2026-11-12 추가). 새 epoch·`requestRefresh` 뒤 30초는 5초. 실패하면 5초 뒤 |
 | 이벤트·`requestRefresh` | 곧바로 경로 + TBT. 단 내비 요청은 1초에 한 번까지 (몰려도 합친다) |
 | 위치 대체 | `LocationFallback.wanted()`가 참일 때 (루프마다 확인, 5초 이하) |
-| 연결 | 실패하면 2초, 4초, 8초 … 최대 1분 간격으로 계속 (서비스 감사 D13) |
+| 연결 | 실패하면 2초, 4초, 8초 … 최대 1분 간격으로 계속 (서비스 감사 D13). 이 간격 계산은 병합 때 코치 모듈의 공용 재시도 도우미(`Retry.kt`, 앱 담당)로 바꾼다 |
 | 호출 시간 초과 | 20초 (kit의 15초보다 길게. 포트가 영영 답하지 않아도 루프가 멈추지 않는다) |
 
 루프는 다음 할 일까지 자되 5초를 넘기지 않는다(가까워지면 TBT 간격이 짧아지므로). 요청·이벤트는 CONFLATED 채널로 루프를 깨운다.
@@ -104,6 +104,8 @@ class CongestionBasis {
 | ROUTE_STARTED(탐색 시작), WAYPOINT_ARRIVED(경로는 이어짐) | 곧바로 다시 읽기만 | 상태가 바뀌었으면 위 규칙대로 | |
 | `requestRefresh()` (경유지 추가·길안내 시작 뒤) | 곧바로 경로 조회 | +1 | `routeChanged=false`면 epoch 그대로 |
 | 앱이 길안내 도중에 켜짐 | 첫 조회부터 길안내 | +1 | 출발지를 몰라 출발지 기준 정체는 넣지 않음 |
+| 내비가 1분 동안 답하지 않음 (6장) | 경로 상태 조회의 연속 실패 시간 | 길안내 중이었으면 +1 | 경로·목적지·TBT·보정 신뢰 지움, `route = null`, TBT 조회 멈춤 |
+| 그 뒤 내비가 다시 답함 | 경로 조회 성공 | 길안내 중이면 +1 | 새 경로로 다시 시작(TBT 곧바로). 출발지를 모르는 것으로 본다 |
 
 새 epoch마다 보정 신뢰를 끄고 다시 얻는다(300m 이상 달려 내비 진행과 맞으면). 옛 경로의 남은 거리와 새 경로의 남은 거리를 섞어 비교하지 않기 위해서다.
 
@@ -119,11 +121,28 @@ class CongestionBasis {
 | 실패 | 동작 |
 |---|---|
 | 경로 상태 조회 실패 | 스냅샷 그대로, 5초 뒤 다시. TBT는 지난 스냅샷 기준으로 계속 |
+| 경로 상태 조회가 1분(`ROUTE_STALE_MS`) 동안 이어서 실패 | 지난 스냅샷을 버리고 '모름'(`mode = UNKNOWN`, `route = null`)을 한 번 낸다. 경고 로그 한 줄(`navi silent for …`). 조회는 계속하고, 다음 답에서 곧바로 회복한다(`navi answering again after …`) |
 | 목적지 조회 실패·남은 거리 NaN | 길안내 시작이면 남은 거리 `null`로 길안내를 알린다(TBT는 받는다). 같은 경로면 지난 남은 거리를 그대로 둔다(엔진 입력이 null로 깜박이지 않게). 5초 뒤 다시 |
 | TBT 실패 | 지난 TBT 그대로(같은 epoch일 때), 5초 뒤 다시. 경로 조회는 영향 없음 |
 | 무응답 | 20초에 끊고 실패로 처리. `requestRefresh`는 그동안에도 막히지 않는다 |
 | 같은 실패 반복 | 로그는 처음과 12번째마다, 회복하면 한 줄 |
 | 이벤트 흐름이 끝나거나 실패 | 2초 뒤 다시 구독 |
+
+### 6.1 답 없는 내비: 지난 스냅샷을 언제까지 믿나 (서비스 감사 SV-N5)
+
+예전에는 내비가 답하지 않는 동안 마지막 길안내 스냅샷(경로·목적지·TBT)을 끝없이 썼다. 내비 앱이 죽거나 멈추면 엔진은 몇 분 전 경로를
+지금 것으로 알고 판단했다. 지금은 상한이 있다.
+
+- 재는 것: **경로 상태 조회가 이어서 실패한 시간**(첫 실패한 조회를 보낸 때부터). 실패 수가 아니다: 무응답은 호출마다 20초가 걸리고
+  빠른 실패는 5초마다 되풀이되므로 수로 세면 같은 상황이 20초~4분으로 갈린다.
+- 1분 미만이면 지난 스냅샷 그대로(잠깐의 실패에 엔진 입력이 깜박이지 않게: 6장 첫 줄). 답을 받으면 처음부터 다시 잰다.
+- 1분이 되면 '모름'을 낸다. 길안내 중이었으면 epoch를 올린다(옛 경로에서 만든 후보·TBT가 다음 경로와 섞이지 않는다).
+  '길안내 아님'(`guiding = false`)이 아니라 `route = null`이다: 길안내가 끝났는지 시작됐는지 모른다. 후보 담당은 둘 다 반경 검색으로 간다.
+- 왜 1분인가: 시속 100km로 1.7km, 휴게소 진입로 하나를 지날 수 있는 시간이다. 그리고 들르기 하나가 내비 잠금을 잡는 시간(경유지 확인
+  20~45초, 그동안 조회는 줄을 서다 시간 초과한다)보다 길어서 그 기다림만으로는 넘지 않는다.
+- 회복: 다음 경로 상태 조회가 답하면 바로. 길안내 중이면 "같은 목적지"여도 새 epoch다(그 사이 재탐색·경유지 변경을 못 봤다).
+  출발지를 본 적이 없는 것으로 보고 출발지 기준 정체는 넣지 않는다(7장).
+- TBT만 실패하고 경로 상태는 답하는 경우는 예전 그대로다(받은 TBT를 epoch 끝까지 둔다, 3장의 약속). 12장.
 
 ## 7. 정체 offset 기준 판정 (`CongestionBasis`)
 
@@ -193,6 +212,11 @@ NaviHelper의 정체 `offset`이 출발지 기준인지 현재 위치 기준인�
 | 경로 조회 실패 → 5초 뒤, 스냅샷 유지 | `aFailingRouteCallRetriesIn5sAndKeepsTheLastSnapshot` |
 | 목적지 조회 실패 / 남은 거리 NaN | `aFailingDestinationCallStillStartsGuidanceAndKeepsTheLastRemainLater`, `aBrokenRemainingDistanceIsUnknownNotZero` |
 | 내비 무응답 → 시간 초과, 요청은 안 막힘 | `aHangingNaviCallTimesOutAndNeverBlocksRequests` |
+| 1분 동안 실패 → 모름(epoch+1, 로그 한 번, TBT 멈춤) → 다시 답하면 새 epoch로 회복 (SV-N5) | `aNaviSilentForAMinuteIsUnknownAndComesBackAsANewRoute` |
+| 무응답(호출마다 20초)도 실패 시간으로 잰다 | `aHangingNaviBecomesUnknownToo` |
+| 1분 안에 돌아오면 같은 경로, 실패 시간은 처음부터 다시 | `aShortOutageKeepsTheLastSnapshot` |
+| 길안내가 아닐 때도 모름, 돌아오면 epoch 그대로 | `whileNotGuidingASilentNaviIsUnknownTooAndComesBackWithoutANewEpoch` |
+| 처음부터 답이 없으면 내보낼 것이 없고 로그만 한 번 | `aNaviThatNeverAnsweredIsReportedOnceAndHasNothingToForget` |
 | 연결 실패 → 백오프 재시도 | `aFailingConnectRetriesWithBackoff` |
 | 위치 대체: 원할 때만 내비에 물음 / PositionTracker와 함께 약 20초마다 | `theLocationFallbackAsksTheNaviOnlyWhileWanted`, `withThePositionTrackerAStaleFusedFeedIsReplacedAboutEvery20s` |
 | 시작·재탐색·이벤트·실패·취소·재시작을 섞은 대본의 불변식 | `everyPublishedSnapshotIsInternallyConsistent` |
@@ -226,3 +250,7 @@ NaviHelper의 정체 `offset`이 출발지 기준인지 현재 위치 기준인�
 - 정체 offset 기준은 여전히 실차에서 확인하지 못했다. 판정 로직은 둘 다 처리하지만, 실제 주행 로그가 생기면 `CongestionBasis` 상수(1km, ±30%, 300m)를 다시 볼 것.
 - 이벤트 없는 재탐색은 다음 경로 조회(최대 15초)까지 모른다. TBT 커버리지와 남은 거리의 차이로 더 일찍 알아챌 수 있지만 내비가 TBT를 어디까지 주는지 확인되지 않아 넣지 않았다.
 - 내비 모드가 짧게 깜박이면(길안내 → 경로 없음 → 길안내) epoch가 두 번 는다. 실제 취소 후 재시작과 구별할 방법이 없어 그대로 둔다.
+- 경로 상태는 답하는데 TBT만 계속 실패하면 받은 TBT를 epoch 끝까지 쓴다. 보정을 믿을 때는 달린 만큼 줄어들어 지나친 휴게소가 빠지지만,
+  못 믿을 때(내비가 서 있다)는 옛 거리가 그대로 남는다. 6.1의 상한은 경로 상태 조회에만 건다.
+- 트래커는 내비 잠금을 기다린 것과 내비가 답하지 않은 것을 가르지 못한다(포트가 알려 주지 않는다). 들르기가 잠금을 1분 넘게 잡으면
+  (조회·확인이 모두 시간 초과하는 경우뿐이다) 그동안 '모름'이 된다. 그때는 내비가 실제로 답하지 않는 것이기도 하다.

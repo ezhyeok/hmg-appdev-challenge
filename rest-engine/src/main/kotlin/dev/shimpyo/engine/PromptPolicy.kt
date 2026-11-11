@@ -45,6 +45,8 @@ internal class PromptPolicy(
         val purposes: Set<Purpose> = emptySet(),
         /** 사용자 응답일 때: 이번에 처음 내놓는 응답이면 true(활성 질문을 끊고 바로), 앞서 밀린 응답이면 false(지금 질문이 끝난 뒤) */
         val fresh: Boolean = true,
+        /** 이 질문의 이유. 화장실 질문이 떠 있는 동안 엔진은 추천(CoachOutput.next)을 이 장소와 이유로 낸다 (CoachEngine.recommend) */
+        val reasons: List<Reason> = emptyList(),
     )
 
     class Issued internal constructor(
@@ -55,6 +57,7 @@ internal class PromptPolicy(
         val expiresMono: Long,
         val userInitiated: Boolean,
         val purposes: Set<Purpose>,
+        val reasons: List<Reason> = emptyList(),
     ) {
         val kind: PromptKind get() = prompt.kind
         var answered: Boolean = false
@@ -197,6 +200,18 @@ internal class PromptPolicy(
         return mem to rec
     }
 
+    /**
+     * 운전자가 다른 정차지를 직접 골랐다 (CoachEngine.noteAccepted): 대답 전의 이 질문은 그 선택으로 끝났다.
+     * 무시한 것으로 치지 않는다. 사용자의 말에 끊긴 질문처럼 물으면서 건 쉼과 시간당 횟수를 되돌리고([interrupt]),
+     * 뒤늦게 오는 대답(늦게 인식된 '응', 화면이 함께 보낸 거절)은 받지 않는다.
+     */
+    fun supersede(a: Issued) {
+        if (a.answered) return
+        if (active === a) interrupt(a)
+        a.answered = true
+        a.mark = null
+    }
+
     /** 테스트용: 톰프슨 샘플링으로 구간 하나를 뽑는다 */
     internal fun thompson(kind: PromptKind, edges: DoubleArray, memory: PersonalMemory): Int {
         var best = 0
@@ -285,7 +300,7 @@ internal class PromptPolicy(
     private fun issue(c: Candidate, statKey: String?, now: Long, mono: Long): Issued {
         val ttl = config.promptTtlS * 1000L
         val p = Prompt(id = ids.next(), kind = c.kind, speech = c.speech, stop = c.stop, expiresAt = now + ttl)
-        val iss = Issued(p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes)
+        val iss = Issued(p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes, c.reasons)
         iss.lastSeenD = c.distanceM ?: Double.NaN
         iss.lastSeenMono = mono
         active = iss

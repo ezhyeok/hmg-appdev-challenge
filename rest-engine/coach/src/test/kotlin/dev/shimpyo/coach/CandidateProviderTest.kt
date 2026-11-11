@@ -5,6 +5,7 @@ import dev.shimpyo.coach.fakes.FakeTripEstimator
 import dev.shimpyo.coach.fakes.Road
 import dev.shimpyo.coach.fakes.StopRow
 import dev.shimpyo.coach.fakes.TripAnswer
+import dev.shimpyo.coach.fakes.TripNaviPort
 import dev.shimpyo.coach.fakes.stop
 import dev.shimpyo.engine.RouteState
 import dev.shimpyo.engine.StopKind
@@ -25,7 +26,8 @@ import org.junit.Test
 /**
  * 정차 후보 만들기 (CandidateProvider). 시나리오 표는 docs/design/coach-layer/candidates.md.
  * 회귀: 서비스 감사 D5(길안내 중 반경 후보에 범위가 없어 가짜 '마지막 기회'), D6(같은 이름 휴게소가 요청 실패 때 반대 방향으로),
- * 데이터 감사 #5·#7, 엔진 감사 '자른 목록을 완전한 목록으로 봄', UI 감사 #19(ahead가 20초마다만 움직임), 46981d8(지어낸 etaS).
+ * 데이터 감사 #5·#7, 엔진 감사 '자른 목록을 완전한 목록으로 봄', UI 감사 #19(ahead가 20초마다만 움직임), 46981d8(지어낸 etaS),
+ * 닫힘 검증 SV-N1(느려지면 같은 휴게소의 후보 id가 데이터 행에서 tbt:로 바뀌어 수락한 정차를 다시 물었다).
  */
 class CandidateProviderTest {
 
@@ -235,6 +237,131 @@ class CandidateProviderTest {
         val fx = Fx(this, emptyList())
         fx.provider.refresh(Road.car(), guiding(listOf(opp("졸음쉼터", 5.0, StopKind.DROWSY_SHELTER), opp("졸음쉼터", 15.0, StopKind.DROWSY_SHELTER))), CandidatePolicy.REAL)
         assertEquals(listOf("tbt:졸음쉼터", "tbt:졸음쉼터#2"), fx.ids)
+    }
+
+    // ------------------------------------------------------------ 한 번 고른 행은 그 경로에서 그 행이다 (SV-N1)
+
+    @Test
+    fun aRowConfirmedByTheLaneKeepsItsIdWhenTheHeadingIsLostAndTheNaviCannotMeasure() = runTest {
+        // 달릴 때 차로 방위로 고른 행이, 정체에 들어 방위를 모르게 되고(P·저속) 내비도 못 재는 동안 좌표 없는 tbt:로 바뀌었다.
+        // 엔진은 수락한 정차를 id로 따라가므로 60초 뒤 잊고 이미 경유지로 넣은 휴게소를 다시 물었다
+        val fx = Fx(this, listOf(anseongSeoul, anseongBusan), FakeTripEstimator(TripAnswer.Unknown))
+        val navi = guiding(listOf(opp("안성휴게소", 47.0)))
+        fx.provider.refresh(Road.car(heading = 180f), navi, CandidatePolicy.REAL)
+        assertEquals(listOf("anseong-busan"), fx.ids)
+
+        repeat(3) { fx.provider.refresh(Road.car(heading = null), navi, CandidatePolicy.REAL) }
+        assertEquals("방위를 잃어도 같은 후보다", listOf("anseong-busan"), fx.ids)
+        assertTrue("이미 고른 행은 내비에 다시 묻지 않는다", fx.oracle.calls.isEmpty())
+        assertEquals("직선거리는 지금 위치에서 다시 잰다", 45_000.0, fx.snap.list.single().straightDistanceM!!, 500.0)
+    }
+
+    @Test
+    fun aRowChosenByNaviDistanceIsKeptWhenLaterRequestsFail() = runTest {
+        val oracle = FakeTripEstimator().apply {
+            answers["anseong-busan"] = TripAnswer.Route(47_500.0)
+            answers["anseong-seoul"] = TripAnswer.Route(57_100.0)
+        }
+        val fx = Fx(this, listOf(anseongSeoul, anseongBusan), oracle)
+        val navi = guiding(listOf(opp("안성휴게소", 47.0)))
+        fx.provider.refresh(Road.car(heading = null), navi, CandidatePolicy.REAL)
+        assertEquals(listOf("anseong-busan"), fx.ids)
+        oracle.answers.clear() // 통신 음영: 내비가 더는 답하지 못한다
+        oracle.calls.clear()
+        fx.provider.refresh(Road.car(heading = null), navi, CandidatePolicy.REAL)
+        assertEquals("내비 거리로 고른 행도 그 경로에서는 그 행이다", listOf("anseong-busan"), fx.ids)
+        assertTrue(oracle.calls.isEmpty())
+    }
+
+    @Test
+    fun aNewRouteOrModeResolvesAgain() = runTest {
+        // 고른 행을 기억하는 것은 같은 경로(epoch) 안에서만이다: 되돌아가는 새 경로에서는 같은 이름이 반대편 시설일 수 있다
+        val fx = Fx(this, listOf(anseongSeoul, anseongBusan), FakeTripEstimator(TripAnswer.Unknown))
+        fx.provider.refresh(Road.car(heading = 180f), guiding(listOf(opp("안성휴게소", 47.0)), epoch = 1), CandidatePolicy.REAL)
+        assertEquals(listOf("anseong-busan"), fx.ids)
+        fx.provider.refresh(Road.car(heading = null), guiding(listOf(opp("안성휴게소", 47.0)), epoch = 2), CandidatePolicy.REAL)
+        assertEquals("새 경로에서는 다시 고른다 (못 고르면 tbt:)", listOf("tbt:안성휴게소"), fx.ids)
+
+        fx.provider.refresh(Road.car(heading = 180f), guiding(listOf(opp("안성휴게소", 47.0)), epoch = 2), CandidatePolicy.REAL)
+        assertEquals("고를 수 있게 되면 데이터 행으로 올라간다", listOf("anseong-busan"), fx.ids)
+        fx.provider.reset()
+        fx.provider.refresh(Road.car(heading = null), guiding(listOf(opp("안성휴게소", 47.0)), epoch = 2), CandidatePolicy.REAL)
+        assertEquals("모드 전환(reset)도 기억을 지운다", listOf("tbt:안성휴게소"), fx.ids)
+    }
+
+    @Test
+    fun aRowPickedOnlyBecauseItsNameIsUniqueIsCheckedAgainOnceTheHeadingIsKnown() = runTest {
+        // 데이터에 반대 차로 행만 있는 이름. 방위를 모를 때는 그 행뿐이라 임시로 쓰지만 확인한 것이 아니다:
+        // 방위를 알면 차로 방위가 빼고, 그 뒤 방위를 다시 잃어도 뺀 행으로 돌아가지 않는다 (행 ↔ tbt:를 오가지 않는다)
+        val fx = Fx(this, listOf(anseongSeoul), FakeTripEstimator(TripAnswer.Unknown))
+        val navi = guiding(listOf(opp("안성휴게소", 47.0)))
+        fx.provider.refresh(Road.car(heading = null), navi, CandidatePolicy.REAL)
+        assertEquals("방위를 모르면 하나뿐인 행을 쓴다", listOf("anseong-seoul"), fx.ids)
+        fx.provider.refresh(Road.car(heading = 180f), navi, CandidatePolicy.REAL)
+        assertEquals("남행인 줄 알면 북행 차로 시설은 아니다", listOf("tbt:안성휴게소"), fx.ids)
+        fx.provider.refresh(Road.car(heading = null), navi, CandidatePolicy.REAL)
+        assertEquals("차로 방위가 뺀 행으로 되돌아가지 않는다", listOf("tbt:안성휴게소"), fx.ids)
+    }
+
+    @Test
+    fun aRememberedRowIsNotUsedForAnotherFacilityWithTheSameName() = runTest {
+        // 경로가 같은 이름을 두 번 지난다(내려갔다 돌아오는 경로). 기억한 행은 TBT 거리와 맞을 때만 쓴다
+        val fx = Fx(this, listOf(anseongBusan))
+        fx.provider.refresh(Road.car(heading = 180f), guiding(listOf(opp("안성휴게소", 47.0), opp("안성휴게소", 180.0))), CandidatePolicy.REAL)
+        assertEquals(listOf("anseong-busan", "tbt:안성휴게소#2"), fx.ids)
+        // 첫 번째를 지나 50km 지점: 남은 '안성휴게소'는 130km 앞인데 기억한 행은 5km 뒤에 있다
+        fx.provider.refresh(Road.car(km = 50.0, heading = 180f), guiding(listOf(opp("안성휴게소", 130.0))), CandidatePolicy.REAL)
+        assertEquals(listOf("tbt:안성휴게소"), fx.ids)
+    }
+
+    @Test
+    fun aSameNamePairBeyondTheThirdIsStillResolvedWhenTheCarIsSlow() = runTest {
+        // 닫힘 검증 SV-N1 (CandidateProvider.Budget): 갱신 하나의 requestTrip 한도(6)를 캐시가 바로 답한 것까지 셌다. 방위를 모를 때(P·저속)
+        // 같은 이름 쌍은 두 번씩 쓰므로 앞 세 쌍만 고르고 네 번째부터는 내비가 멀쩡해도, 몇 번을 다시 만들어도 tbt: 후보로 남았다
+        // (내비 요청은 처음 6번뿐이었다). 지금은 실제로 보낸 요청만 센다: 첫 갱신 6번, 다음 갱신에서 나머지 두 쌍 4번
+        val rows = (1..5).flatMap { i ->
+            listOf(
+                stop("r$i-seoul", "휴게${i}휴게소(서울방향)", i * 10.0, laneHeading = 0f, lonOffset = 0.003),
+                stop("r$i-busan", "휴게${i}휴게소(부산방향)", i * 10.0, laneHeading = 180f),
+            )
+        }
+        val car = Road.car(heading = null) // 서 있거나 느려서 방위를 모른다
+        val naviPort = TripNaviPort { lat, lon, _, _ ->
+            val straight = (car.lat - lat) * 111_000.0
+            // 부산방향은 직선의 1.05배, 서울방향(경도가 다르다)은 유턴만큼 10km 더
+            TripEstimate(straight * 1.05 + if (lon > Road.LON + 0.001) 10_000.0 else 0.0, 600.0)
+        }
+        val clock = ElapsedClock { testScheduler.currentTime }
+        val odometer = Odometer(clock).also { it.advance(0f) }
+        val provider = CandidateProvider(FakeStopIndex(rows), RouteOracle(naviPort, clock), odometer, clock)
+        val navi = NaviSnapshot(
+            epoch = 1, mode = NaviMode.ROUTE_GUIDING, route = RouteState(guiding = true, remainDistanceM = 100_000.0),
+            opportunities = (1..5).map { RouteOpportunity("휴게${it}휴게소", StopKind.HIGHWAY_REST_AREA, it * 10_500.0) },
+            tbtReceived = true, tbtCoverageM = 100_000.0, tbtEpoch = 1, odometerTrusted = true,
+        )
+        provider.refresh(car, navi, CandidatePolicy.REAL)
+        assertEquals("첫 갱신은 한도(6번)만큼만 묻는다: 세 쌍", 6, naviPort.tripCalls)
+        assertEquals(listOf("r1-busan", "r2-busan", "r3-busan", "tbt:휴게4휴게소", "tbt:휴게5휴게소"), provider.snapshot.value.list.map { it.id })
+        repeat(2) { provider.refresh(car, navi, CandidatePolicy.REAL) }
+        assertEquals(
+            "고른 쌍은 다시 묻지 않으니 한도가 남아 뒤 갱신에서 나머지 쌍도 고른다",
+            (1..5).map { "r$it-busan" }, provider.snapshot.value.list.map { it.id },
+        )
+        assertEquals("내비에는 행마다 한 번씩만 물었다 (5쌍 × 2)", 10, naviPort.tripCalls)
+    }
+
+    @Test
+    fun cacheAnswersDoNotUseUpTheRefreshBudgetInTheNearbySearch() = runTest {
+        // 반경 검색도 같다: 캐시가 아는 후보는 한도에 세지 않으므로, 새로 물어야 하는 후보가 한도 안에서 내비에 간다
+        val naviPort = TripNaviPort { lat, _, _, _ -> TripEstimate((Road.START_LAT - lat) * 111_000.0 * 1.1, 600.0) }
+        val clock = ElapsedClock { testScheduler.currentTime }
+        val odometer = Odometer(clock).also { it.advance(0f) }
+        val provider = CandidateProvider(FakeStopIndex(nine), RouteOracle(naviPort, clock), odometer, clock)
+        provider.refresh(Road.car(), notGuiding, CandidatePolicy.REAL)
+        assertEquals(6, naviPort.tripCalls)
+        provider.refresh(Road.car(), notGuiding, CandidatePolicy.REAL)
+        assertEquals("같은 자리의 다음 갱신은 캐시로 끝난다", 6, naviPort.tripCalls)
+        assertEquals(6, provider.snapshot.value.list.count { it.routeDistanceM != null })
     }
 
     // ------------------------------------------------------------ TBT를 기다리는 동안과 반경 검색 경로

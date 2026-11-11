@@ -15,6 +15,7 @@ import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
 
@@ -111,7 +112,7 @@ sealed interface TripAnswer {
     data object Hang : TripAnswer
 }
 
-/** 후보 id → 답. [onCall]로 요청 중에 차를 움직이거나 시간을 흘린다 */
+/** 후보 id → 답. [onCall]로 요청 중에 차를 움직이거나 시간을 흘린다. 캐시가 없어서 부를 때마다 내비 요청 하나다 */
 class FakeTripEstimator(var default: TripAnswer = TripAnswer.Unknown) : TripEstimator {
     val answers = mutableMapOf<String, TripAnswer>()
     val calls = mutableListOf<String>()
@@ -119,7 +120,8 @@ class FakeTripEstimator(var default: TripAnswer = TripAnswer.Unknown) : TripEsti
     var onCall: (suspend (StopCandidate) -> Unit)? = null
     override var enabled = true
 
-    override suspend fun refine(c: StopCandidate, from: Fix): StopCandidate? {
+    override suspend fun refine(c: StopCandidate, from: Fix, permit: () -> Boolean): StopCandidate? {
+        if (!permit()) return null
         calls += c.id
         onCall?.invoke(c)
         return when (val a = answers[c.id] ?: default) {
@@ -135,6 +137,15 @@ class FakeTripEstimator(var default: TripAnswer = TripAnswer.Unknown) : TripEsti
     override fun clear() {
         cleared++
     }
+}
+
+/**
+ * 내비가 요청을 받고도 답하지 않을 때 포트가 하는 일: 자기 시간 초과([timeoutMs], 내비 잠금을 얻은 뒤부터) 뒤에 실패를 낸다 (NaviKit.awaitEvent).
+ * 끝나지 않는 `awaitCancellation()`은 그와 다르다: 요청을 시작하지도 못하고 내비 잠금을 기다리는 것이다.
+ */
+suspend fun naviDoesNotAnswer(timeoutMs: Long): Nothing {
+    delay(timeoutMs)
+    throw IllegalStateException("requestTrip: no response in ${timeoutMs}ms")
 }
 
 /** 손으로 돌리는 실제 시간 (RouteOracle 캐시 나이·백오프) */

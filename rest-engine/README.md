@@ -14,11 +14,14 @@
 | `update(CoachInput): CoachOutput` | 1초 안팎마다. 게이지 2개, 운전 패턴, 다음 추천, 지금 물을 질문 1개, 공조 제안, 급해 결과 |
 | `urgent(input)` / `plan(input)` | 급해 순위, 피트스톱 계획. 상태를 바꾸지 않는다 |
 | `onPromptResult(id, accepted, now)` | 질문에 대한 응/아니 (음성이면 `VoiceIntent.Accept/Decline`을 다음 update에 넣어도 같다) |
+| `noteAccepted(stop, purposes, now)` | 운전자가 화면에서 정차지를 직접 골랐고 내비 명령이 성공했다 (급해 목록, 계획 화면, 실패 뒤 다시 시도). 엔진이 물은 곳이 아니어도 된다. 아래 '들르기로 한 곳' |
 | `setProfile(profile)` | 같은 `tripStart`면 이어 가고, 다르면 새 여정 |
 | `memory()` | 기기에 저장할 개인 기록 (관측 간격, 질문 수락률) |
 
 앱 연동 메모
 - `CoachOutput.prompt`는 대답·만료 전까지 같은 id로 계속 나온다. 새 id일 때만 TTS로 말한다.
+- 들르기로 한 곳: 질문을 수락했거나(`onPromptResult(id, true)`) 화면에서 직접 고른 곳(`noteAccepted`). 추천이 `NEXT_ACCEPTED`가 되고 그동안 엔진은 정차를 먼저 묻지 않는다. 후보 목록에서 1분 넘게 사라지면(지나침), 90분이 지나면, 화장실 정차·휴식이 기록되면 내린다(서 있는 동안에는 내리지 않는다). 그래서 앱은 그곳을 이후 update의 `candidates`에 같은 id로 계속 넣는다. `noteAccepted`는 같은 곳을 묻던 질문이 떠 있으면 그 질문을 수락한 것으로, 다른 곳을 묻던 화장실 질문(마지막 기회·급해 결과)은 그 선택으로 끝난 것으로 본다(무시로 치지 않아 쉼·시간당 횟수가 남지 않고, 늦게 온 대답도 받지 않는다). 사용자의 말("화장실 급해", "아이가 화장실 가고 싶대", "쉬고 싶어", "배고파", 주유)에 답할 곳이 바로 그곳이면 '들를까요?'를 다시 묻지 않고 "가휴게소에 들르기로 했어요. 6km 남았어요."(INFO)라고만 답한다. 그 뒤 그곳에 서면 '앱이 권해서 들른 정차'(0.5회)로 배운다. 첫 update 전에 불러도 된다(재시작 뒤 되살리기).
+- 화장실 질문과 추천의 이유: 화장실 질문(`PromptKind.LAST_CHANCE`)이 떠 있는 동안 `CoachOutput.next`는 그 질문의 장소와 이유다(그 장소가 지금 후보에 있을 때). 화면은 질문 카드를 띄우는 틱의 `next.reasons`를 카드의 이유로 쓴다. 이유 코드: 마지막 기회 문구로 묻는 질문은 `LAST_CHANCE_CONGESTION`/`LAST_CHANCE_GAP`/`LAST_CHANCE_PREFERENCE`(+`LAST_CHANCE_GROUP`), 여유가 거의 없을 때의 가까운 화장실은 `NEXT_NEAREST_RESTROOM`, "화장실 가고 싶대"의 답은 `NEXT_REQUESTED_RESTROOM`, 수유·반려견 요청의 답은 `NEXT_REQUESTED_CARE`. 요청에 답한 곳이 마지막 기회이기도 하면 문장도 그 이유로 말하고 이유는 마지막 기회가 앞, 요청 코드가 뒤다(`[LAST_CHANCE_CONGESTION, NEXT_REQUESTED_RESTROOM]`).
 - `candidates`는 매 update마다 지금 위치 기준 거리로 넘긴다(`routeDistanceM`, 없으면 `straightDistanceM`).
 - `cabinAction = FRESH_AIR`는 사용자가 허용했을 때만 실행하고 1~2분 뒤 내기순환으로 되돌린다 (AI §1). 허용했으면 `cabinAutoAllowed = true`로 넘겨 질문을 생략한다.
 - 출발할 때 "출발 전에 화장실 다녀오셨어요?"에 '아니/모름'이면 `lastRestroomAt`을 출발 60분 전으로 넣기를 권한다 (AI §9-1). 계약상 값이 없으면 출발 시각으로 본다.

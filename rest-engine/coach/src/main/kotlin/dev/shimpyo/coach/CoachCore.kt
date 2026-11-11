@@ -2,8 +2,6 @@ package dev.shimpyo.coach
 
 import dev.shimpyo.coach.voice.IntentParser
 import dev.shimpyo.coach.voice.Spoken
-import dev.shimpyo.coach.voice.parseSpoken
-import dev.shimpyo.coach.voice.replyTo
 import dev.shimpyo.engine.CabinAction
 import dev.shimpyo.engine.CabinState
 import dev.shimpyo.engine.CoachInput

@@ -122,6 +122,114 @@ class StopRepositoryTest {
         assertEquals(emptyList(), syn.matchByName("안성휴게소", StopKind.HIGHWAY_REST_AREA, 37.06, 126.9998, 200_000.0, 180f), "안성 ≠ 안성맞춤")
     }
 
+    // ------------------------------------------------------------ 멀리 있는 같은 이름 쌍 (닫힘 검증 C2)
+
+    /**
+     * 남북 고속도로가 30km 남쪽에서 잠깐 동서로 꺾인다(굽이). 굽이의 쌍은 차로 방위가 85/265도라, 북쪽에서 내려오는 차의
+     * '나 → 시설' 방위(180도)와 거의 직각이다. 곧은 구간의 쌍(곧은휴게소 180/0도)은 분명히 갈린다.
+     */
+    private val bend: StopTable by lazy {
+        val r = "굽이고속도로"
+        StopTable.encode(
+            listOf(
+                rec("bendE", "굽이졸음쉼터", StopKind.DROWSY_SHELTER, 37.0300, 127.0000, 85, r),
+                rec("bendW", "굽이졸음쉼터", StopKind.DROWSY_SHELTER, 37.0303, 127.0005, 265, r),
+                rec("straightS", "곧은휴게소", StopKind.HIGHWAY_REST_AREA, 37.0200, 126.9990, 180, r),
+                rec("straightN", "곧은휴게소", StopKind.HIGHWAY_REST_AREA, 37.0230, 127.0010, 0, r),
+                rec("aloneE", "혼자졸음쉼터", StopKind.DROWSY_SHELTER, 37.0100, 127.0000, 85, r),
+            ),
+            listOf(MotorwayLine(r, false, doubleArrayOf(37.40, 126.9998, 37.00, 126.9998))),
+        ).let(StopTable::decode)
+    }
+
+    @Test
+    fun farAwayTheBearingDecidesBetweenSameNameTwinsOnlyWhenItIsClear() {
+        val repo = repo(bend)
+        // 30km 북쪽에서 남행. '나 → 시설' 방위 180도와 굽이 쌍의 차로 방위는 95도·85도 차이: 어느 쪽도 분명하지 않다.
+        // 예전에는 90도를 넘는 쪽(265도 차로)만 빼서, 길이 반대로 꺾이는 곳(경부선 대신졸음쉼터)에서 반대 차로 행만 남았다
+        val far = repo.matchByName("굽이졸음쉼터", StopKind.DROWSY_SHELTER, 37.30, 126.9998, 60_000.0, 180f).ids()
+        assertEquals(setOf("bendE", "bendW"), far.toSet(), "분명하지 않으면 둘 다 준다 (부르는 쪽이 내비 거리로 고른다)")
+        val ahead = repo.ahead(37.30, 126.9998, 180f, 60_000.0, highway).ids()
+        assertTrue("bendE" in ahead && "bendW" in ahead, ahead.toString())
+
+        // 분명히 갈리는 쌍은 멀어도 예전처럼 한쪽만 준다 (쌍마다 내비에 묻지 않는다)
+        assertEquals(listOf("straightS"), repo.matchByName("곧은휴게소", StopKind.HIGHWAY_REST_AREA, 37.30, 126.9998, 60_000.0, 180f).ids())
+        assertTrue("straightN" !in ahead && "straightS" in ahead, ahead.toString())
+
+        // 20km 안에서는 예전 규칙 그대로다: 90도를 넘는 쪽을 뺀다 (실제 차로 위 136쌍이 20km 안에서는 모두 맞았다)
+        assertEquals(listOf("bendW"), repo.matchByName("굽이졸음쉼터", StopKind.DROWSY_SHELTER, 37.10, 126.9998, 60_000.0, 180f).ids())
+
+        // 쌍이 아닌 시설은 멀어도 예전 규칙 그대로다(95도 → 반대 차로): 고를 상대가 없으니 부르는 쪽이 내비로 가를 수도 없다
+        assertEquals(emptyList(), repo.matchByName("혼자졸음쉼터", StopKind.DROWSY_SHELTER, 37.30, 126.9998, 60_000.0, 180f).ids())
+        assertTrue("aloneE" !in ahead)
+    }
+
+    @Test
+    fun farUpstreamTheOppositeTwinIsNeverTheOnlyOneOffered() {
+        // 닫힘 검증 C2 (데이터 감사 #1·#5가 남긴 것): 반대 차로 판정은 2km보다 먼 시설에 '나 → 시설' 방위와 차로 방위를 비교한다.
+        // 차로 방위를 그 자리의 실제 방위로 고친 뒤(대신졸음쉼터 부산방향 30도·서울방향 211도: 김천~구미에서 길이 북북동으로 꺾인다)
+        // 대구 쪽에서 서울방향으로 올라오는 차(칠곡휴게소 26km 전 ~ 검단 46km 전)에게는 '나 → 대신'이 북서라서 서울방향 행(211도)이
+        // 반대 차로로 빠지고 부산방향 행(30도)만 남았다. matchByName이 한 행만 주면 CandidateProvider는 내비에 묻지 않고 그 행을 쓴다.
+        // 같은 노선·같은 방향 쉼터에서 본 쌍 154곳(직선 20~60km) 가운데 틀린 3곳이 모두 직각에서 13도 안이었다 (docs/design/coach-layer/data.md 3.3).
+        fun row(name: String, road: String, towards: Double): Int = (0 until realTable.size)
+            .filter { realTable.kind(it) in highway && realTable.name(it) == name && realTable.road(it) == road && realTable.laneHeading(it) != null }
+            .minBy { Geo.angleDiff(realTable.laneHeading(it)!!.toDouble(), towards) }
+        data class Case(val car: Int, val mine: Int, val other: Int, val note: String)
+        val gyeongbu = "경부고속도로"
+        val ring = "수도권제1순환고속도로"
+        val daesinSeoul = row("대신졸음쉼터", gyeongbu, 211.0)
+        val daesinBusan = row("대신졸음쉼터", gyeongbu, 30.0)
+        assertEquals(listOf(DAESIN_SEOUL, DAESIN_BUSAN), listOf(realTable.id(daesinSeoul), realTable.id(daesinBusan)), "전제: 대신졸음쉼터 두 행")
+        val cases = listOf(
+            Case(row("칠곡휴게소", gyeongbu, 0.0), daesinSeoul, daesinBusan, "칠곡휴게소(서울방향) → 대신 27km"),
+            Case(row("지천졸음쉼터", gyeongbu, 337.0), daesinSeoul, daesinBusan, "지천졸음쉼터(서울방향) → 대신 37km"),
+            Case(row("검단졸음쉼터", gyeongbu, 258.0), daesinSeoul, daesinBusan, "검단졸음쉼터(서울방향) → 대신 46km"),
+            Case(row("구리남양주졸음쉼터", ring, 185.0), row("시흥졸음쉼터", ring, 141.0), row("시흥졸음쉼터", ring, 322.0), "구리남양주(판교방향) → 시흥 35km"),
+        )
+        for (c in cases) {
+            val lat = realTable.lat(c.car)
+            val lon = realTable.lon(c.car)
+            val lane = realTable.laneHeading(c.car)!!.toFloat()
+            val mine = realTable.id(c.mine)
+            val other = realTable.id(c.other)
+            val matched = real.matchByName(realTable.name(c.mine), realTable.kind(c.mine), lat, lon, 60_000.0, lane).ids()
+            assertTrue(mine in matched, "${c.note}: 이름으로 찾은 행 $matched 에 같은 방향 행 $mine 이 없다")
+            val ahead = real.ahead(lat, lon, lane, 60_000.0, highway).ids()
+            assertFalse(other in ahead && mine !in ahead, "${c.note}: 앞쪽 후보에 반대 차로 행만 있다")
+        }
+        // 가까워지면(석적졸음쉼터, 대신 22km 전 → 5km 전) 차로 방위가 한 행으로 가른다
+        val near = pos("daesin-seoulbound-5km")
+        assertEquals(listOf(DAESIN_SEOUL), real.matchByName("대신졸음쉼터", StopKind.DROWSY_SHELTER, near.lat, near.lon, 60_000.0, near.heading).ids())
+    }
+
+    @Test
+    fun aCarParkedInARestAreaKeepsItWithTheHeadingItArrivedWith() {
+        // 닫힘 검증 C1: 코어는 서 있는 동안에도 마지막으로 달리던 방위를 넘긴다(방위를 버리면 앞 6곳이 뒤·반대 차로 시설로 찬다).
+        // 그 방위로도 차가 서 있는 휴게소는 남아야 한다: 휴게소 시설 점은 본선에서 떨어져 있어 '시설 안'(차로 위가 아니고 250m 안)으로 본다
+        val lat = 37.0005
+        val lon = 126.9991
+        assertTrue("okS" in syn.ahead(lat, lon, 180f, 60_000.0, highway).ids(), "달리던 방위(남행)")
+        assertTrue("okS" in syn.ahead(lat, lon, 0f, 60_000.0, highway).ids(), "주차장을 돌아 반대로 선 방위")
+        // 실제 휴게소: 시설 점에서 진행 방향으로 0~150m 더 들어가 선 차 (오른쪽으로 15m). 차로 방위 = 달리던 방위
+        var parked = 0
+        var kept = 0
+        for (i in 0 until realTable.size) {
+            if (realTable.kind(i) != StopKind.HIGHWAY_REST_AREA) continue
+            val lane = realTable.laneHeading(i) ?: continue
+            val h = Math.toRadians(lane.toDouble())
+            for (along in listOf(0.0, 60.0, 150.0)) {
+                val north = along * kotlin.math.cos(h) - 15.0 * kotlin.math.sin(h)
+                val east = along * kotlin.math.sin(h) + 15.0 * kotlin.math.cos(h)
+                val pLat = realTable.lat(i) + north / 111_195.0
+                val pLon = realTable.lon(i) + east / (111_195.0 * kotlin.math.cos(Math.toRadians(pLat)))
+                parked++
+                if (real.ahead(pLat, pLon, lane.toFloat(), 60_000.0, highway).any { it.id == realTable.id(i) }) kept++
+            }
+        }
+        println("휴게소 안에 선 차 $parked 곳 중 $kept 곳에서 그 휴게소가 앞쪽 후보에 남는다")
+        assertTrue(kept >= parked * 0.95, "$kept / $parked")
+    }
+
     // ------------------------------------------------------------ 실제 데이터
 
     @Test

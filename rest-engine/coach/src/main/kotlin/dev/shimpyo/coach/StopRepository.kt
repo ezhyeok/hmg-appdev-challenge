@@ -20,6 +20,7 @@ import kotlin.math.cos
  * - [heading]은 '움직이는 차의 진행 방위'다. 서 있거나 모르면 null을 넘긴다(부르는 쪽 책임: 기어 P·저속이면 null).
  *   null이면 방향 필터를 하나도 쓰지 않는다.
  * - 반대 차로: 차로 방위가 있는 시설이 진행 방향과 90도 넘게 다르면 뺀다(2km보다 멀면 '나 → 시설' 방위와 비교).
+ *   20km보다 먼 같은 이름 쌍은 그 비교가 분명할 때만 가른다(직각에서 20도 넘게 벗어날 때). 분명하지 않으면 둘 다 남긴다 (닫힘 검증 C2).
  * - 시설 안: 차가 고속도로 차로 위가 아니고(지도 맞춤 [MotorwayIndex]) 휴게소·졸음쉼터 [AT_FACILITY_M] 안이면 그 시설의
  *   반대 차로·뒤쪽 검사를 하지 않는다. 휴게소 주차장에 반대로 세운 차가 자기가 있는 휴게소를 잃지 않게. 반경만으로 풀면 안 된다: 방향별 시설의
  *   93%는 반대 차로가 시설 점에서 150m 안(중앙값 51m)을 지나서, 지나가는 차에게 건너편 시설이 다시 나온다.
@@ -40,6 +41,8 @@ class StopRepository(
         val motorways: MotorwayIndex,
         /** 고속도로 시설의 이름 키 (StopNames.key, 없으면 null). 이름 맞추기에서 매번 정규식을 돌리지 않게 */
         val keys: Array<String?>,
+        /** 같은 이름·같은 종류 시설이 [TWIN_NEAR_M] 안에 또 있는 행 (양방향 쌍). 휴게소 89쌍, 졸음쉼터 97쌍 */
+        val hasTwin: BooleanArray,
     )
 
     @Volatile private var state: Loaded? = null
@@ -55,7 +58,7 @@ class StopRepository(
             val t = loadTable() ?: return@withContext 0
             val keys = arrayOfNulls<String>(t.size)
             for (i in 0 until t.size) if (t.kind(i) in HIGHWAY_KINDS) keys[i] = StopNames.key(t.name(i))
-            state = Loaded(t, GridIndex(t) { true }, GridIndex(t) { t.kind(it) in HIGHWAY_KINDS }, MotorwayIndex(t), keys)
+            state = Loaded(t, GridIndex(t) { true }, GridIndex(t) { t.kind(it) in HIGHWAY_KINDS }, MotorwayIndex(t), keys, twins(t, keys))
             t.size
         }
     }
@@ -97,7 +100,7 @@ class StopRepository(
                 } else if (alongTrackM(lat, lon, cLat, cLon, kx, h) < -BEHIND_TOLERANCE_M) {
                     return@forEachIn
                 }
-                if (oppositeLane(t, i, d, b, h)) return@forEachIn
+                if (oppositeLane(l, i, d, b, h)) return@forEachIn
             }
             hits += Hit(i, d, behind = false, onRoad = road >= 0 && t.roadId(i) == road)
         }
@@ -132,7 +135,7 @@ class StopRepository(
                 val b = Geo.bearingDeg(lat, lon, cLat, cLon)
                 behind = d > 150.0 && Geo.angleDiff(b, h) > 100.0
                 // 고속도로 반대 차로의 휴게소·졸음쉼터는 유턴 없이는 못 간다
-                if (oppositeLane(t, i, d, b, h)) return@forEachIn
+                if (oppositeLane(l, i, d, b, h)) return@forEachIn
             }
             hits += Hit(i, d, behind, onRoad = false)
         }
@@ -158,6 +161,7 @@ class StopRepository(
      *   "덕평자연휴게소" → 덕평. 반대(TBT가 더 짧은 것)는 쓰지 않는다: "안성"이 "안성맞춤"과 맞으면 안 된다.
      * - [heading]을 주면 반대 차로 행을 뺀다. 같은 이름이 양방향에 있는 곳(휴게소 89곳, 졸음쉼터 97곳)이 내비 요청 없이 풀린다
      *   (데이터 감사 #5). 남는 행이 없으면 빈 목록이다(반대 차로 행을 대신 주지 않는다).
+     *   20km보다 먼 쌍이 분명히 갈리지 않으면 두 행을 다 준다: 부르는 쪽(CandidateProvider)이 내비 거리로 고르거나 tbt: 후보로 둔다.
      */
     override fun matchByName(name: String, kind: StopKind, lat: Double, lon: Double, maxStraightM: Double, heading: Float?): List<StopCandidate> {
         val l = state ?: return emptyList()
@@ -175,7 +179,7 @@ class StopRepository(
             if (!isExact && !(ki.length >= 2 && key.startsWith(ki))) return@forEachIn
             val d = Geo.distanceM(lat, lon, t.lat(i), t.lon(i))
             if (d > maxStraightM) return@forEachIn
-            if (h != null && !(d <= AT_FACILITY_M && road < 0) && oppositeLane(t, i, d, Geo.bearingDeg(lat, lon, t.lat(i), t.lon(i)), h)) return@forEachIn
+            if (h != null && !(d <= AT_FACILITY_M && road < 0) && oppositeLane(l, i, d, Geo.bearingDeg(lat, lon, t.lat(i), t.lon(i)), h)) return@forEachIn
             val hit = Hit(i, d, behind = false, onRoad = false)
             if (isExact) exact += hit else prefix += hit to ki.length
         }
@@ -200,12 +204,37 @@ class StopRepository(
 
     /**
      * 차로 방위가 있는 시설(휴게소·졸음쉼터)이 내 진행 방향과 90도 넘게 다르면 반대 차로다.
-     * 2km보다 멀면 내 순간 방향 대신 '나 → 시설' 방위([bearing])와 비교한다 (길이 굽어도 앞쪽 시설을 잘못 빼지 않게)
+     * 2km보다 멀면 내 순간 방향 대신 '나 → 시설' 방위([bearing])와 비교한다 (길이 굽어도 앞쪽 시설을 잘못 빼지 않게).
+     *
+     * 그 방위는 시설 앞에서 길이 꺾이면 차로 방위와 어긋난다. 그래서 [TWIN_FAR_M]보다 먼 같은 이름 쌍은 차이가 직각에서
+     * [TWIN_CLEAR_DEG] 넘게 벗어날 때만 반대 차로로 본다. 그 안쪽이면 둘 다 남는다: 한쪽은 90도 이하라 원래 남고, 다른 쪽을 빼지 않는다.
+     * (경부선 대신졸음쉼터: 서울방향 차가 22~59km 전에서 보면 서울방향 행이 94~103도, 부산방향 행이 76~85도라 반대편 행만 남았다.
+     * 같은 노선·같은 방향 쉼터에서 본 쌍 154곳 가운데 틀린 3곳이 모두 직각에서 13도 안이었고, 20도로 두면 틀린 곳이 없고 7곳이 둘 다 남는다.)
+     * 쌍이 아닌 시설과 20km 안은 예전 규칙 그대로다 (20km 안에서는 모두 맞았다).
      */
-    private fun oppositeLane(t: StopTable, i: Int, d: Double, bearing: Double, heading: Double): Boolean {
-        val lane = t.laneHeading(i) ?: return false
-        val ref = if (d > 2_000.0) bearing else heading
-        return Geo.angleDiff(lane.toDouble(), ref) > 90.0
+    private fun oppositeLane(l: Loaded, i: Int, d: Double, bearing: Double, heading: Double): Boolean {
+        val lane = l.table.laneHeading(i) ?: return false
+        if (d <= LANE_BY_BEARING_M) return Geo.angleDiff(lane.toDouble(), heading) > 90.0
+        val off = Geo.angleDiff(lane.toDouble(), bearing)
+        return if (d > TWIN_FAR_M && l.hasTwin[i]) off > 90.0 + TWIN_CLEAR_DEG else off > 90.0
+    }
+
+    /** 같은 이름(키)·같은 종류의 고속도로 시설이 [TWIN_NEAR_M] 안에 또 있는 행을 표시한다 */
+    private fun twins(t: StopTable, keys: Array<String?>): BooleanArray {
+        val out = BooleanArray(t.size)
+        val groups = HashMap<Pair<StopKind, String>, MutableList<Int>>()
+        for (i in 0 until t.size) keys[i]?.let { groups.getOrPut(t.kind(i) to it) { ArrayList(2) }.add(i) }
+        for (rows in groups.values) {
+            for (a in rows.indices) for (b in a + 1 until rows.size) {
+                val i = rows[a]
+                val j = rows[b]
+                if (Geo.distanceM(t.lat(i), t.lon(i), t.lat(j), t.lon(j)) <= TWIN_NEAR_M) {
+                    out[i] = true
+                    out[j] = true
+                }
+            }
+        }
+        return out
     }
 
     /** 진행 방향 축을 따라 시설이 앞(+)/뒤(-)로 얼마나 떨어졌는지 (m, 국지 평면) */
@@ -225,6 +254,14 @@ class StopRepository(
         const val BEHIND_TOLERANCE_M = 50.0
         /** 고속도로 차로 위가 아닌 차가 이 안에 있으면 그 시설 안(주차장·진입로)으로 본다 */
         const val AT_FACILITY_M = 250.0
+        /** 이보다 먼 시설의 차로는 내 순간 방향이 아니라 '나 → 시설' 방위와 비교한다 */
+        const val LANE_BY_BEARING_M = 2_000.0
+        /** 이보다 먼 같은 이름 쌍은 분명할 때만 가른다 (이 안에서는 '나 → 시설' 방위가 모두 맞았다) */
+        const val TWIN_FAR_M = 20_000.0
+        /** 분명하다 = 차로 방위와 '나 → 시설' 방위의 차가 직각에서 이만큼 넘게 벗어난다. 90이면 먼 쌍은 언제나 둘 다 남는다 */
+        const val TWIN_CLEAR_DEG = 20.0
+        /** 같은 이름·같은 종류 시설이 이 안에 또 있으면 양방향 쌍이다 (같은 길 185쌍 중 151쌍이 500m 안) */
+        const val TWIN_NEAR_M = 3_000.0
     }
 }
 

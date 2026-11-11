@@ -47,9 +47,21 @@ class DemoScenario internal constructor(
     /** 경로 위 정체 한 구간: 경로 시작점 기준 시작 거리(m), 길이(m), 지나는 데 걸리는 시간(초) */
     data class Jam(val startM: Double, val lengthM: Double, val durationS: Double)
 
+    /**
+     * 정체 밖에서 달리는 가상 속도 (m/s) = 실제 1초에 가는 거리 ÷ 시각 배속. 귀성길 200 ÷ 7.2 = 27.8(시속 100km), 오후 졸음 250 ÷ 10 = 25(시속 90km).
+     * 서 있는 시나리오(stop)는 달리는 속도가 없어 [PARKED_CRUISE_MPS]로 둔다 (계획 화면의 도착 시간에만 쓰인다).
+     */
+    val cruiseMps: Double
+        get() = (metersPerSecond / timeScale).takeIf { it >= MIN_CRUISE_MPS } ?: PARKED_CRUISE_MPS
+
     companion object {
         /** 화면 시연 패널·adb `--es demo`가 쓰는 이름 */
         val NAMES: List<String> = listOf("holiday", "fatigue", "urgent", "stop")
+
+        /** 이보다 느리면 달리는 시나리오가 아니다 (엔진이 받는 자유 속도의 아래 끝, 시속 10km) */
+        private const val MIN_CRUISE_MPS = 10 / 3.6
+        /** 서 있는 시나리오의 경로 시간에 쓰는 속도: 고속도로 시속 90km */
+        private const val PARKED_CRUISE_MPS = 25.0
 
         /** 이름으로 시나리오를 만든다. 모르는 이름이나 null이면 null (= 시연 끄기) */
         fun byName(name: String?): DemoScenario? = when (name) {
@@ -136,12 +148,31 @@ class DemoRun private constructor(
         val route = RouteState(
             guiding = true,
             remainDistanceM = remain,
-            remainTimeS = remain / 25.0,
+            remainTimeS = remainTimeS(remain, travelled),
             congestion = congestion,
             // 시연 후보는 직선 60km 안의 시설이라 경로 거리 55km까지만 다 들어 있다. 그 뒤를 목적지까지의 공백으로 보지 않게
             candidatesUntilM = DEMO_CANDIDATES_UNTIL_M,
         )
         return input.copy(route = route)
+    }
+
+    /**
+     * 목적지까지 남은 시간 = 정체 밖 거리 ÷ 가상 속도 + 남은 정체를 지나는 시간. 엔진은 남은 거리·시간에서 정체 몫을 빼
+     * 정체 밖 자유 속도를 구하므로(RouteContext.prepare), 이렇게 줘야 엔진의 도착 시간이 시나리오 속도와 맞는다.
+     * 예전에는 남은 거리 ÷ 25m/s였다: 귀성길에서 정체 1시간을 빼고 나면 자유 속도가 시속 119km가 되어 화면이 "옥산휴게소 14km · 7분"을
+     * 보였다 (2026-11-12 기기 확인, UI 감사 U2). 정체는 엔진과 같게 경로 안([0, 남은 거리])에 든 부분만 센다.
+     */
+    private fun remainTimeS(remainM: Double, travelledM: Double): Double {
+        var jamM = 0.0
+        var jamS = 0.0
+        for (jam in scenario.congestion) {
+            val from = (jam.startM - travelledM).coerceAtLeast(0.0)
+            val to = (jam.startM + jam.lengthM - travelledM).coerceAtMost(remainM)
+            if (to <= from) continue
+            jamM += to - from
+            jamS += jam.durationS * (to - from) / jam.lengthM
+        }
+        return (remainM - jamM) / scenario.cruiseMps + jamS
     }
 
     /** 후보의 경로 거리를 가상 경로를 따라 다시 계산한다 */
