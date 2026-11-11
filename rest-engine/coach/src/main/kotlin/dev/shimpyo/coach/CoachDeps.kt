@@ -53,8 +53,8 @@ class CoachDeps(
  * 주행 중 다시 떴을 때 맥박에 적어 둔 곳이 후보에 보이면 한 번 더 부른다 (TripSession.restoredAccepted).
  *
  * 실제 구현([ENGINE])은 CoachEngine.noteAccepted 그대로다: 그곳이 추천(NEXT_ACCEPTED)이 되고, 같은 곳을 묻던 질문은 수락으로,
- * 다른 곳을 묻던 화장실 질문은 벌점 없이 끝난다. 엔진은 그곳이 후보 목록에서 1분 넘게 빠지면 잊으므로, 경로 후보가 아닌 곳
- * (급해 목록)은 코어가 후보에 계속 넣어 준다 (UrgentFlow의 고정). 따로 이름을 둔 것은 테스트가 "언제, 몇 번, 어떤 목적으로
+ * 다른 곳을 묻던 화장실 질문은 벌점 없이 끝난다. 엔진은 그곳이 후보 목록에서 1분 넘게 빠지면 잊으므로, 코어가 그곳을 같은
+ * id로 후보에 계속 넣어 준다 ([StopPin]). 따로 이름을 둔 것은 테스트가 "언제, 몇 번, 어떤 목적으로
  * 알렸나"를 엔진 속을 보지 않고 확인하게 하려는 것이다 (fakes/RecordingAccepted: 적고 나서 엔진에 그대로 넘긴다).
  */
 fun interface EngineAccepted {

@@ -28,8 +28,9 @@ import kotlin.math.truncate
  * 그래서 코어의 상태(세계·엔진·질문·정차·여정·급해·계획)는 잠금 없이 한 스레드만 바꾼다. 예전 CoachService는 필드 30개를
  * 코루틴 12종이 함께 바꿨다(구조 리뷰 §0·D6·D7).
  *
- * 판단은 부품이 하고 코어는 그 결과를 잇는다: 엔진, PromptMachine(질문), UrgentFlow(급해), VoiceDesk(말하기·듣기), Crew(탑승자),
- * PlanKeeper(계획), StopRecorder(정차), WorldSwitch(세계·여정), CoreRules.kt의 작은 규칙들(환기, 학습 저장, 진행 방향, 동의).
+ * 판단은 부품이 하고 코어는 그 결과를 잇는다: 엔진, PromptMachine(질문), UrgentFlow(급해), StopPin(들르기로 한 곳을 후보에 남기기),
+ * VoiceDesk(말하기·듣기), Crew(탑승자), PlanKeeper(계획), StopRecorder(정차), WorldSwitch(세계·여정), CoreRules.kt의 작은 규칙들
+ * (환기, 학습 저장, 진행 방향, 동의).
  * 코어에 남은 것은 우편함, 틱, 명령 가르기, 질문 기계의 효과 실행, 세계 전환 때의 초기화 순서다.
  *
  * 1초 틱: 신호 → 정차 판정(StopRecorder) → 여정(WorldSwitch.onTick) → 내비 스냅샷·후보 투영 → 세계가 입력을 바꿈 → 엔진 →
@@ -71,6 +72,7 @@ class CoachCore(private val d: CoachDeps) {
     private val parser = IntentParser()
     private val desk = VoiceDesk(d.voice, d.settings, d.ui, d.elapsed, d.log)
     private val urgent = UrgentFlow(seedMs = d.elapsed.elapsedMs())
+    private val pin = StopPin()
     private val plans = PlanKeeper(seedMs = d.elapsed.elapsedMs())
     private val freshAir = FreshAirGate()
     private val memorySaver = MemorySaver()
@@ -300,7 +302,7 @@ class CoachCore(private val d: CoachDeps) {
                 doorOpened = door || (!waiting && doorWhileWaiting),
                 cabin = CabinState(hvacOn = d.hub.hvacOn, recirculation = d.hub.recirculation, setTempC = d.hub.setTempC),
                 route = d.candidates.withHorizon(navi.liveRoute(odo), navi, odo),
-                candidates = CoreRules.withExtras(ahead, urgent.extras(), pos),
+                candidates = CoreRules.withExtras(ahead, extras(), pos),
                 // 엔진에 넣을 때만 꺼낸다 (기다리는 틱에 꺼내면 그 말이 사라진다)
                 intent = if (waiting) null else if (urgent.takeEngineIntent()) VoiceIntent.UrgentRestroom else pendingIntents.removeFirstOrNull(),
                 cabinAutoAllowed = d.settings.autoFreshAir,
@@ -326,7 +328,7 @@ class CoachCore(private val d: CoachDeps) {
             lastOutput = out
             toMachine(PromptEvent.EngineTick(out.prompt, out.next, out.parked))
             autoFreshAir(out, el)
-            urgent.track(pos, out.next?.stop?.id, out.prompt?.stop?.id, el)
+            pin.track(pos, out.next?.stop?.id, out.prompt?.stop?.id, el)
         }
         if (freshAir.takeRevert(el, d.hub.recirculation)) revertFreshAir()
         desk.tick(el)
@@ -462,6 +464,8 @@ class CoachCore(private val d: CoachDeps) {
         val live = liveStop(e.stop.id) ?: e.stop
         log.i("goTo ${live.name} (request ${e.requestId}, parked=${e.parked})")
         goToStart = GoToStart(worlds.active.generation, urgentPick = urgent.onGoToStarted(live))
+        // 고른 곳은 내비가 확인하는 동안에도 엔진 후보에 남긴다 (급해 화면을 닫아도, 경로 후보가 아니어도)
+        pin.onGoToStarted(live)
         ui.update { copy(goToPending = live) }
         effect("goTo") {
             val outcome = try {
@@ -486,7 +490,8 @@ class CoachCore(private val d: CoachDeps) {
         log.i("goTo result: ${r.outcome} ${r.stop.name}")
         // 경로를 바꿨으면 내비를 곧바로 다시 읽는다 (경로 위 안내·검색 열기는 경로를 바꾸지 않았다)
         if (r.outcome == GoToOutcome.WAYPOINT_ADDED || r.outcome == GoToOutcome.ROUTE_STARTED) d.tracker.requestRefresh(routeChanged = true)
-        if (urgent.onGoToFinished(r.stop, ok, d.elapsed.elapsedMs())) publishUrgentClosed()
+        pin.onGoToFinished(r.stop, ok, d.elapsed.elapsedMs())
+        if (urgent.onGoToFinished(r.stop, ok)) publishUrgentClosed()
         // 성공한 들르기는 모두 엔진의 '들르기로 한 곳'이다. 세계가 바뀌기 전에 보낸 것은 지금 엔진의 일이 아니다
         val a = worlds.active
         if (!ok || start == null || start.generation != a.generation || lastInput == null) return
@@ -494,6 +499,13 @@ class CoachCore(private val d: CoachDeps) {
         // 여정에도 적는다 (맥박): 주행 중 재시작해도 이어받는다. 새로 고른 곳이 이어받던 곳을 대신한다
         worlds.onAccepted(r.stop.id)
         restoredAccept = null
+    }
+
+    /** 경로 후보에 더해 엔진에 넣을 것: 급해 요청이 찾은 가까운 화장실과 들르기로 한 곳 (대개 둘 다 없다) */
+    private fun extras(): List<StopCandidate> {
+        val near = urgent.extras()
+        val chosen = pin.extras()
+        return if (chosen.isEmpty()) near else if (near.isEmpty()) chosen else near + chosen
     }
 
     private fun noteAccepted(a: ActiveWorld, stop: StopCandidate, urgentPick: Boolean) {
@@ -515,6 +527,7 @@ class CoachCore(private val d: CoachDeps) {
         restoredAccept = null
         log.i("accepted stop restored: ${stop.name}")
         noteAccepted(a, stop, urgentPick = false)
+        pin.adopt(stop, el)
     }
 
     // ------------------------------------------------------------ 음성
@@ -638,6 +651,7 @@ class CoachCore(private val d: CoachDeps) {
                 val now = a.clock.now()
                 recorder.onWorldChanged(now, change.restorePark, lastSeenMs ?: now)
                 urgent.reset()
+                pin.reset()
                 plans.worldChanged()
                 crew.worldChanged()
                 restoredAccept = null
