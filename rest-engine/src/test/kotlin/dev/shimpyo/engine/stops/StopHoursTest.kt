@@ -121,6 +121,15 @@ class StopHoursTest {
         assertEquals(DayType.HOLIDAY, type("2026-06-06"), "현충일(토)은 공휴일 시간")
         assertEquals(DayType.WEEKDAY, type("2026-06-08"), "현충일은 대체공휴일 없음")
         assertEquals(DayType.WEEKDAY, type("2026-09-28"), "추석 연휴가 토요일과 겹쳐도 대체공휴일 없음")
+        // 2027 월력요항(우주항공청 2026-06-29 발표): 설날 2/6~8 + 대체 2/9(설날이 일요일), 부처님오신날 5/13, 추석 9/14~16
+        for (d in listOf("2027-02-06", "2027-02-07", "2027-02-08", "2027-02-09", "2027-05-13", "2027-09-14", "2027-09-15", "2027-09-16"))
+            assertEquals(DayType.HOLIDAY, type(d), d)
+        assertEquals(DayType.WEEKDAY, type("2027-02-10"), "설 연휴 다음 날")
+        assertEquals(DayType.WEEKDAY, type("2027-09-17"), "추석 연휴는 일요일과 겹치지 않아 대체공휴일 없음")
+        // 2027년부터 노동절(5/1)·제헌절(7/17)도 공휴일이고 대체공휴일이 있다 (둘 다 토요일 → 5/3, 7/19)
+        for (d in listOf("2027-05-01", "2027-05-03", "2027-07-17", "2027-07-19")) assertEquals(DayType.HOLIDAY, type(d), d)
+        assertEquals(DayType.WEEKDAY, type("2026-05-01"), "2026년 노동절은 관공서 공휴일이 아니다")
+        assertEquals(DayType.WEEKDAY, type("2026-07-17"), "2026년 제헌절은 공휴일이 아니다")
     }
 
     @Test

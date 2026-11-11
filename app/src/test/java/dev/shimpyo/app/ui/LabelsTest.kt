@@ -40,6 +40,7 @@ class LabelsTest {
         Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(60)),
         Reason("LAST_CHANCE_GAP", t.reasonLastChanceGap(50)),
         Reason("LAST_CHANCE_PREFERENCE", t.reasonLastChancePreference(50, 45)),
+        Reason("LAST_CHANCE_GROUP", t.reasonLastChanceGroup(4)),
         Reason("NEXT_ACCEPTED", t.reasonNextAccepted()),
         Reason("NEXT_NEAREST_RESTROOM", t.reasonNextNearestRestroom()),
         Reason("NEXT_REST", t.reasonNextRest()),
@@ -81,6 +82,9 @@ class LabelsTest {
         assertEquals("정체 1시간", Labels.shortReason(Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(60))))
         assertEquals("정체 1시간 30분", Labels.shortReason(Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(90))))
         assertEquals("공백 50분", Labels.shortReason(Reason("LAST_CHANCE_GAP", t.reasonLastChanceGap(50))))
+        // 여럿이 타서 앞당겨 묻는 이유는 인원과 함께 보인다
+        assertEquals("4명이 타서", Labels.shortReason(Reason("LAST_CHANCE_GROUP", t.reasonLastChanceGroup(4))))
+        assertEquals("여럿이 타서", Labels.shortReason(Reason("LAST_CHANCE_GROUP", "")))
         assertEquals("1시간 30분마다 걷기", Labels.shortReason(Reason("RESTROOM_CAP", t.reasonRestroomCap(Occupant("e", OccupantType.ELDERLY), 90))))
         assertEquals("카시트 1:30 상한", Labels.shortReason(Reason("RESTROOM_CAP", t.reasonRestroomCap(Occupant("b", OccupantType.INFANT), 90))))
         assertEquals("깬 지 16시간+", Labels.shortReason(Reason("FATIGUE_AWAKE_LONG", t.reasonFatigueAwakeLong(16))))

@@ -241,6 +241,8 @@ object Labels {
         "LAST_CHANCE_CONGESTION" -> durationIn(r.text)?.let { chipWithDuration("정체 ", it, "") } ?: "정체 전 마지막"
         "LAST_CHANCE_GAP" -> durationIn(r.text)?.let { chipWithDuration("공백 ", it, "") } ?: "공백 전 마지막"
         "LAST_CHANCE_PREFERENCE" -> "기준보다 긴 공백"
+        // 게이지(가장 급한 한 사람)는 넉넉한데 여럿이 타서 앞당겨 묻는 경우: 왜 묻는지 보인다 (엔진 GroupNeedTest, 감사 O6)
+        "LAST_CHANCE_GROUP" -> firstNumber(r.text, "명")?.let { "${it}명이 타서" } ?: "여럿이 타서"
         "NEXT_REST" -> "휴식 권유"
         "NEXT_MEAL" -> "식사 가능"
         "URGENT_OPEN_24H" -> "24시간"

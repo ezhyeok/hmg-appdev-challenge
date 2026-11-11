@@ -79,11 +79,19 @@ internal fun restroomLevel(minutes: Int, c: CoachConfig): Level = when {
  * 탑승자별 화장실 시계와 필요 곡선.
  *
  * - 게이지(화면) = 탑승자 중 '필요 확률 0.5까지 남은 분'이 가장 짧은 사람의 값 (SPEC 4.1). 연료계처럼 1분에 1분씩 준다.
+ *   "7살 아이 기준 49분"처럼 누구 때문인지와 함께 읽히는 값이다.
  *   필요가 시작돼도 말없이 참는 경우가 많아(배뇨의 65%는 요의 없이, AI §3-A) '아직 말이 없다'를 증거로 쓰지 않는다.
- * - 판단(마지막 기회·피트스톱) = 같은 곡선의 더 이른 지점: 탑승자마다 '필요 확률 0.3까지 남은 분' 중 가장 짧은 값.
- *   게이지와 같은 사람·같은 곡선이라 게이지와 마감의 차이는 그 사람의 Q(0.5) − Q(0.3)(어른 약 38분, 7살 아이 약 26분)로
- *   탑승 인원과 상관없이 일정하다. 예전에는 '누군가 필요해질 확률' 1 − Π S_i로 계산해 사람이 많을수록 마감이 게이지보다
- *   훨씬 일러졌다 (어른 2명: 게이지 66분 OK일 때 마감, 8명: 102분일 때. 감사 O6).
+ * - 판단 마감(마지막 기회·피트스톱) = 앞으로 Δ분 안에 탑승자 중 **누군가** 필요해질 확률 P(Δ) = 1 − Π S_i(e_i + Δ)가
+ *   0.3에 닿는 Δ (e_i: 마지막 화장실 뒤 지난 시간, 탑승자끼리 독립. AI §8-1 '탑승자 묶음', §8-2). 차는 한 사람만 필요해도
+ *   서야 하므로, 긴 공백 앞에서 "다음 기회까지 버티지 못할 확률"은 한 사람이 아니라 묶음의 확률이다. 혼자 타면 그 사람의
+ *   Q(0.3) − e와 같고 여럿이면 더 이르다 (어른 한 명 112분, 둘 83분, 넷 63분).
+ * - 게이지는 한 사람 기준, 마감은 묶음 기준인 이유 (2026-11-12 시뮬레이션, 조건마다 1,000 여정):
+ *   둘 다 한 사람 기준이면 어른 둘이 탔을 때 '필요 확률 30%' 마감에서 실제로 누군가 필요할 확률이 51%(1 − 0.7²)가 되어
+ *   명절 정체의 위기 비율이 14.1%로 오른다(묶음 마감은 12.0%). 둘 다 묶음 기준이면 위기는 같은데(11.9%) 게이지가 일찍 바닥나
+ *   막히지 않는 길에서 질문이 1.7 → 3.1회로 늘고, 아이 동승 조건은 오히려 나빠진다(13.1 → 14.6%). 공백이 없는 길에서는
+ *   마감이 일러도 물을 일이 없으므로 묶음 확률은 '긴 공백 앞'에서만 일한다.
+ * - 그래서 여럿이 타면 게이지가 넉넉해 보이는데도 마지막 기회를 물을 수 있다(감사 O6: 어른 2명은 게이지 66분일 때 마감).
+ *   그 경우는 이유에 LAST_CHANCE_GROUP('여럿이 타서')을 붙여 화면이 설명한다 (CoachEngine, [soloDeadlineMin]).
  * - 정차 간 상한: 어르신·임신부 걷기 2시간, 영아 카시트 2시간은 확률과 상관없이 문턱의 상한으로 건다 (AI §9-1).
  * - 음성으로 필요를 알린 사람은 바로 0(NOW).
  */
@@ -226,11 +234,11 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
     }
 
     /**
-     * 판단용 마감 (분): 탑승자마다 필요 확률이 p에 닿을 때까지 남은 시간(정차 간 상한 포함) 중 가장 짧은 것. 음성 요청이 있으면 0.
-     * 화면 게이지(같은 사람의 p = 0.5)보다 이르고, 차이는 그 사람의 곡선만으로 정해진다 (클래스 설명).
-     * fromReset이면 모두 방금 화장실에 다녀온 상태(e_i = 0)로 계산한다 (피트스톱의 정차 뒤 구간). 탑승자가 없으면 null.
+     * 한 사람씩만 볼 때의 마감 (분): 탑승자마다 필요 확률이 p에 닿을 때까지 남은 시간(정차 간 상한 포함) 중 가장 짧은 것.
+     * 음성 요청이 있으면 0. [deadlineMin]의 위 한계이고, 묶음 확률 때문에 마지막 기회가 앞당겨졌는지 가리는 데 쓴다.
+     * fromReset이면 모두 방금 화장실에 다녀온 상태(e_i = 0)로 계산한다. 탑승자가 없으면 null.
      */
-    fun deadlineMin(mono: Long, p: Double, fromReset: Boolean = false): Double? {
+    fun soloDeadlineMin(mono: Long, p: Double, fromReset: Boolean = false): Double? {
         if (list.isEmpty()) return null
         var best = Double.POSITIVE_INFINITY
         for (t in list) {
@@ -240,6 +248,37 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
             if (single < best) best = single
         }
         return maxOf(0.0, best)
+    }
+
+    /**
+     * 판단용 마감 (분): 누군가 필요해질 확률 1 − Π S_i(e_i + Δ)가 p에 닿는 Δ (클래스 설명). 한 사람이면 [soloDeadlineMin]과
+     * 같고, 여럿이면 그 이하다. 상한·음성 요청도 반영한다.
+     * fromReset이면 모두 방금 화장실에 다녀온 상태로 계산한다 (피트스톱의 정차 뒤 구간). 탑승자가 없으면 null.
+     */
+    fun deadlineMin(mono: Long, p: Double, fromReset: Boolean = false): Double? {
+        val hi = soloDeadlineMin(mono, p, fromReset) ?: return null
+        if (hi <= 0.0 || list.size == 1) return hi
+        // P(Δ)는 단조 증가하고 묶음 확률은 각자 확률 이상이므로 답은 [0, hi]에 있다.
+        // 상한이 걸린 사람 때문에 hi에서도 p에 못 미치면 hi(상한)가 답이다
+        if (anyNeedProb(mono, hi, fromReset) <= p) return hi
+        if (anyNeedProb(mono, 0.0, fromReset) >= p) return 0.0
+        var lo = 0.0
+        var up = hi
+        repeat(BISECTIONS) {
+            val mid = (lo + up) / 2
+            if (anyNeedProb(mono, mid, fromReset) < p) lo = mid else up = mid
+        }
+        return lo
+    }
+
+    /** 앞으로 deltaMin분 안에 탑승자 중 누군가 필요해질 확률 (독립 가정) */
+    private fun anyNeedProb(mono: Long, deltaMin: Double, fromReset: Boolean): Double {
+        var surv = 1.0
+        for (t in list) {
+            val e = if (fromReset) 0.0 else elapsedMin(t, mono)
+            surv *= t.posterior.survival(e + deltaMin)
+        }
+        return 1.0 - surv
     }
 
     /** 음성 요청 유지 시간이 지나면 푼다 (정차 판정을 놓쳤을 때 NOW에 갇히지 않게) */
@@ -367,6 +406,9 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
     }
 
     companion object {
+        /** 이분법 횟수. 구간이 4시간이어도 오차가 0.001초 아래다 (마감은 1초에 한 번 계산한다) */
+        private const val BISECTIONS = 24
+
         val SENSITIVE: Set<OccupantType> = setOf(
             OccupantType.CHILD, OccupantType.INFANT, OccupantType.PREGNANT, OccupantType.ELDERLY,
             OccupantType.OAB, OccupantType.IBS, OccupantType.DOG,

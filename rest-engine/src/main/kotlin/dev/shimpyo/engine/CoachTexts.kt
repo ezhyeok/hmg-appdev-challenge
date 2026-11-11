@@ -222,6 +222,7 @@ open class CoachTexts {
     open fun reasonLastChanceCongestion(congestionMin: Int): String =
         "이곳을 지나면 ${duration(congestionMin)} 정체 구간에 화장실이 없어요"
     open fun reasonLastChanceGap(gapMin: Int): String = "이곳을 지나면 다음 화장실까지 ${duration(gapMin)} 걸려요"
+    open fun reasonLastChanceGroup(occupants: Int): String = "${occupants}명이 타서, 그 사이 누군가 필요해질 수 있어요"
     open fun reasonLastChancePreference(gapMin: Int, limitMin: Int): String =
         "다음 화장실까지 ${duration(gapMin)}, 기준 ${duration(limitMin)}보다 길어요"
     open fun reasonNextRest(): String = "쉬어 가기 좋은 가장 가까운 곳이에요"
