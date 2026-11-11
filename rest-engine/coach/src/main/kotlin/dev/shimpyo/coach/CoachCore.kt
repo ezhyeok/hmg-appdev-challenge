@@ -340,6 +340,7 @@ class CoachCore(private val d: CoachDeps) {
         }
         lastInput = input
         if (out != null) {
+            logNext(out)
             lastOutput = out
             runEffects(machine.on(PromptEvent.EngineTick(out.prompt, out.next, out.parked), ctx()))
             autoFreshAir(out, el)
@@ -351,6 +352,20 @@ class CoachCore(private val d: CoachDeps) {
         refreshPlan(force = false)
         publish(out, input, navi, a.world, ahead)
         autosaveMemory(el)
+    }
+
+    /** 다음 추천이 바뀌거나 도착 예상이 1분 넘게 바뀌면 남긴다 (기기에서 정체가 도착 시간에 주는 영향을 확인하는 근거) */
+    private fun logNext(out: CoachOutput) {
+        val n = out.next?.stop
+        val prev = lastOutput?.next?.stop
+        val eta = n?.etaS
+        if (n?.id == prev?.id && (eta == null || prev?.etaS?.let { kotlin.math.abs(it - eta) < 60.0 } == true)) return
+        if (n == null) {
+            if (prev != null) log.i("next: none")
+            return
+        }
+        val d = (n.routeDistanceM ?: n.straightDistanceM)?.let { "${it.toLong()}m" } ?: "?"
+        log.i("next: ${n.name} $d eta=${eta?.let { "${it.toLong()}s" } ?: "?"} (${out.next?.reasons?.joinToString(",") { it.code }})")
     }
 
     private fun publish(out: CoachOutput?, input: CoachInput, navi: NaviSnapshot, world: CoachWorld, ahead: List<StopCandidate>) {
