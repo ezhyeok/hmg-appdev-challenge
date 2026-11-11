@@ -117,6 +117,8 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
         if (line != lastCongestionLog) {
             lastCongestionLog = line
             Log.i("Shimpyo", line)
+            // 모든 항목 (offset/거리/늘어난 시간/평균 속도): 엔진 도착 시간 영향을 서버에서 다시 계산할 수 있게
+            Log.i("Shimpyo", "congestion items: " + items.joinToString(" ") { c -> "%.0f/%.0f/%d/%.1f".format(c.offset, c.distance, c.trafficCongestionTime, c.avrSpeed) })
         }
     }
 
