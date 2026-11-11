@@ -73,6 +73,9 @@ class OccupantEditTest {
         val odd = driver.copy(intervalOverrideMin = 75.0)
         assertEquals("평소 간격 · 1시간 15분", intervalButtonLabel(odd))
         assertTrue(INTERVAL_CHOICES.none { intervalSelected(odd, it) })
+        // 자동이 무엇인지는 정해 둔 값과 관계없이 유형 기본값으로 말한다
+        assertEquals("자동은 어른 기본값(2시간 30분)이에요", autoIntervalHint(set))
+        assertEquals("자동은 아이 기본값(1시간 45분)이에요", autoIntervalHint(kid))
     }
 
     @Test

@@ -58,8 +58,15 @@ fun driveRestriction(ux: UxRestrictions): DriveRestriction = when (ux) {
     is UxRestrictions.Unknown -> DriveRestriction.UNKNOWN
 }
 
-/** RED 단계 자리 표시 */
-fun noticeText(notice: String?, restriction: DriveRestriction): String? = notice
+/**
+ * 코치가 말 대신 화면에 잠깐 보이라고 올린 알림(CoachUiState.notice)의 화면 문구. 음성 안내를 껐을 때 "얼마나 남았어"의 대답이
+ * 말로도 화면으로도 나오지 않던 것을 화면으로 알린다 (리뷰 R-F4). 띄우고 내리는 때는 코치가 정한다(몇 초 뒤 지운다).
+ * 주행 중(모를 때 포함)에는 다른 주행 화면 문구처럼 글자 수 제한(LIMIT_STRING_LENGTH)을 지킨다. 없거나 비었으면 null
+ */
+fun noticeText(notice: String?, restriction: DriveRestriction): String? {
+    val text = notice?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return if (restriction.driving) limitChars(text, restriction.maxChars) else text
+}
 
 /** 주행 중 문구 길이 제한. 넘치면 말줄임표로 자른다 */
 fun limitChars(text: String, max: Int): String = if (text.length <= max || max < 2) text else text.take(max - 1) + "…"

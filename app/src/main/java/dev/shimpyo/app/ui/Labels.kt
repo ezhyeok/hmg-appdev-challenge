@@ -222,6 +222,9 @@ object Labels {
         "RESTROOM_CAP" -> durationIn(r.text)?.let { d ->
             if (r.text.contains("카시트")) chipWithDuration("카시트 ", d, " 상한") else chipWithDuration("", d, "마다 걷기")
         } ?: "정차 간격 상한"
+        // 맥락 요인 (엔진 RestroomNeedModel): 식사 뒤에는 조금 일찍, 밤에 잠든 아이는 여유를 더 둔다
+        "RESTROOM_AFTER_MEAL" -> "식사 뒤"
+        "RESTROOM_ASLEEP" -> who?.let { fitChip("$it 자는 중", "자는 중") } ?: "자는 중"
         "FATIGUE_VOICED" -> "졸리다고 하심"
         "FATIGUE_STRONG" -> "커피·낮잠 권장"
         "FATIGUE_DRIVING" -> durationIn(r.text)?.let { "연속 ${if (it >= 60) hhmm(it) else "${it}분"}" } ?: "연속 운전"
@@ -237,6 +240,9 @@ object Labels {
         "CABIN_COOL_DOWN" -> "온도 낮추기 권장"
         "NEXT_ACCEPTED" -> "들르기로 함"
         "NEXT_NEAREST_RESTROOM" -> "가장 빨리 가는 곳"
+        // 말로 한 요청("화장실 가고 싶대", 수유·반려견)에 답한 곳. 질문 카드에서는 맥락 줄이 이 말을 한다
+        "NEXT_REQUESTED_RESTROOM" -> "요청하신 화장실"
+        "NEXT_REQUESTED_CARE" -> "요청하신 곳"
         // 맥락 줄이 이미 "정체 전 마지막 화장실"·"화장실 공백 전 마지막 기회"라서 칩은 길이만 보인다
         "LAST_CHANCE_CONGESTION" -> durationIn(r.text)?.let { chipWithDuration("정체 ", it, "") } ?: "정체 전 마지막"
         "LAST_CHANCE_GAP" -> durationIn(r.text)?.let { chipWithDuration("공백 ", it, "") } ?: "공백 전 마지막"

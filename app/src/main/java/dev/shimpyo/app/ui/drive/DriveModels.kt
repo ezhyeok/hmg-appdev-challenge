@@ -5,6 +5,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.beyondDestination
 import dev.shimpyo.app.ui.components.ShimpyoIcons
+import dev.shimpyo.app.ui.displayJams
 import dev.shimpyo.app.ui.limitChars
 import dev.shimpyo.app.ui.livePlan
 import dev.shimpyo.app.ui.plannedDistanceText
@@ -48,9 +49,14 @@ fun restroomGauge(state: CoachUiState): GaugeModel {
     )
 }
 
-/** 화장실 이유 한 줄: 직접 요청 > 정차 간 상한(숫자를 정한 이유) > 누구 기준 > 개인 기록 > 설정 필요 */
+/**
+ * 화장실 이유 한 줄: 직접 요청 > 정차 간 상한(숫자를 정한 이유) > 자는 중 > 식사 뒤 > 누구 기준 > 개인 기록 > 설정 필요.
+ * '누구 기준'은 늘 붙는 기본 이유라, 숫자가 평소와 다른 이유(잠든 아이는 여유를 더, 식사 뒤에는 조금 일찍)를 먼저 보인다
+ */
 fun restroomReason(reasons: List<Reason>, who: String?): String? {
-    val order = listOf("RESTROOM_VOICED", "RESTROOM_CAP", "RESTROOM_ELAPSED", "RESTROOM_PERSONAL", "RESTROOM_NONE")
+    val order = listOf(
+        "RESTROOM_VOICED", "RESTROOM_CAP", "RESTROOM_ASLEEP", "RESTROOM_AFTER_MEAL", "RESTROOM_ELAPSED", "RESTROOM_PERSONAL", "RESTROOM_NONE",
+    )
     return reasons.sortedBy { r -> order.indexOf(r.code).let { if (it < 0) order.size else it } }
         .firstNotNullOfOrNull { Labels.shortReason(it, who) }
 }
@@ -161,7 +167,7 @@ private const val SHORT_QUESTION_CHARS = 30
 private const val LEAD_CHARS = 24
 
 /**
- * 추천 카드. 우선순위: 서비스 멈춤 > 질문 > 경유지 실패 > (정차 중) 다음 계획 > 엔진 추천 > 경로 앞 첫 화장실 > 빈 상태.
+ * 추천 카드. 우선순위: 서비스 멈춤 > 질문 > 내비에 넣는 중 > 경유지 실패 > (정차 중) 다음 계획 > 엔진 추천 > 경로 앞 첫 화장실 > 빈 상태.
  * 칩은 주행 중 [DriveLimits.MAX_REASON_CHIPS]개, 정차 중 3개까지. 문구는 주행 제한의 글자 수([maxChars])로 자른다.
  */
 fun stopCard(state: CoachUiState, driving: Boolean, maxChars: Int = DriveLimits.MAX_STRING_LENGTH): StopCardModel {
@@ -169,10 +175,12 @@ fun stopCard(state: CoachUiState, driving: Boolean, maxChars: Int = DriveLimits.
     val drivenBy = state.occupants.firstOrNull { it.id == state.restroom?.drivenBy }
     val who = drivenBy?.let { Labels.publicName(it) }
     val prompt = state.prompt
+    val pending = state.goToPending
     val failed = failedGoTo(state)
     val card = when {
         !state.serviceRunning -> serviceCard(state)
         prompt != null -> promptCard(prompt, state, maxChips, who)
+        pending != null -> pendingGoToCard(pending, state)
         failed != null -> failedGoToCard(failed)
         !driving && state.parked && livePlan(state).isNotEmpty() -> planCard(state, maxChips)
         state.next != null -> recommendationCard(state.next!!, state, maxChips, who)
@@ -202,6 +210,8 @@ private fun serviceCard(state: CoachUiState): StopCardModel {
 /**
  * 질문 카드. 맥락과 칩은 질문을 띄운 때의 이유(promptReasons, 코치가 담는다)로 정한다: 진입로 2km 안에서 엔진 추천이
  * 다음 곳으로 넘어가도 "화장실 공백 전 마지막 기회"가 "가까운 화장실"로 바뀌지 않게 (UI 감사 #6).
+ * 이유가 비었으면(띄울 때 추천이 다른 곳이었다) 지금 추천(next)의 이유로 채우지 않는다: 1초 뒤 추천이 넘어오면 질문 도중에
+ * 맥락 줄과 칩이 바뀌었다(닫힘 검증 UI-6). 급해 질문만 결과 목록의 이유(영업·방향)를 칩으로 쓴다.
  * 거리는 지금 값만 쓴다: 같은 곳의 엔진 추천(next) → 질문 장소의 지금 후보(promptStop). 둘 다 없으면 물은 때의 거리를
  * 지금 거리처럼 보이지 않고 위치("경로 위")만 둔다 (UI 감사 #1: 지나친 곳에 '3.9km'가 남았다).
  */
@@ -209,25 +219,13 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     val stop = prompt.stop
     val next = state.next
     val reasons: List<Reason> = state.promptReasons.ifEmpty {
-        when {
-            stop == null -> emptyList()
-            next != null && next.stop.id == stop.id -> next.reasons
-            else -> state.urgent?.firstOrNull { it.stop.id == stop.id }?.why.orEmpty()
-        }
+        if (stop != null && prompt.kind == PromptKind.URGENT_RESULT) state.urgent?.firstOrNull { it.stop.id == stop.id }?.why.orEmpty() else emptyList()
     }
     val restroomKind = prompt.kind == PromptKind.LAST_CHANCE || prompt.kind == PromptKind.URGENT_RESULT
     val level = (if (restroomKind) state.restroom?.level else state.fatigue?.level) ?: Level.WATCH
     val codes = reasons.map { it.code }
     val context = when (prompt.kind) {
-        PromptKind.LAST_CHANCE -> when {
-            "LAST_CHANCE_CONGESTION" in codes -> "정체 전 마지막 화장실"
-            "LAST_CHANCE_GAP" in codes || "LAST_CHANCE_PREFERENCE" in codes -> "화장실 공백 전 마지막 기회"
-            "NEXT_NEAREST_RESTROOM" in codes -> "가까운 화장실"
-            // 이유를 모르면 문장으로 고른다. 마지막 기회 질문은 정체 아니면 공백이다
-            prompt.speech.contains("정체") -> "정체 전 마지막 화장실"
-            prompt.speech.contains("여유가 거의 없어요") -> "가까운 화장실"
-            else -> "화장실 공백 전 마지막 기회"
-        }
+        PromptKind.LAST_CHANCE -> restroomQuestionContext(codes, prompt.speech)
         PromptKind.REST_SUGGESTION -> if ("NEXT_MEAL" in codes || prompt.speech.contains("식사")) "식사할 곳" else "쉬어 갈 곳"
         PromptKind.URGENT_RESULT -> "가장 빠른 화장실"
         // 상태 확인은 운전 패턴 편차 때문일 수도, 연속 운전 시간·졸음 시간대 때문일 수도 있다 (CoachTexts.checkIn)
@@ -242,7 +240,8 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
         else -> ShimpyoIcons.Wc
     }
     val chips = buildList {
-        reasons.forEach { r -> Labels.shortReason(r, who)?.let(::add) }
+        // 맥락 줄이 이미 말한 이유(요청하신 화장실 등)는 칩으로 되풀이하지 않는다
+        reasons.forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.let(::add) }
         if (restroomKind) {
             Labels.companionChip(state.occupants.firstOrNull { it.id == state.restroom?.drivenBy })?.let(::add)
         } else if (prompt.kind != PromptKind.INFO) {
@@ -255,6 +254,62 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     val live = next?.stop?.takeIf { it.id == stop.id } ?: state.promptStop?.takeIf { it.id == stop.id }
     val meta = if (live != null) Labels.stopMeta(live) else Labels.stopPosition(stop)
     return StopCardModel(context, stop.name, meta, chips, icon, askingLevel = level)
+}
+
+/** 맥락 줄 문구 */
+private const val CONTEXT_JAM = "정체 전 마지막 화장실"
+private const val CONTEXT_GAP = "화장실 공백 전 마지막 기회"
+private const val CONTEXT_NEAR = "가까운 화장실"
+private const val CONTEXT_REQUESTED_RESTROOM = "요청하신 화장실"
+private const val CONTEXT_REQUESTED_CARE = "요청하신 곳"
+
+/** 맥락 줄이 뜻을 말해 주는 이유 코드: 같은 말을 칩으로 되풀이하지 않는다 */
+private val CONTEXT_LINE_CODES = setOf("NEXT_ACCEPTED", "NEXT_REQUESTED_RESTROOM", "NEXT_REQUESTED_CARE")
+
+/**
+ * 화장실 질문(PromptKind.LAST_CHANCE)의 맥락 줄. 엔진은 이 종류로 다섯 가지 문장을 낸다(CoachTexts): 정체 전 마지막,
+ * 공백 전 마지막, 여유가 거의 없을 때 가까운 곳, "화장실 가고 싶대"의 답, 수유·반려견 요청의 답. 그래서 종류만 보고
+ * '마지막 기회'라고 하면 틀린 말이 된다 (닫힘 검증 UI-N5: 이유가 비면 요청의 답에도 '화장실 공백 전 마지막 기회'라고 했다).
+ *
+ * 1. 띄운 때의 이유에 LAST_CHANCE_*가 있으면 그것으로 (정체가 먼저).
+ * 2. 없으면 엔진의 마지막 기회 문장인지 본다: 게이지가 NOW일 때 엔진은 "정체 전 마지막 화장실이에요"라고 물으면서 이유는
+ *    NEXT_NEAREST_RESTROOM 하나만 줬다(UI-6). 말한 문장과 맥락 줄이 어긋나지 않게 문장이 요청·가까운 곳 코드보다 먼저다.
+ * 3. 요청에 답한 곳(NEXT_REQUESTED_*), 가까운 곳(NEXT_NEAREST_RESTROOM) 코드.
+ * 4. 이유가 없으면 나머지 세 문장으로. 아는 문장이 아니면 '다음 화장실': 마지막 기회라고 하지 않는다.
+ */
+internal fun restroomQuestionContext(codes: List<String>, speech: String): String = when {
+    "LAST_CHANCE_CONGESTION" in codes -> CONTEXT_JAM
+    codes.any { it.startsWith("LAST_CHANCE_") } -> CONTEXT_GAP
+    // 장소 이름에 들어갈 수 있는 낱말("신정체육공원")이 아니라 엔진 문장의 구절로 가린다
+    speech.contains("정체 전 마지막") || speech.contains("정체가 있어요") -> CONTEXT_JAM
+    speech.contains("동안 화장실이 없어요") -> CONTEXT_GAP
+    "NEXT_REQUESTED_RESTROOM" in codes -> CONTEXT_REQUESTED_RESTROOM
+    "NEXT_REQUESTED_CARE" in codes -> CONTEXT_REQUESTED_CARE
+    "NEXT_NEAREST_RESTROOM" in codes -> CONTEXT_NEAR
+    speech.contains("여유가 거의 없어요") -> CONTEXT_NEAR
+    speech.startsWith("다음 화장실은") -> CONTEXT_REQUESTED_RESTROOM
+    speech.contains("쉬어 갈 수 있어요") -> CONTEXT_REQUESTED_CARE
+    else -> "다음 화장실"
+}
+
+/** 내비에 넣는 중일 때의 맥락 문구. 움직이는 표시 없이 글자로만 알린다 (주행 중 애니메이션 최소화) */
+const val GOTO_PENDING_CONTEXT = "내비에 넣는 중…"
+
+/**
+ * 들르기를 시작해 내비의 확인을 기다리는 동안 (CoachUiState.goToPending). 에뮬레이터에서 경유지 추가 확인이 19.5초 걸렸다:
+ * 그동안 '들르기로 한 곳'이나 지난 실패 카드가 아니라 진행을 보이고 [다시 시도]를 두지 않는다 (닫힘 검증 UI-N2).
+ * 거리는 지금 값만: 같은 곳의 추천 → 앞쪽 후보. 없으면 위치만 둔다 (넣기 시작한 때의 거리를 지금 거리처럼 보이지 않는다)
+ */
+private fun pendingGoToCard(stop: StopCandidate, state: CoachUiState): StopCardModel {
+    val live = state.next?.stop?.takeIf { it.id == stop.id } ?: state.ahead.firstOrNull { it.id == stop.id }
+    return StopCardModel(
+        context = GOTO_PENDING_CONTEXT,
+        title = stop.name,
+        meta = if (live != null) Labels.stopMeta(live) else Labels.stopPosition(stop),
+        chips = emptyList(),
+        icon = ShimpyoIcons.Navigation,
+        askingLevel = null,
+    )
 }
 
 /**
@@ -309,7 +364,8 @@ fun goToContext(outcome: GoToOutcome): String = when (outcome) {
 }
 
 private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChips: Int, who: String?): StopCardModel {
-    val code = next.reasons.firstOrNull()?.code
+    val codes = next.reasons.map { it.code }
+    val code = codes.firstOrNull()
     val result = state.goToResult?.takeIf { it.stop.id == next.stop.id && it.outcome != GoToOutcome.FAILED }
     val context = when {
         result != null -> goToContext(result.outcome)
@@ -317,15 +373,17 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
         code == "NEXT_ACCEPTED" -> "들르기로 한 곳"
         code == "NEXT_REST" -> "쉬어 갈 곳"
         code == "NEXT_MEAL" -> "식사할 곳"
-        code == "LAST_CHANCE_CONGESTION" -> "정체 전 마지막 화장실"
-        code == "LAST_CHANCE_GAP" || code == "LAST_CHANCE_PREFERENCE" -> "화장실 공백 전 마지막 기회"
+        code == "NEXT_REQUESTED_RESTROOM" -> CONTEXT_REQUESTED_RESTROOM
+        code == "NEXT_REQUESTED_CARE" -> CONTEXT_REQUESTED_CARE
+        "LAST_CHANCE_CONGESTION" in codes -> CONTEXT_JAM
+        codes.any { it.startsWith("LAST_CHANCE_") } -> CONTEXT_GAP
         else -> if (state.guiding) "다음 화장실" else "진행 방향 가까운 화장실"
     }
     val restroom = Purpose.RESTROOM in next.purposes || next.purposes.isEmpty()
     val drivenBy = state.occupants.firstOrNull { it.id == state.restroom?.drivenBy }
     val chips = buildList {
-        // 들르기로 한 곳은 맥락 줄이 이미 말한다 ("들르기로 한 곳"/결과): 같은 말을 칩으로 되풀이하지 않는다
-        next.reasons.forEach { r -> if (r.code != "NEXT_ACCEPTED") Labels.shortReason(r, who)?.let(::add) }
+        // 들르기로 한 곳·요청하신 곳은 맥락 줄이 이미 말한다: 같은 말을 칩으로 되풀이하지 않는다
+        next.reasons.forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.let(::add) }
         if (restroom) Labels.companionChip(drivenBy)?.let(::add)
         if (Purpose.REST in next.purposes) state.fatigue?.reasons?.let(::fatigueReason)?.let(::add)
     }.distinct().take(maxChips)
@@ -351,11 +409,12 @@ private fun nearestCard(a: StopCandidate, state: CoachUiState): StopCardModel {
 
 /**
  * 그곳까지 가는 길에 정체가 있으면: 정체가 그 앞에서 끝나면 "정체 뒤", 그곳을 지나서도 이어지면 "정체 구간 안".
- * 차가 이미 정체 안(시작 거리 < 0)이어도 센다 (예전에는 앞에서 시작하는 정체만 봤다, 재검토 #17)
+ * 차가 이미 정체 안(시작 거리 < 0)이어도 센다 (예전에는 앞에서 시작하는 정체만 봤다, 재검토 #17).
+ * 화면에 정체로 보이는 것만 센다(displayJams): 2km 앞의 느린 200m 때문에 20km 앞 휴게소에 '정체 뒤'가 붙었다 (2026-11-12)
  */
 private fun jamChip(a: StopCandidate, state: CoachUiState): String? {
     val d = a.routeDistanceM ?: return null
-    val jams = state.congestion.filter { it.startDistanceM < d && it.startDistanceM + it.lengthM > 0.0 }
+    val jams = displayJams(state.congestion).filter { it.startDistanceM < d }
     if (jams.isEmpty()) return null
     return if (jams.any { it.startDistanceM + it.lengthM > d }) "정체 구간 안" else "정체 뒤"
 }
@@ -412,7 +471,8 @@ fun driveActions(state: CoachUiState, driving: Boolean): DriveActions {
     return when {
         // 서비스가 멈췄으면 받을 사람이 없는 버튼을 두지 않는다
         state.serviceRunning && prompt != null -> DriveActions.Answer(prompt, acceptLabel(prompt, state.cabinSupported))
-        state.serviceRunning && failed != null -> DriveActions.RetryGoTo(failed.stop)
+        // 내비에 넣는 중에는 [다시 시도]를 두지 않는다: 또 보내면 경유지가 둘 들어간다 (닫힘 검증 UI-N2)
+        state.serviceRunning && failed != null && state.goToPending == null -> DriveActions.RetryGoTo(failed.stop)
         !driving -> DriveActions.Parked
         else -> DriveActions.None
     }

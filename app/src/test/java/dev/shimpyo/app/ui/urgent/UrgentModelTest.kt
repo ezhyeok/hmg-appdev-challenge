@@ -1,5 +1,6 @@
 package dev.shimpyo.app.ui.urgent
 
+import dev.shimpyo.app.ui.GoToBusy
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.UrgentState
 import dev.shimpyo.engine.Facilities
@@ -163,6 +164,15 @@ class UrgentModelTest {
         // 멈춘 코치의 남은 질문에는 받을 사람이 없다
         assertNull(urgentQuestion(on.copy(serviceRunning = false, prompt = other)))
         assertNull(urgentQuestion(on))
+    }
+
+    @Test
+    fun aGoToForAStopThatIsNotOnTheListIsExplainedAboveIt() {
+        // 닫힘 검증 UI-N2: 내비에 넣는 동안 결과 카드는 모두 꺼진다. 보이는 카드가 아닌 곳(질문에 '응'한 곳)을 넣는 중이면 이유를 한 줄로 보인다
+        assertEquals("옥산휴게소를 내비에 넣는 중…", busyElsewhere(GoToBusy("oksan", "옥산휴게소(부산방향)"), listOf(r1)))
+        // 보이는 카드를 넣는 중이면 그 카드가 '넣는 중…'을 보인다
+        assertNull(busyElsewhere(GoToBusy("u1", r1.stop.name), listOf(r1)))
+        assertNull(busyElsewhere(null, listOf(r1)))
     }
 
     @Test

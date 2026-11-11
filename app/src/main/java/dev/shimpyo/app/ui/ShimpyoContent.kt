@@ -30,7 +30,9 @@ import dev.shimpyo.app.ui.components.PleosIconButton
 import dev.shimpyo.app.ui.components.PopupLayer
 import dev.shimpyo.app.ui.components.ShimpyoIcons
 import dev.shimpyo.app.ui.components.ToastLayer
+import dev.shimpyo.app.ui.components.DescribeModel
 import dev.shimpyo.app.ui.components.VoiceButton
+import dev.shimpyo.app.ui.components.describeModel
 import dev.shimpyo.app.ui.components.micModel
 import dev.shimpyo.app.ui.demo.DemoPanel
 import dev.shimpyo.app.ui.demo.demoTitle
@@ -88,8 +90,8 @@ private val MenuScreens = listOf(Screen.DRIVE, Screen.PLAN, Screen.OCCUPANTS, Sc
  *
  * 주행 제한([restriction], CarUxRestrictions를 화면이 스스로 구독한 값. 모르면 제한)이 켜지면 주행 화면과 급해 결과만 그린다.
  * 다른 화면에 있었다면 주행 화면으로 돌아오고, 제한을 실제로 읽었을 때만 토스트를 띄운다.
- * 각 화면의 입력 상태는 SaveableStateHolder에, 진행 중 요청(급해 번호, 넣는 중, 계획 계산 중)은 [ContentState]에 남아
- * 액티비티가 다시 만들어져도 이어진다.
+ * 각 화면의 입력 상태는 SaveableStateHolder에, 진행 중 요청(급해 번호, 방금 보낸 들르기, 계획 계산 중)은 [ContentState]에 남아
+ * 액티비티가 다시 만들어져도 이어진다. 들르기가 진행 중인지(내비에 넣는 중)는 코치 상태가 정한다([goToBusy]).
  *
  * 탐색 라이브러리 없이 화면 하나를 상태로 들고 있다. 급해 결과는 다른 화면 위에 덮는 한 단계 화면이다.
  */
@@ -143,6 +145,10 @@ fun ShimpyoContent(
             }
         }
     }
+    // 계획 화면이 보이는 동안만 코치가 계획을 고쳐 세운다. 다른 화면으로 가거나 주행을 시작하면(주행 화면만 그린다) 닫고,
+    // 다시 열면 이어서 요청한다 (리뷰 R-F12: 한 번 요청한 계획을 화면을 떠난 뒤에도 30초마다 다시 세웠다)
+    val planVisible = shown == Screen.PLAN
+    LaunchedEffect(planVisible, state.plan != null) { actions.planVisibility(planVisible) }
 
     // 급해: 요청 번호로 코치의 진행 상태를 짝짓는다 (UrgentModel). 답 기다림 시간 초과는 그 번호에만 붙이고 저장한다:
     // Boolean 하나로 두면 [다시 시도]로 새 번호를 보낸 첫 프레임에 앞 요청의 '초과'가 보이고, 다시 만들어지면 8초를 또 기다렸다
@@ -180,23 +186,18 @@ fun ShimpyoContent(
             ui.pickingId = null
         }
     }
-    LaunchedEffect(ui.pickingId) {
-        if (ui.pickingId != null) {
-            delay(GOTO_TIMEOUT_MS)
-            if (ui.pickingId != null) {
-                ui.pickingId = null
-                overlays.toast(NO_GOTO_RESULT)
-            }
-        }
-    }
-    LaunchedEffect(ui.goToSentId) {
-        if (ui.goToSentId != null) {
-            delay(GOTO_TIMEOUT_MS)
-            if (ui.goToSentId != null) {
-                ui.goToSentId = null
-                overlays.toast(NO_GOTO_RESULT)
-            }
-        }
+    // 들르기(내비에 넣기)가 진행 중인지는 코치가 정한다: goToPending이 있는 동안 넣기 버튼을 막고 진행을 보인다.
+    // 화면은 결과를 기다리는 시간을 재지 않는다 (닫힘 검증 UI-N2: 12초 제한이 19.5초 걸린 성공보다 먼저 '결과 없음'을 띄웠다).
+    val busy = goToBusy(state, ui.goToSentId)
+    // 화면이 보낸 것을 코치가 받지 않았을 때만(지난 질문에 한 대답처럼 들르기가 시작되지 않았다) 잠시 뒤 버튼을 다시 연다.
+    // 코치가 넣는 중이면 이 기다림은 돌지 않는다
+    val coachPendingId = state.goToPending?.id
+    LaunchedEffect(ui.goToSentId, coachPendingId) {
+        val sent = ui.goToSentId ?: return@LaunchedEffect
+        if (coachPendingId != null) return@LaunchedEffect
+        delay(GOTO_ACK_MS)
+        if (ui.goToSentId == sent) ui.goToSentId = null
+        if (ui.pickingId == sent) ui.pickingId = null
     }
     // 들르기·안내 결과 (코치의 goToResult): 기다리던 버튼을 풀고, 카드가 보여 주지 않는 결과는 토스트로 알린다
     val goTo = state.goToResult
@@ -238,7 +239,7 @@ fun ShimpyoContent(
                         view = urgent,
                         driving = driving,
                         maxItems = restriction.maxItems,
-                        pickingId = ui.pickingId,
+                        busy = busy,
                         mic = mic,
                         onMic = { actions.mic(mic) },
                         onPick = { actions.pick(it) },
@@ -300,18 +301,23 @@ fun ShimpyoContent(
                                     Screen.PLAN -> PlanScreen(
                                         state = state,
                                         planRequested = ui.planRequested,
-                                        goToPendingId = ui.goToSentId,
+                                        busy = busy,
                                         onMakePlan = { actions.makePlan() },
                                         onGoTo = { actions.goTo(it) },
                                     )
-                                    Screen.OCCUPANTS -> OccupantsScreen(
-                                        occupants = state.occupants,
-                                        drivenBy = state.restroom?.drivenBy,
-                                        voice = state.voice,
-                                        prefs = host.prefs,
-                                        onSetOccupants = { host.send(UiCommand.SetOccupants(it)) },
-                                        onDescribe = { host.send(UiCommand.DescribeOccupants) },
-                                    )
+                                    Screen.OCCUPANTS -> {
+                                        val describe = describeModel(state.voice, state.ttsAvailable, state.sttAvailable, voiceGuidance)
+                                        OccupantsScreen(
+                                            occupants = state.occupants,
+                                            drivenBy = state.restroom?.drivenBy,
+                                            asleepIds = state.asleepOccupantIds,
+                                            describe = describe,
+                                            prefs = host.prefs,
+                                            onSetOccupants = { host.send(UiCommand.SetOccupants(it)) },
+                                            onSetAsleep = { id, asleep -> actions.setAsleep(id, asleep) },
+                                            onDescribe = { actions.describe(describe) },
+                                        )
+                                    }
                                     Screen.HISTORY -> HistoryScreen(state.history, lastStop = state.lastStop)
                                     Screen.SETTINGS -> SettingsScreen(
                                         status = SettingsStatus(state.serviceRunning, state.status, state.llm, state.cabinSupported),
@@ -336,7 +342,11 @@ fun ShimpyoContent(
                     }
                 }
                 PopupLayer(overlays)
-                ToastLayer(overlays, topInset = if (urgent != null || shown == Screen.DRIVE) layout.headerHeight(driving) else null)
+                ToastLayer(
+                    overlays,
+                    topInset = if (urgent != null || shown == Screen.DRIVE) layout.headerHeight(driving) else null,
+                    notice = noticeText(state.notice, restriction),
+                )
             }
         }
     }
@@ -346,6 +356,7 @@ fun ShimpyoContent(
  * 화면의 동작. [ContentState]·호스트·오버레이만 들고 있어 한 화면 동안 같은 객체다:
  * 아래 화면에 넘기는 람다가 이것만 잡으므로 매초 새 람다가 생기지 않는다 (UI 감사 S2: 함수 참조 ::pick 등은
  * Kotlin 2.0.0 Compose 컴파일러에서 기억되지 않을 수 있었다).
+ * 코치에 명령을 보내는 유일한 곳이다. 무엇을 어떤 순서로 보내는지는 ContentActionsTest가 지킨다.
  */
 @Stable
 internal class ContentActions(
@@ -376,42 +387,52 @@ internal class ContentActions(
         host.send(UiCommand.Urgent(id))
     }
 
+    /**
+     * 급해 화면을 닫는다. 고르지 않고 닫았을 때만 급해 질문에 '아니'로 답한다: 고른 곳을 내비에 넣는 중에 닫은 것은 거절이 아니다
+     * (들르기는 계속 진행되고, 다른 화면의 넣기 버튼도 끝날 때까지 막힌다)
+     */
     fun closeUrgent(requestId: Long, answerUrgentPrompt: Boolean = true) {
         val p = state().prompt
-        if (answerUrgentPrompt && p?.kind == PromptKind.URGENT_RESULT) host.send(UiCommand.Answer(p.id, false))
+        if (answerUrgentPrompt && p?.kind == PromptKind.URGENT_RESULT && ui.pickingId == null) host.send(UiCommand.Answer(p.id, false))
         host.send(UiCommand.DismissUrgent(requestId))
         ui.dismissedUrgent = rememberDismissed(ui.dismissedUrgent, requestId)
         ui.urgentRequested = null
         ui.pickingId = null
     }
 
-    /** 급해 결과 고르기. 결과를 기다리는 동안 다른 카드는 막는다 (두 번 누르면 경유지 요청이 두 번 갔다) */
+    /**
+     * 급해 결과 고르기. 들르기가 진행 중이면 받지 않는다 (두 번 누르면 경유지 요청이 두 번 갔다).
+     * 코치가 묻고 있는 곳("…안내할까요?")을 고르면 그 질문에 '응'으로 답하고, 다른 곳을 고르면 GoTo만 보낸다: 고른 것이 그 질문의
+     * 답이고 코치가 질문을 거둔다. 예전에는 거절도 함께 보내서 엔진이 거절만 알고 30초 뒤 다시 물었다 (닫힘 검증 UI-9)
+     */
     fun pick(r: RankedStop) {
-        if (ui.pickingId != null) return
+        if (busy() != null) return
         ui.pickingId = r.stop.id
+        ui.goToSentId = r.stop.id
         val p = state().prompt
         if (p?.kind == PromptKind.URGENT_RESULT && p.stop?.id == r.stop.id) {
-            // 음성 질문("안내할까요?")과 같은 곳이면 그 질문에 '응'으로 답한다
             host.send(UiCommand.Answer(p.id, true))
         } else {
             host.send(UiCommand.GoTo(r.stop))
-            if (p?.kind == PromptKind.URGENT_RESULT) host.send(UiCommand.Answer(p.id, false))
         }
     }
 
-    /** 계획 화면의 경유지 넣기. 결과(또는 시간 초과)까지 같은 요청을 막는다 */
+    /** 계획 화면의 경유지 넣기. 들르기가 진행 중이면 받지 않는다 (UI 감사 #24) */
     fun goTo(stop: StopCandidate) {
-        if (ui.goToSentId != null) return
+        if (busy() != null) return
         ui.goToSentId = stop.id
         host.send(UiCommand.GoTo(stop))
         overlays.toast("${Labels.withObject(shortStopName(stop.name))} 내비에 넣는 중이에요")
     }
 
-    /** 주행 화면의 경유지 실패 카드 [다시 시도] */
+    /**
+     * 주행 화면의 경유지 실패 카드 [다시 시도]. GoTo 하나만 보낸다: 지난 실패 결과는 코치가 새 들르기를 시작하며 내린다.
+     * 예전에는 DismissGoToResult를 먼저 보내서 코치의 '실패한 수락 → 다시 시도' 연결이 끊겼고, 경유지는 들어가도
+     * 엔진은 수락을 몰랐다 (닫힘 검증 UI-3)
+     */
     fun retryGoTo(stop: StopCandidate) {
-        if (ui.goToSentId != null) return
+        if (busy() != null) return
         ui.goToSentId = stop.id
-        host.send(UiCommand.DismissGoToResult)
         host.send(UiCommand.GoTo(stop))
     }
 
@@ -425,21 +446,48 @@ internal class ContentActions(
         }
     }
 
+    /** 탑승자 화면의 [말로 설정]: 쓸 수 있으면 묻고 듣기, 진행 중이면 멈추기, 쓸 수 없으면 이유를 알린다 */
+    fun describe(m: DescribeModel) {
+        when (m.action) {
+            MicAction.LISTEN -> host.send(UiCommand.DescribeOccupants)
+            MicAction.STOP -> host.send(UiCommand.StopVoice)
+            MicAction.EXPLAIN -> m.reason?.let(overlays::toast)
+        }
+    }
+
+    /** 탑승자 화면의 '자는 중' (아이). 표시는 코치 상태(asleepOccupantIds)가 돌아올 때 바뀐다 */
+    fun setAsleep(occupantId: String, asleep: Boolean) = host.send(UiCommand.SetAsleep(occupantId, asleep))
+
     fun makePlan() {
         ui.planRequestedGen = state().planGeneration
         ui.planRequested = true
+        ui.planWanted = true
         host.send(UiCommand.MakePlan)
     }
 
-    // RED 단계 자리 표시
-    fun planVisibility(visible: Boolean) = Unit
+    /**
+     * 계획 화면이 보이는지([visible])에 맞춰 코치의 계획 갱신을 닫거나 잇는다 (리뷰 R-F12).
+     * 안 보이면(다른 화면, 주행 시작) 요청해 둔 계획을 닫는다(ClosePlan, 한 번). 다시 보이는데 계획이 이미 있으면 이어서 요청한다:
+     * 떠 있는 동안 코치가 지나친 정차를 빼고 다시 세운다(UI 감사 #4). 계획이 없으면 [계획 세우기]를 눌러야 세운다.
+     */
+    fun planVisibility(visible: Boolean) {
+        if (!visible) {
+            if (ui.planWanted) {
+                ui.planWanted = false
+                host.send(UiCommand.ClosePlan)
+            }
+        } else if (!ui.planWanted && state().plan != null) {
+            makePlan()
+        }
+    }
 
-    fun describe(m: dev.shimpyo.app.ui.components.DescribeModel) = host.send(UiCommand.DescribeOccupants)
-
-    fun setAsleep(occupantId: String, asleep: Boolean) = Unit
+    private fun busy(): GoToBusy? = goToBusy(state(), ui.goToSentId)
 }
 
-private const val GOTO_TIMEOUT_MS = 12_000L
 private const val PLAN_TIMEOUT_MS = 6_000L
-/** 결과가 오지 않을 때. 성공했는지 모르므로 실패라고 하지 않는다 (옛 서비스는 결과를 음성으로만 말한다) */
-private const val NO_GOTO_RESULT = "결과를 받지 못했어요. 내비에서 확인해 주세요"
+
+/**
+ * 화면이 보낸 들르기를 코치가 받았다고 알릴 때까지 기다리는 시간. 코치는 명령을 받자마자 goToPending을 올린다.
+ * 들르기 결과를 기다리는 시간이 아니다: 그것은 코치가 정한다
+ */
+private const val GOTO_ACK_MS = 5_000L
