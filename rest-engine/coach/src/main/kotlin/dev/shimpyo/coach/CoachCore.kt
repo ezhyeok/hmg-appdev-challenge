@@ -285,6 +285,9 @@ class CoachCore(private val d: CoachDeps) {
             UiCommand.ProfileChanged -> worlds.profileChanged()
             // 신호 수집을 다시 잇는 일은 서비스가 한다 (코어는 신호의 출처를 모른다)
             UiCommand.PermissionsChanged -> Unit
+            // 계약만 먼저 넣었다 (2026-11-12): 계획 닫기·자는 중 표시는 코어 수정에서 구현한다
+            UiCommand.ClosePlan -> Unit
+            is UiCommand.SetAsleep -> Unit
         }
     }
 

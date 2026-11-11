@@ -45,6 +45,17 @@ data class CoachUiState(
     val promptReasons: List<Reason> = emptyList(),
     /** 들르기·안내 요청의 결과. 실패하면 화면이 다시 시도 버튼을 보인다 */
     val goToResult: GoToResult? = null,
+    /**
+     * 내비에 넣는 중인 곳 (들르기를 시작해 결과를 기다리는 동안). 화면은 이 값이 있는 동안 진행 표시를 하고 버튼을 막는다.
+     * 화면이 따로 시간을 재지 않는다: 에뮬레이터에서 내비 확인이 19.5초 걸렸는데 화면의 12초 제한이 먼저 '결과 없음'을 띄웠다
+     * (2026-11-12 UI 검증 N2). 끝은 코치의 감시 타이머가 보장한다
+     */
+    val goToPending: StopCandidate? = null,
+    /**
+     * 말 대신 화면에 잠깐 보일 알림 (음성 안내를 껐을 때의 대답, 못 알아들었을 때 등). 코치가 몇 초 뒤 지운다.
+     * (2026-11-12 리뷰 R-F4: 음성 안내를 끄면 '얼마나 남았어'의 대답이 말로도 화면으로도 나오지 않았다)
+     */
+    val notice: String? = null,
     val urgent: List<RankedStop>? = null,
     /** 급해 화면의 진행 상태. requestId는 화면이 보낸 Urgent 명령의 번호 (닫은 뒤 늦게 온 결과를 버린다) */
     val urgentState: UrgentState = UrgentState.IDLE,
@@ -86,6 +97,11 @@ data class CoachUiState(
     val status: String? = null,
     /** 시연 모드 이름. 꺼져 있으면 null */
     val demo: String? = null,
+    /**
+     * 운전자가 '자는 중'이라고 알려 준 탑승자 id (말 또는 탑승자 화면). 밤에 잠든 아이는 화장실 게이지에 여유를 더 둔다
+     * (엔진 CoachInput.asleepOccupantIds, docs/research/need-covariates.md). 깼다고 하거나 화장실 정차가 있으면 코치가 뺀다
+     */
+    val asleepOccupantIds: Set<String> = emptySet(),
     /** LLM 사용 가능 여부와 종류 (예: "Pleos LLM (온디바이스)") */
     val llm: String? = null,
 )
@@ -124,9 +140,13 @@ sealed interface UiCommand {
     data object Listen : UiCommand
     data object StopVoice : UiCommand
     data object MakePlan : UiCommand
+    /** 계획 화면을 떠났다 (또는 주행을 시작했다): 계획을 더 고쳐 세우지 않는다 */
+    data object ClosePlan : UiCommand
     data class Answer(val promptId: String, val accept: Boolean) : UiCommand
     data class GoTo(val stop: StopCandidate) : UiCommand
     data class SetOccupants(val occupants: List<Occupant>) : UiCommand
+    /** 탑승자를 '자는 중'으로 표시하거나 푼다 (아이) */
+    data class SetAsleep(val occupantId: String, val asleep: Boolean) : UiCommand
     /** 말로 탑승자 설정 ("아이 둘이랑 강아지 타") */
     data object DescribeOccupants : UiCommand
     data class Demo(val scenario: String?) : UiCommand
