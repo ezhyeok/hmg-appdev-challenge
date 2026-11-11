@@ -297,7 +297,8 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
     val restroom = Purpose.RESTROOM in next.purposes || next.purposes.isEmpty()
     val drivenBy = state.occupants.firstOrNull { it.id == state.restroom?.drivenBy }
     val chips = buildList {
-        next.reasons.forEach { r -> if (r.code != "NEXT_ACCEPTED" || result == null) Labels.shortReason(r, who)?.let(::add) }
+        // 들르기로 한 곳은 맥락 줄이 이미 말한다 ("들르기로 한 곳"/결과): 같은 말을 칩으로 되풀이하지 않는다
+        next.reasons.forEach { r -> if (r.code != "NEXT_ACCEPTED") Labels.shortReason(r, who)?.let(::add) }
         if (restroom) Labels.companionChip(drivenBy)?.let(::add)
         if (Purpose.REST in next.purposes) state.fatigue?.reasons?.let(::fatigueReason)?.let(::add)
     }.distinct().take(maxChips)

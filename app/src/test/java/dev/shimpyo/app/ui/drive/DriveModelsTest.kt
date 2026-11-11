@@ -189,6 +189,7 @@ class DriveModelsTest {
         val a = stop("a", "안성휴게소", 4.0)
         val accepted = running.copy(next = rec(a, Reason("NEXT_ACCEPTED", "경유지로 넣기로 한 곳이에요")))
         assertEquals("들르기로 한 곳", stopCard(accepted, driving = true).context)
+        assertFalse(stopCard(accepted, driving = true).chips.contains("들르기로 함"))
         assertEquals("경유지로 넣었어요", stopCard(accepted.copy(goToResult = GoToResult(a, GoToOutcome.WAYPOINT_ADDED, 1L)), driving = true).context)
         assertEquals("경로 위 · 진입로로 들어가세요", stopCard(accepted.copy(goToResult = GoToResult(a, GoToOutcome.ON_ROUTE, 1L)), driving = true).context)
         // 다른 곳의 결과는 이 카드의 맥락을 바꾸지 않는다
