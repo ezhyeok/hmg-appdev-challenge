@@ -18,7 +18,7 @@ import kotlinx.coroutines.withContext
  */
 class LocationKit(context: Context) {
     private val appContext = context.applicationContext
-    private val sdk = LazySdk { FusedLocation(appContext) }
+    private val sdk = LazySdk("FusedLocation") { FusedLocation(appContext) }
 
     /** SDK 원본 객체. 처음 쓰는 곳에서 만들어진다 ([connect]를 먼저 부르면 SDK 전용 스레드). [reconnect] 뒤에는 새 객체다 */
     val raw: FusedLocation get() = sdk.value

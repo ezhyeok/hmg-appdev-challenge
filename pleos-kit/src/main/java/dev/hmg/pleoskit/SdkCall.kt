@@ -34,12 +34,19 @@ private class Box<T>(val value: T)
  * kit을 조립하면 NaviHelper·Vehicle·TTS·STT·FusedLocation이 모두 메인 스레드에서 만들어졌다 (서비스 감사 SV-N4).
  * [ifCreated]는 만든 적이 있을 때만 돈다: 놓으려고(release) SDK 객체를 새로 만들지 않는다 (서비스 감사 D11).
  */
-internal class LazySdk<T : Any>(private val create: () -> T) {
+internal class LazySdk<T : Any>(private val name: String, private val create: () -> T) {
     @Volatile
     private var instance: T? = null
 
     val value: T
-        get() = instance ?: synchronized(this) { instance ?: create().also { instance = it } }
+        get() = instance ?: synchronized(this) {
+            instance ?: create().also {
+                instance = it
+                // 어느 스레드에서 만들었는지 남긴다. 메인 스레드면 경고: connect() 전에 raw를 메인 스레드에서 건드렸다는 뜻이다
+                val thread = Thread.currentThread().name
+                if (thread == "main") KitLog.w("$name created on the main thread (call connect() first)") else KitLog.d("$name created on $thread")
+            }
+        }
 
     fun ifCreated(block: (T) -> Unit) {
         instance?.let(block)

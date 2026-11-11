@@ -65,7 +65,7 @@ class SdkCallTest {
     @Test
     fun theSdkObjectIsCreatedOnFirstUseAndNeverJustToBeReleased() {
         var created = 0
-        val sdk = LazySdk {
+        val sdk = LazySdk("Sdk") {
             created++
             Any()
         }

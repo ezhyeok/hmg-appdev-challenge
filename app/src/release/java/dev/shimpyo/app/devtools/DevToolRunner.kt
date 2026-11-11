@@ -1,6 +1,7 @@
 package dev.shimpyo.app.devtools
 
 import android.content.Context
+import android.content.Intent
 import dev.hmg.pleoskit.LocationKit
 import dev.hmg.pleoskit.NaviKit
 import dev.hmg.pleoskit.SttKit
@@ -27,4 +28,8 @@ object DevToolRunner {
 
     @Suppress("UNUSED_PARAMETER", "RedundantSuspendModifier")
     suspend fun run(request: DevHooks.Request, context: Context, kits: Kits) = Unit
+
+    /** debug 빌드는 여기서 개발용 브로드캐스트를 받는다. release는 아무것도 받지 않는다 */
+    @Suppress("UNUSED_PARAMETER")
+    fun listen(context: Context, onIntent: (Intent) -> Unit): () -> Unit = {}
 }

@@ -64,6 +64,8 @@ class CoachService : PleosForegroundService() {
     private var signals: CarSignals? = null
     private var signalsJob: Job? = null
     private var devJob: Job? = null
+    /** debug 빌드의 개발용 브로드캐스트 수신을 끄는 함수 (release는 받지 않는다, DevToolRunner.listen) */
+    private var stopDevListener: (() -> Unit)? = null
 
     override fun onServiceStarted() {
         // 메인 스레드에서 쓴 시간을 남긴다 (서비스 감사 SV-N4: SDK 객체를 여기서 만들면 메인 스레드가 막힌다)
@@ -114,6 +116,7 @@ class CoachService : PleosForegroundService() {
                 c.command(cmd)
             }
         }
+        stopDevListener = DevToolRunner.listen(this) { onCommand(it) }
         Log.i(TAG, "onServiceStarted: ${SystemClock.elapsedRealtime() - startedAt} ms on the main thread")
     }
 
@@ -161,6 +164,7 @@ class CoachService : PleosForegroundService() {
 
     /** 끝날 때: 루프를 먼저 멈추고(D11), 코어의 마지막 저장을 코치 스레드에서 하고, 만든 kit만 놓고, 화면의 진행 중 상태를 지운다 */
     override fun onDestroy() {
+        stopDevListener?.invoke()
         coachScope?.cancel()
         core?.let { c -> runBlocking { withTimeoutOrNull(SHUTDOWN_MS) { withContext(coachThread) { c.shutdown() } } } }
         kits.releaseMade()

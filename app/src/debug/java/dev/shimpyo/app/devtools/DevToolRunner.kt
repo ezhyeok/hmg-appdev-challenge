@@ -1,6 +1,10 @@
 package dev.shimpyo.app.devtools
 
+import android.content.BroadcastReceiver
 import android.content.Context
+import android.content.Intent
+import android.content.IntentFilter
+import android.os.Build
 import dev.hmg.pleoskit.LocationKit
 import dev.hmg.pleoskit.NaviKit
 import dev.hmg.pleoskit.SttKit
@@ -24,6 +28,26 @@ object DevToolRunner {
         val stt: () -> SttKit,
         val location: () -> LocationKit,
     )
+
+    /**
+     * 떠 있는 앱에 개발용 요청을 보내는 길 (debug 빌드에만 있다). Pleos 홈 화면은 이미 떠 있는 앱으로 보낸 `am start`를 창 다시
+     * 띄우기로 처리해서 인텐트가 앱에 닿지 않는다. 앱을 매번 다시 시작하면 느리고 에뮬레이터 부하가 커서 브로드캐스트로 받는다:
+     * `adb shell am broadcast -a dev.shimpyo.app.DEV --es probe wp`. 받은 extras는 서비스의 onCommand로 가고 DevHooks가 거른다.
+     * 돌려주는 것을 부르면 그만 받는다.
+     */
+    fun listen(context: Context, onIntent: (Intent) -> Unit): () -> Unit {
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(c: Context, intent: Intent) = onIntent(intent)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            context.registerReceiver(receiver, IntentFilter(ACTION), Context.RECEIVER_EXPORTED)
+        } else {
+            context.registerReceiver(receiver, IntentFilter(ACTION))
+        }
+        return { runCatching { context.unregisterReceiver(receiver) } }
+    }
+
+    const val ACTION = "dev.shimpyo.app.DEV"
 
     /** 점검 하나를 끝까지 돌린다. 결과는 logcat `PleosApp` */
     suspend fun run(request: DevHooks.Request, context: Context, kits: Kits) {

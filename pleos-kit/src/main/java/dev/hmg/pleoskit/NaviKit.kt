@@ -76,7 +76,7 @@ sealed interface NaviEvent {
  */
 class NaviKit(context: Context) {
     private val appContext = context.applicationContext
-    private val sdk = LazySdk { NaviHelper(appContext) }
+    private val sdk = LazySdk("NaviHelper") { NaviHelper(appContext) }
 
     /**
      * SDK 원본 객체. kit에 없는 API(즐겨찾기, 최근 목적지, 화면 전환 등)에 쓴다.

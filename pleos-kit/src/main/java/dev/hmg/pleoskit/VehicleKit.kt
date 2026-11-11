@@ -61,7 +61,7 @@ class VehicleKit(context: Context) {
         val turnSignal by lazy { vehicle.getTurnSignal() }
     }
 
-    private val link = LazySdk { Link(appContext) }
+    private val link = LazySdk("Vehicle") { Link(appContext) }
 
     /**
      * SDK 원본 객체. kit에 없는 API를 쓸 때 사용한다. 호출은 [call]/[observe] 안에서 할 것.

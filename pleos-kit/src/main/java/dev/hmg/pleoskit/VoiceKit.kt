@@ -58,7 +58,7 @@ class TtsKit(
     private val locale: Locale = Locale.KOREA,
 ) : SpeechOutput {
     private val appContext = context.applicationContext
-    private val sdk = LazySdk { TextToSpeech(appContext, mode) }
+    private val sdk = LazySdk("TextToSpeech") { TextToSpeech(appContext, mode) }
 
     /**
      * SDK 원본 객체. SERVER/HYBRID 모드의 `registerApp`이나 오디오 존 설정에 쓴다.
@@ -167,7 +167,7 @@ class SttKit(
     private val locale: Locale = Locale.KOREA,
 ) : SpeechInput {
     private val appContext = context.applicationContext
-    private val sdk = LazySdk { SpeechToText(appContext, mode) }
+    private val sdk = LazySdk("SpeechToText") { SpeechToText(appContext, mode) }
 
     /** SDK 원본 객체. 처음 쓰는 곳에서 만들어진다 ([connect]를 먼저 부르면 SDK 전용 스레드) */
     val raw: SpeechToText get() = sdk.value
