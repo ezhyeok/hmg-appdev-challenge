@@ -77,6 +77,7 @@ class CoachCore(private val d: CoachDeps) {
     private val freshAir = FreshAirGate()
     private val memorySaver = MemorySaver()
     private val travel = TravelHeading()
+    private val asleep = AsleepMarks()
 
     private var started = false
     private var lastInput: CoachInput? = null
@@ -234,8 +235,7 @@ class CoachCore(private val d: CoachDeps) {
             // 신호 수집을 다시 잇는 일은 서비스가 한다 (코어는 신호의 출처를 모른다)
             UiCommand.PermissionsChanged -> Unit
             UiCommand.ClosePlan -> plans.stop()
-            // 자는 중 표시는 코어 수정 U4에서 잇는다
-            is UiCommand.SetAsleep -> Unit
+            is UiCommand.SetAsleep -> setAsleep(c.occupantId, c.asleep)
         }
     }
 
@@ -256,6 +256,7 @@ class CoachCore(private val d: CoachDeps) {
 
         recorder.onTick(t, gear, speed, door, pos, a.world.persistsHistory)?.let { r ->
             worlds.onStop(r.log, t)
+            if (r.log.restroom) asleepChanged(asleep.onRestroomStop())
             val shown = StopHistory.sanitize(r.history, t)
             ui.update { copy(history = shown, lastStop = r.log) }
             log.i("stop recorded: ${(r.log.end - r.log.start) / 60_000} min restroom=${r.log.restroom} persisted=${r.persisted}")
@@ -264,6 +265,8 @@ class CoachCore(private val d: CoachDeps) {
         // 감지기·여정·엔진이 같은 판정을 쓴다 (서비스 닫힘 검증 N2·N3). 보통 1~2초, 길어도 StopDetector.RESTORE_WAIT_MS
         val waiting = recorder.restorePending
         if (waiting) doorWhileWaiting = doorWhileWaiting || door
+        // 자는 중 표시: 화장실 정차가 되거나 아침이 지나면 푼다 (엔진 입력을 만들기 전에)
+        asleepChanged(asleep.onTick(t, recorder.parkState.takeUnless { waiting }))
         if (!waiting) {
             recorder.takeRestoredEnd()?.let { endedAt ->
                 log.i("restored park ended ${(t - endedAt) / 1000}s ago")
@@ -292,6 +295,7 @@ class CoachCore(private val d: CoachDeps) {
                 // 엔진에 넣을 때만 꺼낸다 (기다리는 틱에 꺼내면 그 말이 사라진다)
                 intent = if (waiting) null else if (urgent.takeEngineIntent()) VoiceIntent.UrgentRestroom else pendingIntents.removeFirstOrNull(),
                 cabinAutoAllowed = d.settings.autoFreshAir,
+                asleepOccupantIds = asleep.ids,
             ),
         )
         d.loopInputs.request = CandidateRequest(CoreRules.searchFix(pos, real, heading), navi, a.world.candidatePolicy)
@@ -529,8 +533,7 @@ class CoachCore(private val d: CoachDeps) {
         // 떠 있는 카드에 대한 대답이면 Accept/Decline(key)로 나온다 (prompt.md 6.2)
         when (val spoken = parser.parseSpoken(text, occupants(), activePromptId = machine.current?.key)) {
             is Spoken.Intent -> return dispatchIntent(spoken.intent)
-            // 자는 중 표시는 코어 수정 U4에서 잇는다
-            is Spoken.Asleep -> return
+            is Spoken.Asleep -> return answer(asleepReply(setAsleep(spoken.occupantId, spoken.asleep)))
             null -> Unit
         }
         val interpreter = d.interpreter ?: return notUnderstood()
@@ -605,7 +608,28 @@ class CoachCore(private val d: CoachDeps) {
 
     private fun setOccupants(list: List<Occupant>) {
         val a = worlds.setOccupants(HealthConsent.allowed(list, d.settings.healthConsent))
-        ui.update { copy(occupants = a.world.occupants(d.settings)) }
+        val now = a.world.occupants(d.settings)
+        asleep.onOccupants(now)
+        ui.update { copy(occupants = now, asleepOccupantIds = asleep.ids) }
+    }
+
+    /** 탑승자를 자는 중으로 표시하거나 푼다 (화면의 표시, 말 "아이 잠들었어"·"깼어"). 아이만 표시할 수 있다 (AsleepMarks) */
+    private fun setAsleep(occupantId: String?, on: Boolean): AsleepMarks.Result {
+        val result = asleep.set(occupantId, on, occupants(), worlds.active.clock.now())
+        asleepChanged(result == AsleepMarks.Result.MARKED || result == AsleepMarks.Result.CLEARED)
+        return result
+    }
+
+    private fun asleepChanged(changed: Boolean) {
+        if (changed) ui.update { copy(asleepOccupantIds = asleep.ids) }
+    }
+
+    private fun asleepReply(result: AsleepMarks.Result): String = when (result) {
+        AsleepMarks.Result.MARKED -> "자는 동안은 화장실 여유를 조금 더 둘게요"
+        AsleepMarks.Result.CLEARED -> "깬 것으로 바꿨어요"
+        AsleepMarks.Result.NOT_A_CHILD -> "자는 중 표시는 아이 탑승자에게만 쓸 수 있어요"
+        AsleepMarks.Result.UNKNOWN_WHO -> "누가 자는지 탑승자 화면에서 표시해 주세요"
+        AsleepMarks.Result.NO_CHANGE -> "네, 알겠어요"
     }
 
     /**
@@ -618,7 +642,9 @@ class CoachCore(private val d: CoachDeps) {
         healthConsentSeen = consent
         if (!consent && worlds.dropHealthOccupants()) {
             log.i("health consent off: health-type occupants removed")
-            ui.update { copy(occupants = occupants()) }
+            val now = occupants()
+            asleep.onOccupants(now)
+            ui.update { copy(occupants = now, asleepOccupantIds = asleep.ids) }
         }
     }
 
@@ -705,6 +731,7 @@ class CoachCore(private val d: CoachDeps) {
                 recorder.onWorldChanged(now, change.restorePark, lastSeenMs ?: now)
                 urgent.reset()
                 plans.worldChanged()
+                asleep.clear()
                 lastInput = null
                 lastOutput = null
                 lastPlan = null
@@ -715,6 +742,7 @@ class CoachCore(private val d: CoachDeps) {
                     copy(
                         demo = a.world.name, occupants = a.world.occupants(d.settings), history = shown, lastStop = shown.lastOrNull(),
                         urgent = null, urgentState = UrgentState.IDLE, plan = null, ahead = emptyList(), promptStop = null,
+                        asleepOccupantIds = emptySet(),
                     )
                 }
             }
