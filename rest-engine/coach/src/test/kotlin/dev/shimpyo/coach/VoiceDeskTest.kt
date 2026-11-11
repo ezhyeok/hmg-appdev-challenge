@@ -1,7 +1,9 @@
 package dev.shimpyo.coach
 
+import dev.shimpyo.coach.fakes.FakeSettings
 import dev.shimpyo.coach.fakes.FakeVoice
 import dev.shimpyo.coach.fakes.RecordingLog
+import dev.shimpyo.coach.fakes.RecordingUi
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
@@ -14,13 +16,17 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 음성 작업 책상 (VoiceDesk): 무엇이 돌고 있는지, 무엇을 취소하는지, 결과를 몇 번 돌려주는지. 코어 없이 가짜 음성으로 돌린다.
- * 닫힘 검증(2026-11-12)의 리뷰 R-F8(세계 전환)·R-F11(실패해도 결과 한 번)을 여기서 규칙으로 지킨다.
+ * 코치의 입과 귀 (VoiceDesk): 무엇이 돌고 있는지, 무엇을 취소하는지, 결과를 몇 번 돌려주는지, 대답이 말로 가는지 화면으로 가는지.
+ * 코어 없이 가짜 음성으로 돌린다. 닫힘 검증(2026-11-12)의 리뷰 R-F4(음성 안내 끔)·R-F8(세계 전환)·R-F11(실패해도 결과 한 번)을
+ * 여기서 규칙으로 지킨다.
  */
 class VoiceDeskTest {
     private val log = RecordingLog()
+    private val settings = FakeSettings()
+    private val ui = RecordingUi()
 
-    private fun TestScope.desk(voice: VoicePort) = VoiceDesk(voice, log).also { it.scope = backgroundScope }
+    private fun TestScope.desk(voice: VoicePort) =
+        VoiceDesk(voice, settings, ui, ElapsedClock { testScheduler.currentTime }, log).also { it.scope = backgroundScope }
 
     private fun TestScope.pass(ms: Long) {
         advanceTimeBy(ms)
@@ -167,6 +173,93 @@ class VoiceDeskTest {
         assertTrue(d.describing)
         pass(4_000)
         assertFalse(d.describing)
+    }
+
+    // ------------------------------------------------------------ 말로 낼지 화면으로 낼지 (리뷰 R-F4)
+
+    @Test
+    fun anAnswerIsSpokenWhenSpeechIsOnAndShownForAFewSecondsWhenItIsOff() = runTest {
+        // 음성 안내를 꺼도 마이크로 물을 수 있다. 예전에는 그 답이 소리로도 화면으로도 나가지 않았다
+        val voice = FakeVoice()
+        val d = desk(voice)
+        d.answer("화장실까지 40분 여유가 있어요")
+        pass(2_000)
+        assertEquals(listOf("화장실까지 40분 여유가 있어요"), voice.said)
+        assertNull("말했으면 화면 알림은 없다", ui.state.notice)
+
+        settings.voiceEnabled = false
+        d.answer("화장실까지 39분 여유가 있어요")
+        assertEquals("화장실까지 39분 여유가 있어요", ui.state.notice)
+        assertEquals("말하지 않는다", 1, voice.said.size)
+        pass(VoiceDesk.NOTICE_MS - 1)
+        d.tick(testScheduler.currentTime)
+        assertEquals("6초 동안 보인다", "화장실까지 39분 여유가 있어요", ui.state.notice)
+        pass(1)
+        d.tick(testScheduler.currentTime)
+        assertNull("그 뒤 틱이 거둔다", ui.state.notice)
+        d.tick(testScheduler.currentTime + 60_000)
+        assertNull(ui.state.notice)
+    }
+
+    @Test
+    fun aNewNoticeReplacesTheOldOneAndRestartsItsTime() = runTest {
+        val d = desk(FakeVoice())
+        d.notice("누가 함께 타나요?")
+        pass(4_000)
+        d.notice("아이로 맞췄어요")
+        pass(4_000)
+        d.tick(testScheduler.currentTime)
+        assertEquals("앞 알림의 시간으로 새 알림을 거두지 않는다", "아이로 맞췄어요", ui.state.notice)
+        pass(2_000)
+        d.tick(testScheduler.currentTime)
+        assertNull(ui.state.notice)
+    }
+
+    @Test
+    fun withoutTtsAnAnswerIsShownAndAPlainRemarkIsDropped() = runTest {
+        val voice = FakeVoice().also { it.ttsReady = false }
+        val d = desk(voice)
+        assertFalse(d.canSpeak)
+        d.speak("옥산휴게소로 안내할게요") // 대답을 받지 않는 말: 결과 카드가 화면에 있다
+        assertNull(ui.state.notice)
+        d.answer("잘 못 알아들었어요")
+        assertEquals("잘 못 알아들었어요", ui.state.notice)
+        pass(2_000)
+        assertTrue(voice.said.isEmpty())
+    }
+
+    // ------------------------------------------------------------ 생각하는 중 (UI 감사 #12)
+
+    @Test
+    fun thinkingIsShownWhileAnInterpretationRunsAndClearedHoweverItEnds() = runTest {
+        val d = desk(FakeVoice())
+        d.interpret("interpret", failed = null, showThinking = true, done = {}) { delay(2_000); "졸려" }
+        assertEquals(VoiceState.THINKING, ui.state.voice)
+        pass(2_000)
+        assertEquals("끝나면 돌아온다", VoiceState.IDLE, ui.state.voice)
+
+        d.interpret<String?>("interpret", failed = null, showThinking = true, done = {}) { error("llm crashed") }
+        pass(100)
+        assertEquals("실패해도 돌아온다", VoiceState.IDLE, ui.state.voice)
+
+        d.interpret("interpret", failed = null, showThinking = true, done = {}) { delay(5_000); "졸려" }
+        assertEquals(VoiceState.THINKING, ui.state.voice)
+        d.worldChanged()
+        assertEquals("세계가 바뀌어 멈춰도 바로 돌아온다", VoiceState.IDLE, ui.state.voice)
+
+        d.interpret("interpretOccupants", failed = null, done = {}) { delay(1_000); "아이" }
+        assertEquals("탑승자 해석은 마이크 표시를 바꾸지 않는다", VoiceState.IDLE, ui.state.voice)
+    }
+
+    @Test
+    fun stoppingByTheUserReturnsTheMicToIdleButNeverHidesThatVoiceIsUnavailable() = runTest {
+        val d = desk(FakeVoice(speakMs = 5_000))
+        d.interpret("interpret", failed = null, showThinking = true, done = {}) { delay(5_000) }
+        d.stopAll()
+        assertEquals(VoiceState.IDLE, ui.state.voice)
+        ui.update { copy(voice = VoiceState.UNAVAILABLE) }
+        d.stopAll()
+        assertEquals("연결이 없다는 표시는 그대로 둔다", VoiceState.UNAVAILABLE, ui.state.voice)
     }
 
     // ------------------------------------------------------------ 결과는 정확히 한 번 (리뷰 R-F11)

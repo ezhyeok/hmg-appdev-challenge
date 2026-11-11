@@ -7,15 +7,26 @@ import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 
 /**
- * 코치의 음성 작업을 모두 든다: 카드의 묻기, 마이크 버튼 듣기, 탑승자 말하기, LLM 해석, 대답 없는 말. 코어는 "무엇을 말하고
- * 들을지"만 정하고, 어떤 작업이 돌고 있는지·무엇을 취소할지는 여기서 본다. 코어 스레드에서만 부른다.
+ * 코치의 입과 귀. 음성 작업을 모두 들고(카드의 묻기, 마이크 버튼 듣기, 탑승자 말하기, LLM 해석, 대답 없는 말), 대답을 말로 낼지
+ * 화면 알림으로 낼지 정한다. 코어는 "무엇을 말하고 들을지"만 정하고, 어떤 작업이 돌고 있는지·무엇을 취소할지는 여기서 본다.
+ * 코어 스레드에서만 부른다.
  *
  * 작업은 코어의 효과 스코프에서 돌고, 결과는 done으로 정확히 한 번 돌려준다(실패해도). done은 효과 코루틴 안에서 불리므로
  * 우편함에 메시지를 넣는 일만 해야 한다(코어 상태를 직접 바꾸지 않는다). 취소된 작업은 결과를 돌려주지 않는다: 취소한 쪽이 뒷일을 안다.
  * 세계가 바뀌면([worldChanged]) 모든 작업을 취소한다. 그래도 이미 우편함에 든 결과가 있을 수 있어서, 코어는 결과에 세계 세대를
  * 실어 보내고 세대가 다른 결과를 버린다 (리뷰 R-F8: 시연 중에 물은 탑승자가 시연을 끈 뒤 실제 설정에 저장됐다).
+ *
+ * 화면에 올리는 것: 알림([notice], CoachUiState.notice)과 '생각하는 중'(VoiceState.THINKING). 말하는 중·듣는 중은 음성 포트
+ * (앱의 VoiceAgent)가 올린다.
  */
-class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachLog.NONE) {
+class VoiceDesk(
+    private val voice: VoicePort,
+    private val settings: SettingsPort,
+    private val ui: UiSink,
+    /** 알림을 거둘 때를 재는 실제 시간 */
+    private val elapsed: ElapsedClock,
+    private val log: CoachLog = CoachLog.NONE,
+) {
     /** 효과를 띄우는 곳 (CoachCore.run의 supervisorScope). run 전에는 null */
     var scope: CoroutineScope? = null
 
@@ -25,6 +36,9 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
     private var describeJob: Job? = null
     private var interpretJob: Job? = null
     private val speakJobs = ArrayList<Job>(4)
+    /** 화면 알림을 거둘 실제 시각. 알림이 없으면 null */
+    private var noticeUntilMs: Long? = null
+    private var thinking = false
 
     /** 말하거나 듣거나 해석하는 중인지 (마이크 버튼: 바쁘면 멈추기) */
     val busy: Boolean
@@ -37,7 +51,45 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
     /** 탑승자 말하기가 돌고 있는지 (두 번 누르기) */
     val describing: Boolean get() = describeJob?.isActive == true
 
-    // ------------------------------------------------------------ 작업
+    /** 말해도 되는지: 설정의 음성 안내 켬 + TTS 연결 */
+    val canSpeak: Boolean get() = settings.voiceEnabled && voice.ttsReady
+
+    // ------------------------------------------------------------ 말하기와 알림
+
+    /** 대답을 받지 않는 말 (들르기 결과, 환기 알림). 말할 수 없으면 아무것도 하지 않는다 (UI 감사 #12) */
+    fun speak(text: String) {
+        if (canSpeak) say(text)
+    }
+
+    /**
+     * 사용자가 말로 물은 것의 대답: 말할 수 있으면 말하고, 아니면 화면 알림으로 낸다. 음성 안내를 꺼도 마이크로 물을 수 있는데
+     * 예전에는 그 답이 소리로도 화면으로도 나가지 않았다 (리뷰 R-F4)
+     */
+    fun answer(text: String) {
+        if (canSpeak) say(text) else notice(text)
+    }
+
+    /** 화면에 잠깐 보일 알림. [NOTICE_MS] 뒤 [tick]이 거둔다. 새 알림이 앞의 것을 바꾼다 */
+    fun notice(text: String) {
+        noticeUntilMs = elapsed.elapsedMs() + NOTICE_MS
+        ui.update { copy(notice = text) }
+    }
+
+    /** 코치 틱마다: 보여 둔 시간이 지난 알림을 거둔다 */
+    fun tick(nowMs: Long) {
+        val until = noticeUntilMs ?: return
+        if (nowMs < until) return
+        noticeUntilMs = null
+        ui.update { copy(notice = null) }
+    }
+
+    /** 지금 말 뒤에 이어 말한다 (VoicePort가 차례를 세운다). 말해도 되는지는 부르는 쪽이 확인했다 (PromptEffect.Speak) */
+    fun say(text: String) {
+        speakJobs.removeAll { !it.isActive }
+        speakJobs += launch("say", failed = false, done = {}) { voice.say(text) }
+    }
+
+    // ------------------------------------------------------------ 묻기·듣기·해석
 
     /**
      * 카드의 묻기: 말하고 [listen]이면 대답을 듣는다. 끝나면 반드시 [done]을 부른다 (못 들었거나 실패했으면 null).
@@ -62,12 +114,6 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
         }
     }
 
-    /** 대답을 받지 않는 말. 지금 말 뒤에 이어 말한다 (VoicePort가 차례를 세운다) */
-    fun say(text: String) {
-        speakJobs.removeAll { !it.isActive }
-        speakJobs += launch("say", failed = false, done = {}) { voice.say(text) }
-    }
-
     /** 마이크 버튼 듣기 */
     fun listen(done: (String?) -> Unit) {
         listenJob = launch("listen", failed = null, done = done) { voice.listen() }
@@ -80,9 +126,22 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
         }
     }
 
-    /** 규칙으로 못 알아들은 말의 해석 (LLM). [failed]: 해석이 실패했을 때의 결과 */
-    fun <T> interpret(name: String, failed: T, done: (T) -> Unit, block: suspend () -> T) {
-        interpretJob = launch(name, failed, done, block)
+    /**
+     * 규칙으로 못 알아들은 말의 해석 (LLM). [failed]: 해석이 실패했을 때의 결과. [showThinking]이면 도는 동안 마이크 표시를
+     * '생각하는 중'으로 두고, 끝나면(결과·실패·취소 어느 쪽이든) 되돌린다
+     */
+    fun <T> interpret(name: String, failed: T, showThinking: Boolean = false, done: (T) -> Unit, block: suspend () -> T) {
+        if (showThinking) {
+            thinking = true
+            ui.update { copy(voice = VoiceState.THINKING) }
+        }
+        interpretJob = launch(name, failed, done) {
+            try {
+                block()
+            } finally {
+                if (showThinking) clearThinking()
+            }
+        }
     }
 
     // ------------------------------------------------------------ 멈추기
@@ -102,6 +161,17 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
      * 코어가 '대답 없음'으로 알려 버튼으로 대답할 시간을 준다
      */
     fun stopAll(): String? {
+        val key = cancelAll()
+        ui.update { if (voice == VoiceState.UNAVAILABLE) this else copy(voice = VoiceState.IDLE) }
+        return key
+    }
+
+    /** 세계·엔진이 바뀌었다: 지난 세계에서 시작한 말·듣기·해석을 모두 멈춘다 (결과가 새 세계에 적용되지 않게) */
+    fun worldChanged() {
+        cancelAll()
+    }
+
+    private fun cancelAll(): String? {
         val key = askKey?.takeIf { askJob?.isActive == true }
         askJob?.cancel()
         askJob = null
@@ -112,12 +182,14 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
         speakJobs.forEach { it.cancel() }
         speakJobs.clear()
         voice.stop()
+        clearThinking()
         return key
     }
 
-    /** 세계·엔진이 바뀌었다: 지난 세계에서 시작한 말·듣기·해석을 모두 멈춘다 (결과가 새 세계에 적용되지 않게) */
-    fun worldChanged() {
-        stopAll()
+    private fun clearThinking() {
+        if (!thinking) return
+        thinking = false
+        ui.update { if (voice == VoiceState.THINKING) copy(voice = VoiceState.IDLE) else this }
     }
 
     // ------------------------------------------------------------ 띄우기
@@ -145,5 +217,7 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
     companion object {
         /** 탑승자를 말하는 데 주는 시간 */
         const val DESCRIBE_LISTEN_MS = 8_000L
+        /** 화면 알림을 보여 두는 시간 (틱이 거두므로 6~7초) */
+        const val NOTICE_MS = 6_000L
     }
 }

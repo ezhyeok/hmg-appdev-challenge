@@ -81,7 +81,7 @@ class CoachCoreVoiceTest {
         assertTrue("말하지 않는다", rig.voice.said.isEmpty() && rig.voice.asked.isEmpty())
         assertNull("안내는 카드가 아니다", rig.state.prompt)
         // 약 6초 보이고 코치가 거둔다
-        rig.run(CoachCore.NOTICE_MS - 2_000)
+        rig.run(VoiceDesk.NOTICE_MS - 2_000)
         assertNotNull("${shownAfter}ms에 뜬 알림이 4초 뒤에도 보인다", rig.state.notice)
         rig.run(4_000)
         assertNull(rig.state.notice)

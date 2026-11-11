@@ -1,6 +1,5 @@
 package dev.shimpyo.coach
 
-import dev.shimpyo.coach.voice.Hangul
 import dev.shimpyo.coach.voice.IntentParser
 import dev.shimpyo.coach.voice.Spoken
 import dev.shimpyo.coach.voice.parseSpoken
@@ -71,7 +70,7 @@ class CoachCore(private val d: CoachDeps) {
     private val recorder = StopRecorder(StopDetector(), d.history, d.stops, d.log)
     private val goTo = GoToRunner(d.navi, d.log)
     private val parser = IntentParser()
-    private val desk = VoiceDesk(d.voice, d.log)
+    private val desk = VoiceDesk(d.voice, d.settings, d.ui, d.elapsed, d.log)
     private val urgent = UrgentFlow(seedMs = d.elapsed.elapsedMs())
     private val plans = PlanKeeper(seedMs = d.elapsed.elapsedMs())
     private val freshAir = FreshAirGate()
@@ -88,8 +87,6 @@ class CoachCore(private val d: CoachDeps) {
 
     /** 시연을 처음 켠 실제 시각. 끌 때 실제 정차를 그 시각에 끝내는 데 쓴다 (StopDetector.restore의 lastSeenMs) */
     private var demoSinceWall: Long? = null
-    /** 화면 알림(CoachUiState.notice)을 거둘 실제 시각. 알림이 없으면 null */
-    private var noticeUntilMs: Long? = null
     /** 마지막으로 본 건강 정보 동의 (처음에는 모름). 꺼진 것을 보면 건강 유형 탑승자를 뺀다 */
     private var healthConsentSeen: Boolean? = null
     /** 되돌린 정차의 판정을 기다리는 동안 열린 문. 판정 뒤 첫 엔진 입력에 싣는다 (엔진도 그 문을 본다) */
@@ -207,15 +204,12 @@ class CoachCore(private val d: CoachDeps) {
                 onPromptEvent(PromptEvent.Heard(m.key, reply.answer, reply.other))
             }
             is Msg.Listened -> if (current(m.gen)) onListened(m.text)
-            is Msg.Interpreted -> {
-                clearThinking()
-                if (current(m.gen)) m.intent?.let(::dispatchIntent) ?: notUnderstood()
-            }
+            is Msg.Interpreted -> if (current(m.gen)) m.intent?.let(::dispatchIntent) ?: notUnderstood()
             is Msg.OccupantsHeard -> if (current(m.gen)) onOccupantsHeard(m.text)
             is Msg.OccupantsInterpreted -> if (current(m.gen)) applySpokenOccupants(m.list)
             is Msg.FreshAirDone -> {
                 freshAir.finished(d.elapsed.elapsedMs(), switched = m.ok)
-                if (m.ok && m.announce) speak("환기를 위해 외기로 바꿨어요")
+                if (m.ok && m.announce) desk.speak("환기를 위해 외기로 바꿨어요")
             }
             is Msg.MemorySaved -> memorySaver.finished(m.memory, m.ok)
         }
@@ -331,7 +325,7 @@ class CoachCore(private val d: CoachDeps) {
             urgent.track(pos, out.next?.stop?.id, el)
         }
         if (freshAir.takeRevert(el, d.hub.recirculation)) revertFreshAir()
-        noticeUntilMs?.takeIf { el >= it }?.let { clearNotice() }
+        desk.tick(el)
         if (!waiting) advanceUrgent(el, a, pos, input)
         refreshPlan(force = false)
         publish(out, input, navi, a.world, ahead)
@@ -427,8 +421,8 @@ class CoachCore(private val d: CoachDeps) {
                 }
                 is PromptEffect.Ask -> desk.ask(e.promptId, e.speech, e.listen) { text -> send(Msg.AskHeard(e.promptId, text)) }
                 PromptEffect.CancelVoice -> desk.cancelCard()
-                is PromptEffect.Speak -> speak(e.text)
-                is PromptEffect.Notice -> notice(e.text)
+                is PromptEffect.Speak -> desk.speak(e.text)
+                is PromptEffect.Notice -> desk.notice(e.text)
                 is PromptEffect.ScheduleExpiry -> scheduleExpiry(e.promptId, e.atElapsedMs)
                 is PromptEffect.Report -> try {
                     worlds.active.engine.onPromptResult(e.promptId, e.accept, worlds.active.clock.now())
@@ -521,38 +515,12 @@ class CoachCore(private val d: CoachDeps) {
 
     // ------------------------------------------------------------ 음성
 
-    /** 대답을 받지 않는 말. 설정에서 음성을 껐으면 아무것도 말하지 않는다 (UI 감사 #12) */
-    private fun speak(text: String) {
-        if (!d.settings.voiceEnabled || !d.voice.ttsReady) return
-        desk.say(text)
-    }
-
-    /** 사용자가 말로 물은 것의 대답: 말할 수 있으면 말하고, 아니면 화면 알림으로 낸다 (리뷰 R-F4) */
-    private fun answer(text: String) {
-        if (promptContext().speak) desk.say(text) else notice(text)
-    }
-
-    /** 화면에 잠깐 보일 알림. [NOTICE_MS] 뒤 틱이 거둔다. 새 알림이 앞의 것을 바꾼다 */
-    private fun notice(text: String) {
-        noticeUntilMs = d.elapsed.elapsedMs() + NOTICE_MS
-        ui.update { copy(notice = text) }
-    }
-
-    private fun clearNotice() {
-        noticeUntilMs = null
-        ui.update { copy(notice = null) }
-    }
-
     /** 음성 결과가 지금 세계의 것인지 (그 말을 들은 뒤 세계·엔진이 바뀌지 않았는지) */
     private fun current(gen: Int): Boolean = gen == worlds.active.generation
 
-    private fun clearThinking() = ui.update { if (voice == VoiceState.THINKING) copy(voice = VoiceState.IDLE) else this }
-
     /** 사용자가 멈추기를 눌렀다. 카드가 묻던 중이면 버튼으로 대답할 시간을 준다 (Heard UNKNOWN) */
     private fun stopVoice() {
-        val key = desk.stopAll()
-        ui.update { if (voice == VoiceState.UNAVAILABLE) this else copy(voice = VoiceState.IDLE) }
-        key?.let { send(Msg.AskHeard(it, null)) }
+        desk.stopAll()?.let { key -> send(Msg.AskHeard(key, null)) }
     }
 
     private fun startListen() {
@@ -566,18 +534,17 @@ class CoachCore(private val d: CoachDeps) {
         // 떠 있는 카드에 대한 대답이면 Accept/Decline(key)로 나온다 (prompt.md 6.2)
         when (val spoken = parser.parseSpoken(text, occupants(), activePromptId = machine.current?.key)) {
             is Spoken.Intent -> return dispatchIntent(spoken.intent)
-            is Spoken.Asleep -> return answer(asleepReply(setAsleep(spoken.occupantId, spoken.asleep)))
+            is Spoken.Asleep -> return desk.answer(AsleepMarks.reply(setAsleep(spoken.occupantId, spoken.asleep)))
             null -> Unit
         }
         val interpreter = d.interpreter ?: return notUnderstood()
         val people = occupants()
         val key = machine.current?.key
         val gen = worlds.active.generation
-        ui.update { copy(voice = VoiceState.THINKING) }
-        desk.interpret("interpret", failed = null, done = { send(Msg.Interpreted(gen, it)) }) { interpreter.interpret(text, people, key) }
+        desk.interpret("interpret", failed = null, showThinking = true, done = { send(Msg.Interpreted(gen, it)) }) { interpreter.interpret(text, people, key) }
     }
 
-    private fun notUnderstood() = answer("잘 못 알아들었어요. 화장실 급해, 졸려, 얼마나 남았어처럼 말해 주세요")
+    private fun notUnderstood() = desk.answer("잘 못 알아들었어요. 화장실 급해, 졸려, 얼마나 남았어처럼 말해 주세요")
 
     /** 말로 한 요청. 질문 대답은 기계로, 급해는 급해 흐름으로, 나머지는 다음 틱 엔진 입력으로 (엔진이 안내·질문으로 답한다) */
     private fun dispatchIntent(intent: VoiceIntent) {
@@ -657,13 +624,6 @@ class CoachCore(private val d: CoachDeps) {
         if (changed) ui.update { copy(asleepOccupantIds = asleep.ids) }
     }
 
-    private fun asleepReply(result: AsleepMarks.Result): String = when (result) {
-        AsleepMarks.Result.MARKED -> "자는 동안은 화장실 여유를 조금 더 둘게요"
-        AsleepMarks.Result.CLEARED -> "깬 것으로 바꿨어요"
-        AsleepMarks.Result.NOT_A_CHILD -> "자는 중 표시는 아이 탑승자에게만 쓸 수 있어요"
-        AsleepMarks.Result.UNKNOWN_WHO -> "누가 자는지 탑승자 화면에서 표시해 주세요"
-        AsleepMarks.Result.NO_CHANGE -> "네, 알겠어요"
-    }
 
     /**
      * 건강 정보 동의가 꺼져 있으면(화면이 설정을 바꾼다: 명령은 오지 않는다) 건강 유형 탑승자를 모든 세계에서 뺀다 (UI 닫힘 검증 N3).
@@ -687,10 +647,10 @@ class CoachCore(private val d: CoachDeps) {
      */
     private fun describeOccupants() {
         if (desk.describing) return
-        if (!d.voice.sttReady) return notice("음성 인식을 쓸 수 없어요. 화면에서 골라 주세요")
+        if (!d.voice.sttReady) return desk.notice("음성 인식을 쓸 수 없어요. 화면에서 골라 주세요")
         val question = "누가 함께 타나요? 예를 들어 일곱 살 아이 하나랑 강아지처럼 말해 주세요"
-        val speak = promptContext().speak
-        if (!speak) notice(question)
+        val speak = desk.canSpeak
+        if (!speak) desk.notice(question)
         val gen = worlds.active.generation
         desk.describe(question.takeIf { speak }) { text -> send(Msg.OccupantsHeard(gen, text)) }
     }
@@ -705,16 +665,10 @@ class CoachCore(private val d: CoachDeps) {
     }
 
     private fun applySpokenOccupants(list: List<Occupant>?) {
-        if (list.isNullOrEmpty()) return answer("잘 못 알아들었어요. 화면에서 골라 주세요")
+        if (list.isNullOrEmpty()) return desk.answer("잘 못 알아들었어요. 화면에서 골라 주세요")
         val heard = HealthConsent.spoken(list, d.settings.healthConsent)
         heard.apply?.let(::setOccupants)
-        // 한 번에 말한다 (화면 알림은 한 자리라 두 문장을 따로 내면 앞의 것이 지워진다)
-        answer(
-            listOfNotNull(
-                "건강 관련 정보는 설정에서 동의한 뒤에 넣을 수 있어요".takeIf { heard.consentNeeded },
-                heard.apply?.let { "${Hangul.euRo(OccupantPhrase.describe(it))} 맞췄어요" },
-            ).joinToString(" "),
-        )
+        desk.answer(heard.reply)
     }
 
     // ------------------------------------------------------------ 세계 (시연·실제)
@@ -804,7 +758,6 @@ class CoachCore(private val d: CoachDeps) {
         expiryJobs.clear()
         toMachine(PromptEvent.Reset)
         desk.worldChanged()
-        clearThinking()
     }
 
     private fun shownHistory(now: Long) = StopHistory.sanitize(recorder.shown, now)
@@ -829,7 +782,7 @@ class CoachCore(private val d: CoachDeps) {
         val before = urgent.view ?: return
         when (urgent.step(el, pos != null, d.stops.loaded)) {
             UrgentFlow.Step.NONE -> {}
-            UrgentFlow.Step.NO_LOCATION -> speak("현재 위치를 아직 모르겠어요")
+            UrgentFlow.Step.NO_LOCATION -> desk.speak("현재 위치를 아직 모르겠어요")
             UrgentFlow.Step.SEARCH -> {
                 val real = d.positions.current.value?.fix
                 val f = CoreRules.searchFix(pos, real, travel.heading)!!
@@ -906,8 +859,6 @@ class CoachCore(private val d: CoachDeps) {
     companion object {
         const val TICK_MS = 1_000L
         const val MAX_PENDING_INTENTS = 4
-        /** 화면 알림을 보여 두는 시간 (틱이 거두므로 6~7초) */
-        const val NOTICE_MS = 6_000L
         /** 재시작 전에 들르기로 한 곳이 후보에 다시 보이기를 기다리는 시간 (후보는 20초 안에 다시 만든다) */
         const val ACCEPT_RESTORE_MS = 2 * 60_000L
     }

@@ -105,7 +105,16 @@ class AsleepMarks(
         return (if (t.isBefore(today)) today else today.plusDays(1)).toInstant().toEpochMilli()
     }
 
-    private companion object {
-        val ENGINE = CoachConfig()
+    companion object {
+        private val ENGINE = CoachConfig()
+
+        /** 말로 표시했을 때 운전자에게 할 대답 */
+        fun reply(result: Result): String = when (result) {
+            Result.MARKED -> "자는 동안은 화장실 여유를 조금 더 둘게요"
+            Result.CLEARED -> "깬 것으로 바꿨어요"
+            Result.NOT_A_CHILD -> "자는 중 표시는 아이 탑승자에게만 쓸 수 있어요"
+            Result.UNKNOWN_WHO -> "누가 자는지 탑승자 화면에서 표시해 주세요"
+            Result.NO_CHANGE -> "네, 알겠어요"
+        }
     }
 }

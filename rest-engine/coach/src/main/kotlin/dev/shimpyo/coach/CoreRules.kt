@@ -1,5 +1,6 @@
 package dev.shimpyo.coach
 
+import dev.shimpyo.coach.voice.Hangul
 import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
@@ -133,7 +134,14 @@ object HealthConsent {
      * (예전에는 "임산부 한 명"이 타고 있던 아이를 지우고 "로 맞췄어요"라고 말했다, 리뷰 R-F9).
      * [consentNeeded]: 동의가 없어 뺀 사람이 있다 (동의 안내를 한다)
      */
-    data class Spoken(val apply: List<Occupant>?, val consentNeeded: Boolean)
+    data class Spoken(val apply: List<Occupant>?, val consentNeeded: Boolean) {
+        /** 운전자에게 할 대답 한 번 (화면 알림은 한 자리라 두 문장을 따로 내면 앞의 것이 지워진다) */
+        val reply: String
+            get() = listOfNotNull(
+                "건강 관련 정보는 설정에서 동의한 뒤에 넣을 수 있어요".takeIf { consentNeeded },
+                apply?.let { "${Hangul.euRo(OccupantPhrase.describe(it))} 맞췄어요" },
+            ).joinToString(" ")
+    }
 
     fun spoken(heard: List<Occupant>, consent: Boolean): Spoken {
         val allowed = allowed(heard, consent)
