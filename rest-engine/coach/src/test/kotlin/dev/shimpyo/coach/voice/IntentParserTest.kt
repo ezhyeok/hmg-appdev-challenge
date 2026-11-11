@@ -4,13 +4,17 @@ import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.Purpose
 import dev.shimpyo.engine.VoiceIntent
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
  * 규칙 기반 의도 분류 (IntentParser). 표 하나가 규칙 하나다: 말 → 기대하는 의도. 표는 docs/design/coach-layer/voice.md와 같다.
  * 운전자가 실제로 하는 말(띄어쓰기 없는 STT 결과, 부정, 되묻기, 아이·반려견 이야기)을 의도마다 맞는 말과 아닌 말로 넣었다.
- * 회귀: "화장실까지 얼마나 남았어?"가 화장실 요청이 됐다(R-F2), "안 급해"가 급해 요청이 됐다(R-F3).
+ * 회귀 (독립 리뷰 2026-11-12, 예전 closure/ReviewIntentParserTest의 세 줄이 표에 들어 있다):
+ * - R-F2 "화장실까지 얼마나 남았어?"가 화장실 요청이 되어 게이지가 NOW로 뛰고 간격이 학습됐다 → [mentioningTheRestroomIsNotANeed]
+ * - R-F3 "아니 안 급해"가 급해 요청, "화장실 안 가도 돼"가 화장실 요청이 됐다 → [notUrgent], [yesNo], [mentioningTheRestroomIsNotANeed]
+ * - R-F3 카드 대답이 수락·거절과 새 요청 두 가지로 처리됐다 → [aCardReplyIsOneAnswer]
  */
 class IntentParserTest {
     private val parser = IntentParser()
@@ -21,6 +25,7 @@ class IntentParserTest {
     private val baby = Occupant("baby", OccupantType.INFANT, label = "아기")
     private val grandma = Occupant("grandma", OccupantType.ELDERLY, label = "할머니")
     private val dog = Occupant("dog", OccupantType.DOG, label = "반려견")
+    private val wife = Occupant("wife", OccupantType.ADULT, label = "어른")
 
     private val alone = listOf(driver)
     private val withKid = listOf(driver, kid)
@@ -104,6 +109,7 @@ class IntentParserTest {
         "화장실 어디야" to restroom(),
         "근처 화장실 찾아줘" to restroom(),
         "가까운 화장실" to restroom(),
+        "미안한데 화장실 좀" to restroom(),
         "쉬 마려워" to restroom(),
         "오줌 마려" to restroom(),
         "소변 보고 싶어" to restroom(),
@@ -227,6 +233,9 @@ class IntentParserTest {
         "깜빡 졸았어" to VoiceIntent.Sleepy,
         "졸 뻔했어" to VoiceIntent.Sleepy,
         "졸린데 얼마나 남았어" to VoiceIntent.Sleepy,
+        "눈이 자꾸 감겨" to VoiceIntent.Sleepy,
+        "잠 좀 깨자" to VoiceIntent.Sleepy,
+        "커피 마셔도 졸려" to VoiceIntent.Sleepy,
     )
 
     @Test
@@ -264,6 +273,11 @@ class IntentParserTest {
         "휴게소 어디야" to VoiceIntent.WantRest,
         "졸음쉼터 들어가자" to VoiceIntent.WantRest,
         "다음 휴게소에서 쉬자" to VoiceIntent.WantRest,
+        // 쉬자고 하지는 않았지만 차에서 내리고 싶다는 말
+        "스트레칭 좀 하자" to VoiceIntent.WantRest,
+        "바람 좀 쐬자" to VoiceIntent.WantRest,
+        "허리 아파" to VoiceIntent.WantRest,
+        "커피 한잔 하고 싶다" to VoiceIntent.WantRest,
     )
 
     @Test
@@ -300,6 +314,7 @@ class IntentParserTest {
         "아이스크림 먹고 싶어" to VoiceIntent.Hungry,
         "배고픈데 휴게소 얼마나 남았어" to VoiceIntent.Hungry,
         "점심 먹었는데 또 배고파" to VoiceIntent.Hungry,
+        "밥도 먹자" to VoiceIntent.Hungry,
         "안 배고파" to null,
         "배 안 고파" to null,
         "배고프지 않아" to null,
@@ -318,6 +333,9 @@ class IntentParserTest {
         "충전해야 돼" to fuel,
         "주유 좀 하자" to fuel,
         "배터리 없어" to fuel,
+        "기름이 간당간당해" to fuel,
+        "주유 경고등 떴어" to fuel,
+        "기름 얼마 안 남았어" to fuel, // 묻는 말이 아니라 넣어야 한다는 말
         "기름 얼마나 남았어" to null, // 연료량은 코치가 모른다. 화장실 여유를 답하면 틀린 답이다
         "핸드폰 충전해야 돼" to null,
         "기름 안 넣어도 돼" to null,
@@ -338,6 +356,10 @@ class IntentParserTest {
         "아직 멀었어?" to VoiceIntent.HowLong,
         "언제쯤 도착해" to VoiceIntent.HowLong,
         "남은 시간 알려줘" to VoiceIntent.HowLong,
+        "몇 킬로야" to VoiceIntent.HowLong,
+        "몇 분 걸려" to VoiceIntent.HowLong,
+        "다 왔어?" to VoiceIntent.HowLong,
+        "거의 다 왔어" to null, // 묻는 말이 아니다
     )
 
     @Test
@@ -371,9 +393,12 @@ class IntentParserTest {
             "오케이" to accept, "콜" to accept, "ㅇㅇ" to accept, "가자" to accept, "들르자" to accept, "들러줘" to accept,
             "네 들러주세요" to accept, "네 가요" to accept, "어 가자" to accept, "그래 들렀다 가자" to accept,
             "넣어줘" to accept, "안내해줘" to accept, "응들르자" to accept,
-            // 수락하면서 그 정차를 다시 말한 것은 새 휴식 요청이 아니다 (R-F3)
+            // 수락하면서 그 정차를 다시 말한 것은 새 요청이 아니다 (R-F3)
             "응 휴게소 들르자" to accept,
             "휴게소 들르자" to accept,
+            "응 화장실 가자" to accept,
+            "휴게소 들러서 화장실 좀 가자" to accept,
+            "응 아이가 화장실 가고 싶대" to accept,
             prompt = id,
         )
         parsing(
@@ -392,10 +417,12 @@ class IntentParserTest {
             "아니 화장실 급해" to urgent,
             "화장실 급해" to urgent,
             "응 화장실 급해" to urgent, // 의도 하나만 돌려주는 parse는 급해를 삼키지 않는다 (카드 대답은 replyTo로 받는다)
+            "휴게소에서 밥 먹자" to VoiceIntent.Hungry,
             "배고파" to VoiceIntent.Hungry,
             "아이가 화장실 가고 싶대" to restroom("kid"),
             "얼마나 남았어?" to VoiceIntent.HowLong,
             "다음 휴게소 얼마나 남았어?" to VoiceIntent.HowLong, // '다음'이 있어도 묻는 말은 거절이 아니다
+            "그래 얼마나 걸려" to VoiceIntent.HowLong, // '그래'가 있어도 묻는 말은 수락이 아니다
             "응가 마려워" to restroom(), // '응'이 아니다
             prompt = id,
         )
@@ -407,6 +434,7 @@ class IntentParserTest {
             "네비 켜줘" to null,
             "바로 가자" to null, // 들르자는 말인지 그냥 가자는 말인지 알 수 없다: 버튼을 기다린다
             "예정대로 가자" to null,
+            "아이가 자고 있어서 조용히 가자" to null,
             prompt = id,
         )
     }
@@ -421,15 +449,19 @@ class IntentParserTest {
             "응", "응응", "웅", "엉", "어", "어어", "네", "네네", "넵", "예", "그래", "그래요", "그럼", "그럼요", "그러자",
             "좋아", "좋아요", "좋습니다", "좋지", "오케이", "ok", "OK", "콜", "당연하지", "물론이지", "알았어", "알겠습니다",
             "가자", "가줘", "가주세요", "갑시다", "들르자", "들러", "들러줘", "들렀다 가자", "쉬자", "쉬었다 가자",
-            "넣어줘", "부탁해", "안내해줘", "고고",
-            "응 가자", "네 들러주세요", "어 그래", "응 휴게소 들르자", "휴게소 가자", "괜찮네 들르자",
+            "넣어줘", "부탁해", "안내해줘", "좋은데", "그게 좋겠다", "그렇게 하자", "그러지 뭐", "들르면 좋겠다",
+            "아이가 잠들기 전에 들르자",
+            "응 가자", "네 들러주세요", "어 그래", "응 휴게소 들르자", "휴게소 가자", "거기로 가자", "괜찮네 들르자", "밥 먹고 가자",
+            "지나가는 길에 들르자", "하이패스 휴게소 들르자",
             "응가자", "네가주세요", // 띄어쓰기 없는 STT: "응 가자", "네 가주세요"
         )
         answers(
             "아니요", YesNo.NO,
             "아니", "아니요", "아니야", "아뇨", "아냐", "아닙니다", "괜찮아", "괜찮아요", "괜찮습니다", "됐어", "됐어요", "싫어",
-            "나중에", "이따가", "다음에", "다음 휴게소 가자", "그냥 가자", "그냥 가", "계속 가자", "쭉 가자", "집에 가자",
-            "그냥 지나가자", "지나쳐", "패스", "취소", "별로", "굳이",
+            "나중에", "이따가", "다음에", "다음 휴게소 가자", "좀 있다가", "한 시간 뒤에", "도착해서",
+            "그냥 가자", "그냥 가", "계속 가자", "쭉 가자", "집에 가자", "조금만 더 가자",
+            "그냥 지나가자", "지나쳐", "패스", "취소", "별로", "굳이", "귀찮아", "괜찮다니까", "괜찮은 것 같아", "난 괜찮은데",
+            "애는 괜찮대", "아이는 안 간대", "조금만 참자", "더 가서 쉬자", "30분만 더 가자", "아이 깨면 들르자",
             "안 들러도 돼", "안 가도 돼", "안 가", "안 쉬어도 돼", "안 돼", "안 좋아", "필요 없어", "들르지 말자", "가지 마",
             "아니 안 급해", "안 급해", "별로 안 급해", "참을 수 있어",
             "응 아니 됐어", "아니 괜찮아 그냥 가자",
@@ -440,7 +472,205 @@ class IntentParserTest {
             "화장실 급해", "배고파", "얼마나 남았어", "다음 휴게소 얼마나 남았어?",
             "아이가 자", "애기 자", // 잠든 아이 이야기는 '가자'가 아니다
             "응가 마려워", "응급실", "네비 켜줘", "네 시에 도착해", "예정대로", "그래도", "콜라 마시고 싶어", "좋아하는 노래 틀어줘",
-            "바로 가자", "빨리 가자", // 어느 쪽인지 알 수 없다
+            // '가자'는 앞말이 대답·정차·'들렀다'일 때만 수락이다. 계속 가자는 말일 수 있으면 버튼을 기다린다
+            "바로 가자", "빨리 가자", "조용히 가자", "천천히 가자", "일단 가자", "고고", "괜찮겠지",
+            // 묻는 말이 섞이면 대답으로 보지 않는다 (틀린 수락은 경유지를 넣고, 틀린 거절은 카드를 닫는다)
+            "그래 얼마나 걸려", "응 얼마나 남았어", "아니 얼마나 남았는데", "다음 휴게소가 어디야", "거기 뭐야",
+            // STT가 물음표를 주면 되묻는 말이다 (못 들었다는 "네?")
+            "네?", "응?", "그래?", "들를까?",
+            "못 참겠어", // '참자'가 아니다
+            "난 괜찮은데 애가 가고 싶대", // 거절이 아니다
+            "뒤에 다 자", // '한 시간 뒤에'가 아니다
         )
+    }
+
+    // ------------------------------------------------------------ 카드 대답 (replyTo)
+
+    @Test
+    fun aCardReplyIsOneAnswer() {
+        fun replies(name: String, stop: String?, vararg rows: Pair<String?, CardReply>) =
+            table(name, rows.toList()) { parser.replyTo(it, family, cardStopName = stop) }
+        fun yes(other: VoiceIntent? = null) = CardReply(YesNo.YES, other)
+        fun no(other: VoiceIntent? = null) = CardReply(YesNo.NO, other)
+        fun unknown(other: VoiceIntent? = null) = CardReply(YesNo.UNKNOWN, other)
+
+        replies(
+            "휴게소를 묻는 카드", "옥산휴게소(부산방향)",
+            "응" to yes(), "아니" to no(), null to unknown(), "음" to unknown(),
+            // 수락: 그 정차에 가면 풀리는 말은 새 요청이 아니다 (예전: "…쉬어 갈까요?"를 한 번 더 물었다)
+            "응 휴게소 들르자" to yes(),
+            "옥산휴게소에서 쉬자" to yes(),
+            "좋아 쉬었다 가자" to yes(),
+            "휴게소 가자" to yes(),
+            "응 화장실 가자" to yes(),
+            "응 화장실 급해" to yes(),
+            "응 아이가 화장실 가고 싶대" to yes(),
+            "응 졸려" to yes(),
+            "응 근데 배고파" to yes(), // 휴게소에서 먹을 수 있다
+            "옥산 가자" to yes(), // 카드의 정차 이름을 댔다
+            // 거절: 부정한 말은 요청이 아니다 (예전: "아니 안 급해"가 급해 모드를 열었다)
+            "아니 안 급해" to no(),
+            "아니 괜찮아" to no(),
+            "아니 됐어" to no(),
+            "괜찮아 그냥 가자" to no(),
+            "화장실 안 가도 돼" to no(),
+            // 거절하면서 분명히 말한 다른 요청은 전한다
+            "아니 화장실 급해" to no(urgent),
+            "아니 근데 졸려" to no(VoiceIntent.Sleepy),
+            "아니 배고파" to no(VoiceIntent.Hungry),
+            // 지금 할 일이 아니거나 카드의 정차 이야기면 전하지 않는다
+            "아니 다음 휴게소에서 쉬자" to no(),
+            "더 가서 쉬자" to no(),
+            "아니 나중에 화장실 갈래" to no(),
+            "아니 옥산휴게소 말고 다른 데서 쉬자" to no(),
+            // 대답이 아닌 말: 카드는 버튼을 기다리고 요청은 전한다
+            "배고파" to unknown(VoiceIntent.Hungry),
+            "화장실 급해" to unknown(urgent),
+            "아이가 화장실 가고 싶대" to unknown(restroom("kid")),
+            "얼마나 남았어?" to unknown(VoiceIntent.HowLong),
+            "다음 휴게소 얼마나 남았어?" to unknown(VoiceIntent.HowLong),
+            // 묻는 말이 섞이면 수락도 거절도 아니다: 답을 듣고 다시 정한다
+            "응 얼마나 남았어" to unknown(VoiceIntent.HowLong),
+            "그래 얼마나 걸려?" to unknown(VoiceIntent.HowLong),
+            "아니 다음 휴게소 얼마나 남았어?" to unknown(VoiceIntent.HowLong),
+            "아이가 자고 있어서 조용히 가자" to unknown(), // 계속 가자는 말이다
+            "다음 휴게소가 어디야" to unknown(),
+            "거기 화장실 있어?" to unknown(),
+            "난 괜찮은데 애가 가고 싶대" to unknown(), // 거절로 닫지 않는다
+            // 카드의 말을 되받은 것은 요청이 아니다
+            "휴게소?" to unknown(),
+            "옥산휴게소" to unknown(),
+            "화장실" to unknown(),
+            "아이가 자" to unknown(),
+            // 띄어쓰기 없는 STT
+            "아니안급해" to no(),
+            "응휴게소들르자" to yes(),
+            "아니화장실급해" to no(urgent),
+        )
+        replies(
+            "졸음쉼터를 묻는 카드: 식당·수유실이 없다", "오산졸음쉼터",
+            "응 근데 배고파" to yes(VoiceIntent.Hungry),
+            "응 기저귀도 갈아야 해" to yes(feeding("baby")),
+            "응 화장실 급해" to yes(),
+            "응 쉬자" to yes(),
+        )
+        replies(
+            "정차 없는 카드 (환기 등)", null,
+            "응 화장실 급해" to yes(urgent),
+            "응 배고파" to yes(VoiceIntent.Hungry),
+            "응 쉬자" to yes(),
+            "응 졸려" to yes(),
+            "아니 화장실 급해" to no(urgent),
+            "아니 안 급해" to no(),
+        )
+    }
+
+    // ------------------------------------------------------------ 잠든 탑승자 (parseSpoken)
+
+    @Test
+    fun sleepingAndWakingAreCoachStatementsNotEngineIntents() {
+        fun spoken(name: String, people: List<Occupant>, vararg rows: Pair<String?, Spoken?>, prompt: String? = null) =
+            table(name, rows.toList()) { parser.parseSpoken(it, people, activePromptId = prompt) }
+        fun asleep(who: String?) = Spoken.Asleep(who, asleep = true)
+        fun awake(who: String?) = Spoken.Asleep(who, asleep = false)
+        fun intent(i: VoiceIntent) = Spoken.Intent(i)
+
+        spoken(
+            "아이 하나", withKid,
+            "아이 잠들었어" to asleep("kid"),
+            "애기 자" to asleep("kid"),
+            "아이가 자" to asleep("kid"),
+            "아이가 자요" to asleep("kid"),
+            "애가 잔다" to asleep("kid"),
+            "아이 자는 중이야" to asleep("kid"),
+            "잠들었어" to asleep("kid"), // 가리키지 않아도 아이는 하나다
+            "자고 있어" to asleep("kid"),
+            "곯아떨어졌어" to asleep("kid"),
+            "아직 안 깼어" to asleep("kid"),
+            "아직 자" to asleep("kid"),
+            "아이가 자서 화장실 안 가도 돼" to asleep("kid"),
+            "깼어" to awake("kid"),
+            "일어났어" to awake("kid"),
+            "아이 깼어" to awake("kid"),
+            "잠 깼어" to awake("kid"),
+            "아이가 일어났어요" to awake("kid"),
+            "아이가 안 자" to awake("kid"),
+            "아이가 안 자고 떠들어" to awake("kid"),
+            "아직 안 자" to awake("kid"),
+            "아이가 자고 있어서 조용히 가자" to asleep("kid"),
+            "뒤에 다 자" to asleep("kid"),
+            "뒷자리 다 자고 있어" to asleep("kid"),
+            "아이가자" to asleep("kid"), // 띄어쓰기 없는 STT
+        )
+        spoken(
+            "가족", family,
+            "아이 잠들었어" to asleep("kid"),
+            "첫째 잠들었어" to asleep("kid"),
+            "애기 자" to asleep("baby"),
+            "아기가 잠들었어" to asleep("baby"),
+            "할머니 주무셔" to asleep("grandma"),
+            "강아지 자" to asleep("dog"),
+            // 아이가 둘(아이와 아기)인데 가리키지 않았다: 코어가 고른다
+            "자고 있어" to asleep(null),
+            "깼어" to awake(null),
+        )
+        spoken(
+            "아이 둘", twoKids,
+            "둘째 잠들었어" to asleep("kid2"),
+            "첫째는 벌써 자" to asleep("kid"),
+            "애들 다 자" to asleep(null),
+            "둘 다 잠들었어" to asleep(null),
+        )
+        spoken(
+            "운전자 혼자", alone,
+            "아이 잠들었어" to asleep(null), // 아이를 설정하지 않았다: 코어가 알린다
+            "자고 있어" to asleep(null),
+            "와이프 자고 있어" to null, // 설정에 없는 어른 이야기를 아이에게 붙이지 않는다
+        )
+        spoken(
+            "어른 동승", listOf(driver, wife, kid),
+            "와이프 자고 있어" to asleep("wife"),
+            "아내가 잠들었어" to asleep("wife"),
+        )
+        spoken(
+            "잠 이야기가 아니다", withKid,
+            // 운전자 자신의 졸림·휴식
+            "졸려" to intent(VoiceIntent.Sleepy),
+            "잠 와" to intent(VoiceIntent.Sleepy),
+            "잠들 것 같아" to intent(VoiceIntent.Sleepy),
+            "자고 싶어" to intent(VoiceIntent.Sleepy),
+            "아이도 자고 나도 졸려" to intent(VoiceIntent.Sleepy),
+            "한숨 자고 가자" to intent(VoiceIntent.WantRest),
+            "쉬자" to intent(VoiceIntent.WantRest),
+            // 다른 요청이 함께 있으면 요청이 먼저다
+            "화장실 급해" to intent(urgent),
+            "아이가 깼는데 화장실 가고 싶대" to intent(restroom("kid")),
+            // '자'로 끝나거나 '자'가 든 다른 말
+            "가자" to null,
+            "애들아 가자" to null,
+            "아이 자리 좀 봐줘" to null,
+            "아이가 자고 싶대" to null,
+            "잠깐만" to null,
+            "창문 좀 열어 줄래" to null,
+            null to null,
+        )
+        spoken(
+            "카드가 떠 있을 때", withKid,
+            "응" to intent(VoiceIntent.Accept("p1#2")),
+            "아니" to intent(VoiceIntent.Decline("p1#2")),
+            "아이 잠들었어" to asleep("kid"),
+            "아이가 자" to asleep("kid"), // 수락('가자')이 아니다
+            prompt = "p1#2",
+        )
+    }
+
+    @Test
+    fun theReviewsOriginalAssertionsHold() {
+        // 예전 closure/ReviewIntentParserTest 그대로 (탑승자: 운전자와 일곱 살 아이)
+        val people = listOf(Occupant("driver", OccupantType.ADULT), Occupant("kid", OccupantType.CHILD, ageYears = 7))
+        assertEquals(VoiceIntent.HowLong, parser.parse("화장실까지 얼마나 남았어?", people, activePromptId = null))
+        assertEquals(YesNo.NO, parser.yesNo("아니 안 급해"))
+        assertEquals(null, parser.parse("아니 안 급해", people, activePromptId = null))
+        assertEquals(null, parser.parse("화장실 안 가도 돼", people, activePromptId = null))
     }
 }
