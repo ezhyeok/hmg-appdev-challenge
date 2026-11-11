@@ -64,8 +64,9 @@ class PromptMachineTest {
     private val appMs = PromptMachine.APP_CARD_MS
     private val t0 = 1_000_000_000_000L
 
-    private fun key(p: Prompt, generation: Int = 0) = PromptMachine.keyOf(p.id, generation)
-    private fun shown(p: Prompt, generation: Int = 0) = p.copy(id = key(p, generation))
+    /** 카드 key = 질문 id + 띄운 순번 (기계가 띄울 때마다 1씩 오른다). 첫 카드는 1 */
+    private fun key(p: Prompt, seq: Int = 1) = PromptMachine.keyOf(p.id, seq)
+    private fun shown(p: Prompt, seq: Int = 1) = p.copy(id = key(p, seq))
 
     /** 기계 하나와 두 시계. voice=false면 설정에서 음성을 끈 것 */
     private class Rig(var voice: Boolean = true, var stt: Boolean = true) {
@@ -76,8 +77,8 @@ class PromptMachineTest {
         fun tick(offered: Prompt?, parked: Boolean = false, next: Recommendation? = null) = on(EngineTick(offered, next, parked))
     }
 
-    private fun showEffects(p: Prompt, at: Long = 0, life: Long = engineMs, reasons: List<Reason> = emptyList(), listen: Boolean = true, gen: Int = 0) =
-        listOf(Show(shown(p, gen), reasons), ScheduleExpiry(key(p, gen), at + life), Ask(key(p, gen), p.speech, listen))
+    private fun showEffects(p: Prompt, at: Long = 0, life: Long = engineMs, reasons: List<Reason> = emptyList(), listen: Boolean = true, seq: Int = 1) =
+        listOf(Show(shown(p, seq), reasons), ScheduleExpiry(key(p, seq), at + life), Ask(key(p, seq), p.speech, listen))
 
     // ---------------------------------------------------------------- 전이표
 
@@ -132,13 +133,13 @@ class PromptMachineTest {
         // ----- Asking(엔진 마지막 기회 p1)
         Row("묻는 중 × 같은 질문 → 그대로", askingP1, EngineTick(p1, null, false), PromptState.Asking::class, emptyList()),
         Row("묻는 중 × 엔진이 더 급한 질문으로 바꿈 → 같은 틱에 새 카드 (D1)", askingP1, EngineTick(p2, null, false),
-            PromptState.Asking::class, listOf(CancelVoice) + showEffects(p2)),
+            PromptState.Asking::class, listOf(CancelVoice) + showEffects(p2, seq = 2)),
         Row("묻는 중 × 엔진이 거둠(지나침·만료) → 카드와 음성을 내린다 (D2)", askingP1, EngineTick(null, null, false),
             PromptState.Idle::class, listOf(CancelVoice, Show(null))),
         Row("묻는 중 × P로 세움 → 주행 질문은 거둔다", askingP1, EngineTick(p1, null, true),
             PromptState.Idle::class, listOf(CancelVoice, Show(null))),
-        Row("묻는 중 × 안내 → 말만 하고 카드는 그대로", askingP1, EngineTick(info, null, false),
-            PromptState.Asking::class, listOf(Speak(info.speech), Report(info.id, true))),
+        Row("묻는 중 × 안내 → 묻던 음성을 멈추고 대답을 말한다, 카드는 그대로 (버튼 대기)", askingP1, EngineTick(info, null, false),
+            PromptState.AwaitingTap::class, listOf(CancelVoice, Speak(info.speech), Report(info.id, true))),
         Row("묻는 중 × 실제 수명이 지난 틱 (타이머를 잃어도 틱이 거둔다)", askingP1, EngineTick(p1, null, false),
             PromptState.Idle::class, listOf(CancelVoice, Show(null)), elapsed = engineMs),
         Row("묻는 중 × '응' → 카드를 내리고 들르기 (보고는 성공 뒤)", askingP1, Heard(key(p1), YesNo.YES),
@@ -161,16 +162,16 @@ class PromptMachineTest {
         Row("묻는 중 × 수명 전 만료 신호 → 무시", askingP1, Expired(key(p1)), PromptState.Asking::class, emptyList(), elapsed = engineMs - 1),
         Row("묻는 중 × 수명 만료", askingP1, Expired(key(p1)), PromptState.Idle::class, listOf(CancelVoice, Show(null)), elapsed = engineMs),
         Row("묻는 중 × 앱 급해 결과 → 앞선다", askingP1, AppPrompt(urgent),
-            PromptState.Asking::class, listOf(CancelVoice) + showEffects(urgent, life = appMs)),
+            PromptState.Asking::class, listOf(CancelVoice) + showEffects(urgent, life = appMs, seq = 2)),
         Row("묻는 중 × 초기화", askingP1, Reset, PromptState.Idle::class, listOf(CancelVoice, Show(null), PublishGoToResult(null))),
         Row("묻는 중 × 다른 곳 들르기 명령 → 카드는 그대로", askingP1, GoTo(jukam),
             PromptState.Asking::class, listOf(PublishGoToResult(null), StartGoTo(1, jukam, parked = false))),
 
         // ----- AwaitingTap(엔진 p1): 음성이 끝났으니 멈출 음성이 없다
         Row("버튼 대기 × 엔진이 거둠", awaitingP1, EngineTick(null, null, false), PromptState.Idle::class, listOf(Show(null))),
-        Row("버튼 대기 × 엔진이 바꿈", awaitingP1, EngineTick(p2, null, false), PromptState.Asking::class, showEffects(p2)),
+        Row("버튼 대기 × 엔진이 바꿈", awaitingP1, EngineTick(p2, null, false), PromptState.Asking::class, showEffects(p2, seq = 2)),
         Row("버튼 대기 × 수락 버튼", awaitingP1, Tapped(key(p1), true), PromptState.Idle::class, listOf(Show(null)) + goToOksan),
-        Row("버튼 대기 × 마이크로 '응'", awaitingP1, Heard(key(p1), YesNo.YES), PromptState.Idle::class, listOf(Show(null)) + goToOksan),
+        Row("버튼 대기 × 같은 카드 음성 작업의 늦은 '응'", awaitingP1, Heard(key(p1), YesNo.YES), PromptState.Idle::class, listOf(Show(null)) + goToOksan),
         Row("버튼 대기 × 만료", awaitingP1, Expired(key(p1)), PromptState.Idle::class, listOf(Show(null)), elapsed = engineMs),
         Row("버튼 대기 × P로 세움", awaitingP1, EngineTick(p1, null, true), PromptState.Idle::class, listOf(Show(null))),
 
@@ -179,12 +180,12 @@ class PromptMachineTest {
         Row("급해 카드 × 엔진 질문 없음 → 그대로", askingUrgent, EngineTick(null, null, false), PromptState.Asking::class, emptyList()),
         Row("급해 카드 × P로 세움 → 그대로 (서 있어도 쓸모 있다)", askingUrgent, EngineTick(null, null, true), PromptState.Asking::class, emptyList()),
         Row("급해 카드 × 안내 → 말한다", askingUrgent, EngineTick(info, null, false),
-            PromptState.Asking::class, listOf(Speak(info.speech), Report(info.id, true))),
+            PromptState.AwaitingTap::class, listOf(CancelVoice, Speak(info.speech), Report(info.id, true))),
         Row("급해 카드 × 수락 → 들르기 (엔진 질문이 아니라 보고 없음)", askingUrgent, Tapped(key(urgent), true),
             PromptState.Idle::class, listOf(CancelVoice, Show(null), PublishGoToResult(null), StartGoTo(1, gasStation, parked = false))),
         Row("급해 카드 × 거절 → 보고 없음", askingUrgent, Tapped(key(urgent), false), PromptState.Idle::class, listOf(CancelVoice, Show(null))),
         Row("급해 카드 × 새 급해 결과 → 바꾼다", askingUrgent, AppPrompt(urgent2),
-            PromptState.Asking::class, listOf(CancelVoice) + showEffects(urgent2, life = appMs)),
+            PromptState.Asking::class, listOf(CancelVoice) + showEffects(urgent2, life = appMs, seq = 2)),
         Row("급해 카드 × 같은 급해 결과 다시 → 무시", askingUrgent, AppPrompt(urgent), PromptState.Asking::class, emptyList()),
         Row("급해 카드 × 90초 수명", askingUrgent, Expired(key(urgent)), PromptState.Idle::class, listOf(CancelVoice, Show(null)), elapsed = appMs),
 
@@ -197,7 +198,8 @@ class PromptMachineTest {
         Row("장소 없는 휴식 권유 × 수락 → 보고만", askingRestNoStop, Tapped(key(restNoStop), true),
             PromptState.Idle::class, listOf(CancelVoice, Show(null), Report(restNoStop.id, true))),
         Row("휴식 권유 × 엔진이 마지막 기회로 밀어냄 (REST → LAST_CHANCE)", askingRest, EngineTick(p1, nextFor(oksan, jamReason), false),
-            PromptState.Asking::class, listOf(CancelVoice) + showEffects(p1, reasons = listOf(jamReason))),
+            PromptState.Asking::class, listOf(CancelVoice) + showEffects(p1, reasons = listOf(jamReason), seq = 2)),
+        Row("Idle × 결과 닫기", idle, PromptEvent.DismissGoToResult, PromptState.Idle::class, listOf(PublishGoToResult(null))),
     )
 
     @Test
@@ -256,7 +258,7 @@ class PromptMachineTest {
         val r = Rig()
         val tbt = PromptFakes.stop("tbt:죽암휴게소", "죽암휴게소", routeDistanceM = 4_400.0)
         r.tick(Prompt("p9", PromptKind.LAST_CHANCE, "죽암휴게소 들를까요?", tbt, expiresAt = 0))
-        r.on(Tapped(PromptMachine.keyOf("p9", 0), true))
+        r.on(Tapped(r.m.current!!.key, true))
         val live = tbt.copy(routeDistanceM = 2_600.0)
         val done = r.on(GoToFinished(1, GoToOutcome.ON_ROUTE, stop = live))
         assertEquals(PublishGoToResult(GoToResult(live, GoToOutcome.ON_ROUTE, t0)), done[0])
@@ -282,7 +284,7 @@ class PromptMachineTest {
         assertEquals(emptyList<PromptEffect>(), r.on(GoTo(mangHyang)))
         val done = r.on(GoToFinished(1, GoToOutcome.WAYPOINT_ADDED))
         assertEquals("끝나면 마지막에 줄 선 곳을 시작한다 (죽암은 망향에 밀렸다)", StartGoTo(3, mangHyang, parked = false), done.last())
-        assertEquals(PublishGoToResult(null), done[done.size - 2])
+        assertTrue("방금 결과를 같은 묶음에서 지우지 않는다", done.none { it == PublishGoToResult(null) })
         assertNull(r.m.goToQueued)
     }
 
@@ -303,8 +305,16 @@ class PromptMachineTest {
         r.tick(p1)
         r.on(GoTo(oksan))
         val done = r.on(GoToFinished(1, GoToOutcome.WAYPOINT_ADDED))
-        assertEquals(listOf(CancelVoice, Show(null)), done.filter { it is CancelVoice || it is Show })
-        assertEquals(Report("p1", true), done.last())
+        assertEquals(
+            "카드를 먼저 내리고(음성 멈춤) 결과를 말한다. 반대 순서면 CancelVoice가 방금 시작한 안내를 끊는다",
+            listOf(
+                PublishGoToResult(GoToResult(oksan, GoToOutcome.WAYPOINT_ADDED, t0)),
+                CancelVoice, Show(null),
+                Speak("옥산휴게소를 경유지로 넣었어요"),
+                Report("p1", true),
+            ),
+            done,
+        )
         assertNull(r.m.current)
         assertEquals("닫은 질문은 다시 띄우지 않는다", emptyList<PromptEffect>(), r.tick(p1))
         // 실패하면 카드는 남아 있다
@@ -313,6 +323,102 @@ class PromptMachineTest {
         r2.on(GoTo(oksan))
         r2.on(GoToFinished(1, GoToOutcome.FAILED))
         assertEquals(key(p1), r2.m.current?.key)
+    }
+
+    @Test
+    fun aFailedResultStaysVisibleWhenTheQueuedGoToStarts() {
+        val r = Rig()
+        r.on(GoTo(oksan))
+        r.on(GoTo(jukam))
+        val done = r.on(GoToFinished(1, GoToOutcome.FAILED))
+        assertEquals(
+            "실패 카드가 보여야 '다시 눌러 주세요'가 맞다",
+            listOf(
+                PublishGoToResult(GoToResult(oksan, GoToOutcome.FAILED, t0)),
+                Speak("내비에 넣지 못했어요. 화면에서 다시 눌러 주세요"),
+                StartGoTo(2, jukam, parked = false),
+            ),
+            done,
+        )
+    }
+
+    @Test
+    fun aGoToThatNeverFinishesIsFailedByTheWatchdog() {
+        // 결과가 끝내 오지 않으면(실행 취소, 내비 스레드가 막힘, Error) 뒤의 모든 들르기가 영영 줄만 선다
+        val r = Rig()
+        r.on(GoTo(oksan))
+        r.on(GoTo(jukam))
+        r.elapsed = PromptMachine.GO_TO_WATCHDOG_MS - 1
+        assertEquals(emptyList<PromptEffect>(), r.tick(null))
+        r.elapsed = PromptMachine.GO_TO_WATCHDOG_MS
+        assertEquals(
+            listOf(
+                PublishGoToResult(GoToResult(oksan, GoToOutcome.FAILED, t0)),
+                Speak("내비에 넣지 못했어요. 화면에서 다시 눌러 주세요"),
+                StartGoTo(2, jukam, parked = false),
+            ),
+            r.tick(null),
+        )
+        assertEquals("늦게 온 결과는 버린다", emptyList<PromptEffect>(), r.on(GoToFinished(1, GoToOutcome.WAYPOINT_ADDED)))
+        assertEquals(jukam, r.m.goToInFlight)
+    }
+
+    @Test
+    fun theWatchdogAlsoFreesAGoToCancelledByAWorldSwitch() {
+        val r = Rig()
+        r.tick(p1)
+        r.on(Tapped(key(p1), true))
+        r.on(Reset) // 코어가 실행을 취소해 결과가 오지 않는다
+        r.elapsed = PromptMachine.GO_TO_WATCHDOG_MS
+        val freed = r.tick(null)
+        assertTrue("옛 세계 질문은 보고하지 않는다", freed.none { it is Report })
+        assertNull(r.m.goToInFlight)
+        assertEquals(StartGoTo(2, jukam, parked = false), r.on(GoTo(jukam)).last())
+    }
+
+    @Test
+    fun twoAcceptsForTheSamePlaceAreBothReported() {
+        val restAtOksan = Prompt("p8", PromptKind.REST_SUGGESTION, "옥산휴게소에서 쉬어 갈까요?", oksan, expiresAt = 0)
+        val r = Rig()
+        r.tick(p1)
+        r.on(Tapped(key(p1), true))
+        r.tick(restAtOksan)
+        r.on(Tapped(key(restAtOksan, 2), true))
+        val done = r.on(GoToFinished(1, GoToOutcome.WAYPOINT_ADDED))
+        assertEquals(listOf(Report("p1", true), Report("p8", true)), done.filterIsInstance<Report>())
+    }
+
+    @Test
+    fun theRetryLinkIsShortLivedAndDismissable() {
+        val r = Rig()
+        r.tick(p1)
+        r.on(Tapped(key(p1), true))
+        r.on(GoToFinished(1, GoToOutcome.FAILED))
+        // 30분 뒤 계획 화면에서 같은 곳을 누른 것은 그 질문의 다시 시도가 아니다
+        r.elapsed = PromptMachine.RETRY_LINK_MS + 1
+        r.on(GoTo(oksan))
+        assertTrue(r.on(GoToFinished(2, GoToOutcome.WAYPOINT_ADDED)).none { it is Report })
+
+        val r2 = Rig()
+        r2.tick(p1)
+        r2.on(Tapped(key(p1), true))
+        r2.on(GoToFinished(1, GoToOutcome.FAILED))
+        assertEquals(listOf(PublishGoToResult(null)), r2.on(PromptEvent.DismissGoToResult))
+        r2.on(GoTo(oksan))
+        assertTrue("실패 카드를 닫았으면 다시 시도가 아니다", r2.on(GoToFinished(2, GoToOutcome.WAYPOINT_ADDED)).none { it is Report })
+    }
+
+    @Test
+    fun aGoToFromBeforeResetDoesNotAnswerTheNewEnginesCard() {
+        val r = Rig()
+        r.tick(p1)
+        r.on(Tapped(key(p1), true))
+        r.on(Reset)
+        val newP1 = p1.copy(id = "e2-p1")
+        r.tick(newP1)
+        val done = r.on(GoToFinished(1, GoToOutcome.WAYPOINT_ADDED))
+        assertTrue(done.none { it is Report || it == Show(null) })
+        assertEquals("e2-p1", r.m.current?.prompt?.id)
     }
 
     @Test
@@ -377,6 +483,31 @@ class PromptMachineTest {
     }
 
     @Test
+    fun aDrivingPromptDisplacedByTheUrgentCardDoesNotReturnAfterParking() {
+        val r = Rig()
+        r.tick(p1)
+        r.on(AppPrompt(urgent))
+        r.tick(p1, parked = true)
+        r.on(Tapped(key(urgent, 2), false))
+        r.tick(p1, parked = true)
+        assertEquals("띄웠던 주행 질문은 P에서 닫는다", emptyList<PromptEffect>(), r.tick(p1, parked = false))
+    }
+
+    @Test
+    fun aStaleHeardFromACancelledAskDoesNotTouchTheReshownCard() {
+        // 취소된 음성 작업이 늦게 보낸 대답이 다시 띄운 같은 질문(새 음성 작업 중)에 닿으면 상태가 어긋난다
+        val r = Rig()
+        r.tick(p1)
+        r.on(AppPrompt(urgent))
+        r.on(Tapped(key(urgent, 2), false))
+        r.tick(p1)
+        assertEquals(key(p1, 3), r.m.current!!.key)
+        assertEquals(emptyList<PromptEffect>(), r.on(Heard(key(p1, 1), YesNo.UNKNOWN)))
+        assertTrue(r.m.state is PromptState.Asking)
+        assertEquals("새 음성 작업을 멈춘다", listOf(CancelVoice, Show(null)), r.tick(null))
+    }
+
+    @Test
     fun anInfoTickDoesNotHideTheCardAndTheCardIsNotReasked() {
         // 엔진 출력은 질문 하나뿐이다. 안내가 나온 틱에는 카드 질문이 살아 있는지 모르니 카드를 그대로 두고 다음 틱에 판단한다
         val r = Rig()
@@ -385,6 +516,16 @@ class PromptMachineTest {
         assertEquals("엔진이 다시 p1을 내면 그대로 (다시 묻지 않는다)", emptyList<PromptEffect>(), r.tick(p1))
         assertEquals(key(p1), r.m.current!!.key)
         assertEquals("엔진이 안내 뒤 p1을 버렸으면 다음 틱에 내린다", listOf(Show(null)), r.tick(null).filterNot { it is CancelVoice })
+    }
+
+    @Test
+    fun anInfoAnswerIsNotCutOffWhenTheCardGoesAway() {
+        // 엔진은 사용자 요청(얼마나 남았어)에 답하며 떠 있던 질문을 버린다(엔진 감사 P1). 다음 틱에 카드를 내릴 때
+        // 멈출 음성이 없어야 한다 (CancelVoice가 1초 전에 시작한 대답을 끊지 않게)
+        val r = Rig()
+        r.tick(p1)
+        assertEquals(listOf(CancelVoice, Speak(info.speech), Report(info.id, true)), r.tick(info))
+        assertEquals(listOf(Show(null)), r.tick(null))
     }
 
     @Test
@@ -400,7 +541,7 @@ class PromptMachineTest {
         val r = Rig()
         r.tick(rest)
         r.tick(p1)
-        assertEquals(listOf(CancelVoice) + showEffects(rest), r.tick(rest))
+        assertEquals(listOf(CancelVoice) + showEffects(rest, seq = 3), r.tick(rest))
     }
 
     // ---------------------------------------------------------------- 앱 급해 결과가 우선 (서비스 감사 D2)
@@ -412,8 +553,8 @@ class PromptMachineTest {
         r.on(AppPrompt(urgent))
         assertEquals(emptyList<PromptEffect>(), r.tick(p1))
         r.elapsed = 20_000
-        r.on(Tapped(key(urgent), false))
-        assertEquals("급해 카드가 끝나면 엔진이 아직 내는 질문을 다시 띄우고 묻는다", showEffects(p1, at = 20_000), r.tick(p1))
+        r.on(Tapped(key(urgent, 2), false))
+        assertEquals("급해 카드가 끝나면 엔진이 아직 내는 질문을 다시 띄우고 묻는다 (새 key)", showEffects(p1, at = 20_000, seq = 3), r.tick(p1))
     }
 
     @Test
@@ -435,7 +576,7 @@ class PromptMachineTest {
         r.on(Reset)
         assertEquals(emptyList<PromptEffect>(), r.on(Tapped(oldKey, true)))
         // 새 엔진이 id를 다시 p1부터 셌다 (엔진 감사 P3). 새 질문은 띄우고, 옛 카드의 대답은 새 질문에 닿지 않는다
-        assertEquals(showEffects(p1, gen = 1), r.tick(p1))
+        assertEquals(showEffects(p1, seq = 2), r.tick(p1))
         assertEquals(emptyList<PromptEffect>(), r.on(Tapped(oldKey, true)))
         assertEquals(emptyList<PromptEffect>(), r.on(Heard(oldKey, YesNo.YES)))
         assertEquals(PromptKind.LAST_CHANCE, r.m.current!!.prompt.kind)
@@ -447,7 +588,7 @@ class PromptMachineTest {
         r.tick(p1)
         r.on(Heard(key(p1), YesNo.NO))
         r.on(Reset)
-        assertEquals(showEffects(p1, gen = 1), r.tick(p1))
+        assertEquals(showEffects(p1, seq = 2), r.tick(p1))
     }
 
     @Test
@@ -498,12 +639,12 @@ class PromptMachineTest {
         all += r.tick(freshAir)
         all += r.on(Tapped(key(freshAir), true))
         all += r.tick(p1)
-        all += r.on(Tapped(key(p1), true))
+        all += r.on(Tapped(key(p1, 2), true))
         all += r.on(GoToFinished(1, GoToOutcome.WAYPOINT_ADDED))
         all += r.on(AppPrompt(urgent))
         assertTrue(all.toString(), all.none { it is Ask || it is Speak })
         assertTrue(all.contains(FreshAir(announce = false)))
-        assertTrue("카드는 보인다", all.contains(Show(shown(urgent))))
+        assertTrue("카드는 보인다", all.contains(Show(shown(urgent, 3))))
     }
 
     // ---------------------------------------------------------------- 화면이 쓰는 값

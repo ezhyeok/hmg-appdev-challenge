@@ -18,6 +18,7 @@ import dev.shimpyo.engine.StopKind
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.emptyFlow
+import kotlinx.coroutines.withTimeout
 
 /**
  * 질문·들르기·정차 기록 테스트의 가짜들 (prompt 담당). 다른 담당의 가짜와 이름이 겹치지 않게 PromptFakes 안에 둔다.
@@ -83,7 +84,8 @@ object PromptFakes {
 
     /**
      * 들르기 실행(GoToRunner)용 내비. 경로 상태 조회 결과와 명령 결과를 차례로 정해 둔다.
-     * 각 목록의 값: NaviMode/Boolean = 그 값을 돌려준다, Throwable = 던진다, HANG = 끝나지 않는다. 목록이 비면 마지막 값을 반복한다.
+     * 각 목록의 값: NaviMode/Boolean = 그 값을 돌려준다, Throwable = 던진다, HANG = 끝나지 않는다, PORT_TIMEOUT = 포트 자체 시간 초과.
+     * 목록이 비면 마지막 값을 반복한다.
      */
     class Navi(
         modes: List<Any> = listOf(NaviMode.SAFE_GUIDING),
@@ -100,6 +102,7 @@ object PromptFakes {
             calls += label
             return when (val v = next(commands)) {
                 HANG -> awaitCancellation()
+                PORT_TIMEOUT -> withTimeout(1) { awaitCancellation() }
                 is Throwable -> throw v
                 else -> v as Boolean
             }
@@ -128,6 +131,8 @@ object PromptFakes {
 
         companion object {
             val HANG = Any()
+            /** 포트 안에서 자기 withTimeout이 끝난다 (TimeoutCancellationException) */
+            val PORT_TIMEOUT = Any()
         }
     }
 }

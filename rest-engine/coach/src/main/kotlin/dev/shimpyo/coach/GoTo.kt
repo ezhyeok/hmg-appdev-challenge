@@ -3,7 +3,9 @@ package dev.shimpyo.coach
 import dev.shimpyo.coach.voice.Hangul
 import dev.shimpyo.engine.StopCandidate
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.roundToInt
 
@@ -107,7 +109,9 @@ object GoToPlanner {
 /**
  * 들르기 실행기 (효과 실행). 코어가 PromptEffect.StartGoTo를 받으면 이것을 launch하고, 돌려받은 결과를
  * PromptEvent.GoToFinished로 우편함에 넣는다. 판단은 [GoToPlanner]가 하고 여기는 내비 호출과 다시 시도만 한다.
- * 결과는 [GoToPlanner.MAX_TOTAL_MS] 안에 반드시 나온다. 취소(세계 전환)는 결과로 바꾸지 않고 그대로 전한다.
+ * 결과는 [GoToPlanner.MAX_TOTAL_MS] 안에 나온다(내비 호출이 취소에 응하는 한). 취소는 결과로 바꾸지 않고 그대로 전한다:
+ * 코어는 세계 전환에 실행을 취소하지 않고, 서비스가 끝날 때만 취소된다. 그래도 결과가 안 오면 PromptMachine이
+ * [PromptMachine.GO_TO_WATCHDOG_MS] 뒤 FAILED로 끝낸다.
  */
 class GoToRunner(
     private val navi: NaviPort,
@@ -154,11 +158,16 @@ class GoToRunner(
         }
     }
 
-    /** 내비 예외는 null로 (취소는 그대로 던진다) */
+    /**
+     * 내비 예외는 null로. 우리 취소·시간 초과는 그대로 던지고, 포트 안의 시간 초과(TimeoutCancellationException)는
+     * 실패로 본다 (다시 던지면 결과가 영영 안 나온다)
+     */
     private suspend fun <T> guarded(block: suspend () -> T): T? = try {
         block()
     } catch (e: CancellationException) {
-        throw e
+        currentCoroutineContext().ensureActive()
+        log.w("navi: ${e.message}")
+        null
     } catch (e: Exception) {
         log.w("navi: ${e.message}")
         null

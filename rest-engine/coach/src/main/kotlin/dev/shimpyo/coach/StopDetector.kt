@@ -13,6 +13,8 @@ data class ParkState(
     val sinceMs: Long,
     /** 정차 중 처음 문이 열린 시각. 안 열렸으면 null */
     val doorAtMs: Long?,
+    /** 마지막으로 서 있는 것을 본 시각 (마지막 틱). 재시작 뒤 이미 출발해 있으면 정차 끝으로 쓴다 */
+    val lastSeenMs: Long = sinceMs,
 )
 
 /** 끝난 정차 한 건 (P를 벗어날 때 낸다) */
@@ -25,16 +27,25 @@ data class ParkedStop(val start: Long, val end: Long, val doorOpened: Boolean)
  * 규칙은 엔진 StopTracker와 같다. 다르면 기록의 '화장실' 표시와 엔진이 배운 화장실 간격이 어긋난다(구조 리뷰 §2.3e).
  * - 기어 UNKNOWN: 차속이 [MOVING_KPH]를 넘으면 주행, 아니면 직전 상태를 유지한다 (Car 서비스가 잠깐 끊겨도 정차를 잃지 않는다)
  * - P에서 벗어나는 틱에 함께 온 문 열림도 그 정차의 문 열림이다 (1초 틱 사이에 문을 닫고 출발할 수 있다)
+ * - 선 시간은 틱 사이 시간을 더해 잰다. 시계가 거꾸로 간 걸음은 0으로 센다(엔진 EngineClock과 같다). 그래서 정차 중 시각이
+ *   뒤로 맞춰져도(NTP) 정차를 잃지 않는다. 기록의 끝은 지금 시계, 시작은 끝 - 선 시간이다
  * - 시계가 바뀌면(시연 켜기·끄기) [rebase]로 정차 시작을 새 시계의 지금으로 옮긴다. 두 시계의 시각을 빼서 4시간 정차를 만들지 않는다
  */
 class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinParkedMin * 60_000L) {
     private var since: Long? = null
     private var doorAt: Long? = null
+    /** 이번 정차에서 선 시간 (틱 사이 시간의 합) */
+    private var parkedMs = 0L
+    /** 마지막 틱 시각 */
+    private var lastT = 0L
+    private var ticked = false
+    /** resume 뒤 첫 틱 전이다 (앱이 꺼진 사이를 정차로 셀지 그 틱에 정한다) */
+    private var resumed = false
 
     val parked: Boolean get() = since != null
 
     /** 정차 중이면 그 상태, 아니면 null */
-    val parkState: ParkState? get() = since?.let { ParkState(it, doorAt) }
+    val parkState: ParkState? get() = since?.let { ParkState(it, doorAt, lastT) }
 
     /** [doorOpened]: 지난 틱 이후 문이 열린 적이 있는지 */
     fun onTick(t: Long, gear: Gear, speedKph: Float?, doorOpened: Boolean): ParkedStop? {
@@ -44,20 +55,28 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
             Gear.DRIVE, Gear.REVERSE, Gear.NEUTRAL -> false
             Gear.UNKNOWN -> if (speedKph != null && speedKph > MOVING_KPH) false else wasParked
         }
+        // 재시작 뒤 첫 틱이 P가 아니면 앱이 꺼진 사이 출발했다: 마지막으로 서 있는 것을 본 때를 정차 끝으로 한다
+        val endAt = if (resumed && !nowParked) lastT else t
+        if (wasParked && !(resumed && !nowParked)) parkedMs += maxOf(0L, t - lastT)
+        resumed = false
         if (nowParked && !wasParked) {
             since = t
             doorAt = null
+            parkedMs = 0L
         }
         // 정차 중이었거나 막 세웠으면 이번 정차의 문 열림이다 (P에서 D로 바뀌는 틱 포함)
         if ((wasParked || nowParked) && doorOpened && doorAt == null) doorAt = t
+        lastT = t
+        ticked = true
         if (nowParked) return null
-        val start = since ?: return null
+        if (since == null) return null
         val door = doorAt != null
+        val stayed = parkedMs
         since = null
         doorAt = null
-        // 시계가 거꾸로 갔으면(t < start) 이 조건에 걸린다
-        if (t - start < minStopMs) return null
-        return ParkedStop(start, t, door)
+        parkedMs = 0L
+        if (stayed < minStopMs) return null
+        return ParkedStop(endAt - stayed, endAt, door)
     }
 
     /**
@@ -67,26 +86,32 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
     fun restroomReachedAt(now: Long): Long? {
         val s = since ?: return null
         val door = doorAt ?: return null
-        if (now - s < minStopMs) return null
+        if (parkedMs + maxOf(0L, now - lastT) < minStopMs) return null
         return maxOf(door, s + minStopMs)
     }
 
     /** 시계가 바뀌었다 (시연 켜기·끄기). 정차 중이면 새 시계의 [now]부터 다시 센다. 문 열림도 새로 본다 */
     fun rebase(now: Long) {
+        lastT = now
         if (since == null) return
         since = now
         doorAt = null
+        parkedMs = 0L
     }
 
     /**
-     * 앱 재시작: 저장해 둔 정차를 이어 간다. 다음 틱이 P가 아니면 그 틱에 정차가 끝난다.
-     * 미래 시각(시연 시각이 저장된 경우 등)은 버린다. 이미 정차 중이면 더 이른 시작과 문 열림을 남긴다.
+     * 앱 재시작: 저장해 둔 정차를 이어 간다. 코어는 첫 틱 전에 부른다(첫 틱 뒤에는 무시한다. 겹치는 정차를 만들지 않게).
+     * 다음 틱이 P면 앱이 꺼진 사이도 서 있던 것으로 세고, P가 아니면 [ParkState.lastSeenMs]에 정차가 끝난다.
+     * 미래 시각(시연 시각이 저장된 경우 등)은 버린다.
      */
     fun resume(state: ParkState, now: Long) {
-        if (state.sinceMs > now) return
-        val door = state.doorAtMs?.takeIf { it in state.sinceMs..now }
-        since = minOf(since ?: state.sinceMs, state.sinceMs)
-        doorAt = listOfNotNull(doorAt, door).minOrNull()
+        if (ticked || state.sinceMs > now) return
+        val lastSeen = state.lastSeenMs.coerceIn(state.sinceMs, now)
+        since = state.sinceMs
+        doorAt = state.doorAtMs?.takeIf { it in state.sinceMs..lastSeen }
+        parkedMs = lastSeen - state.sinceMs
+        lastT = lastSeen
+        resumed = true
     }
 
     companion object {

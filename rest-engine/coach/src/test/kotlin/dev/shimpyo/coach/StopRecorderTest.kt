@@ -94,12 +94,34 @@ class StopRecorderTest {
         r.onTick(demoNow + 30 * min, Gear.PARK, 0f, doorOpened = true, pos = atRestArea, persist = false)
         r.onWorldChanged(now = t0)
         assertTrue("시연 정차는 실제 기록 화면에서 사라진다", r.shown.isEmpty())
-        assertEquals(ParkState(t0, doorAtMs = null), r.parkState)
+        assertEquals(ParkState(t0, doorAtMs = null, lastSeenMs = t0), r.parkState)
         assertNull(
             "시연 시각에서 실제 시각을 빼 정차를 만들지 않는다 (새 시계로 1분)",
             r.onTick(t0 + min, Gear.DRIVE, 5f, false, pos = atRestArea, persist = true),
         )
         assertTrue(h.appended.isEmpty())
+    }
+
+    @Test
+    fun theDemoPlaceNameDoesNotLabelARealStop() {
+        val r = recorder()
+        val demoNow = t0 + 4 * 60 * min
+        r.onTick(demoNow, Gear.PARK, 0f, false, pos = atRestArea, persist = false) // 시연 위치: 옥산휴게소
+        r.onWorldChanged(now = t0)
+        r.onTick(t0, Gear.PARK, 0f, false, pos = null, persist = true) // 실제 위치를 아직 모른다
+        val rec = r.onTick(t0 + 5 * min, Gear.DRIVE, 5f, false, pos = null, persist = true)!!
+        assertNull("시연 장소 이름을 실제 정차에 붙이지 않는다", rec.log.name)
+    }
+
+    @Test
+    fun theListStaysInTimeOrderAfterAFailedSave() {
+        val h = PromptFakes.History()
+        val r = recorder(h)
+        h.failAppend = true
+        r.stopFor(5, door = false, pos = null, persist = true, at = t0)
+        h.failAppend = false
+        r.stopFor(5, door = false, pos = null, persist = true, at = t0 + 60 * min)
+        assertEquals(listOf(t0, t0 + 60 * min), r.shown.map { it.start })
     }
 
     @Test
@@ -120,14 +142,15 @@ class StopRecorderTest {
         r.clear()
         assertEquals(1, h.clears)
         assertTrue(r.shown.isEmpty())
-        assertEquals("지금 서 있는 것은 기록이 아니라 차의 상태다", ParkState(t0, t0), r.parkState)
+        assertEquals("지금 서 있는 것은 기록이 아니라 차의 상태다", ParkState(t0, t0, t0), r.parkState)
     }
 
     @Test
     fun restartWhileParkedRecordsTheWholeStop() {
         val h = PromptFakes.History()
         val r = recorder(h)
-        r.resume(ParkState(t0, doorAtMs = t0 + min), now = t0 + 4 * min)
+        r.resume(ParkState(t0, doorAtMs = t0 + min, lastSeenMs = t0 + 3 * min), now = t0 + 4 * min)
+        r.onTick(t0 + 4 * min, Gear.PARK, 0f, false, pos = atRestArea, persist = true)
         val rec = r.onTick(t0 + 6 * min, Gear.DRIVE, 5f, false, pos = atRestArea, persist = true)!!
         assertEquals(StopLog(t0, t0 + 6 * min, null, null, restroom = true, name = "옥산휴게소"), rec.log)
     }

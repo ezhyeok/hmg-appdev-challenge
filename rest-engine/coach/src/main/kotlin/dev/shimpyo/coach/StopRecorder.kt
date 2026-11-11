@@ -27,8 +27,8 @@ class StopRecorder(
     /** 정차 중 마지막으로 안 위치. 출발 틱의 위치보다 서 있던 곳을 잘 나타낸다 */
     private var parkedAt: Fix? = null
 
-    /** 화면에 보일 기록: 저장된 것 + 이 세계에서 저장하지 않은 것 */
-    val shown: List<StopLog> get() = saved + unsaved
+    /** 화면에 보일 기록: 저장된 것 + 이 세계에서 저장하지 않은 것 (시간 순) */
+    val shown: List<StopLog> get() = if (unsaved.isEmpty()) saved else (saved + unsaved).sortedBy { it.start }
 
     val parkState: ParkState? get() = detector.parkState
 
@@ -67,6 +67,8 @@ class StopRecorder(
     fun onWorldChanged(now: Long) {
         detector.rebase(now)
         unsaved = emptyList()
+        // 시연 위치(휴게소)의 이름이 실제 정차에 붙지 않게
+        parkedAt = null
     }
 
     /** 기록 지우기. 지금 서 있는 정차는 차의 상태라 그대로 둔다 */
@@ -76,7 +78,7 @@ class StopRecorder(
         unsaved = emptyList()
     }
 
-    /** 앱 재시작: TripSession이 저장해 둔 정차를 이어 간다 */
+    /** 앱 재시작: TripSession이 저장해 둔 정차를 이어 간다. 첫 틱 전에 부른다 */
     fun resume(state: ParkState, now: Long) = detector.resume(state, now)
 
     private fun placeName(at: Fix, now: Long): String? =

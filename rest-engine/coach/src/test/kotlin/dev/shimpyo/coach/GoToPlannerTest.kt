@@ -180,6 +180,14 @@ class GoToPlannerTest {
     }
 
     @Test
+    fun aPortsOwnTimeoutIsAFailureNotACancellation() = runTest {
+        // 포트 안의 withTimeout이 낸 TimeoutCancellationException을 우리 취소로 보고 다시 던지면 결과가 영영 안 나온다
+        val navi = PromptFakes.Navi(modes = listOf(NaviMode.SAFE_GUIDING), commands = listOf(PromptFakes.Navi.PORT_TIMEOUT, true))
+        assertEquals(GoToOutcome.ROUTE_STARTED, GoToRunner(navi).run(oksan, parked = false))
+        assertEquals(2, navi.calls.count { it.startsWith("startRoute") })
+    }
+
+    @Test
     fun otherExceptionsFromTheNaviAreFailuresNotCrashes() = runTest {
         val navi = PromptFakes.Navi(modes = listOf(NaviMode.ROUTE_GUIDING), commands = listOf(RuntimeException("x"), RuntimeException("y")))
         assertEquals(GoToOutcome.FAILED, GoToRunner(navi).run(oksan, parked = false))
