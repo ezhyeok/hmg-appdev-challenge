@@ -4,7 +4,9 @@ package dev.shimpyo.engine
  * 마지막 기회 찾기. SPEC 4.3, docs/research/ai-science.md 8-2.
  *
  * 화장실 기회 o_1..o_n을 경로 거리순으로 놓고 정체를 반영한 도착 시간 a_i를 구한다(거리순으로 단조, RouteContext).
- * 판단 마감 D는 '가장 급한 탑승자가 필요해질 확률이 0.3에 닿을 때까지 남은 시간'이다 (RestroomNeedModel.deadlineMin).
+ * 판단 마감 D는 '탑승자 중 누군가 필요해질 확률이 0.3에 닿을 때까지 남은 시간'이다 (RestroomNeedModel.deadlineMin).
+ * 여럿이 타면 가장 급한 한 사람의 마감보다 이르다. 그 차이 때문에 앞당겨진 마지막 기회는 [LastChance.groupDriven]으로 표시해
+ * 화면이 이유를 말하게 한다 (CoachEngine이 한 사람 기준 마감으로 한 번 더 판정해 가린다).
  *
  * 판단 범위: 목록을 자른 곳(RouteState.candidatesUntilM) 너머나 목적지 너머 후보는 공백의 증거로 쓰지 않는다.
  * 그 앞 마지막 기회 뒤의 공백은 자른 곳까지(아래 한계) 또는 목적지까지다. 예전에는 목적지 너머 후보까지의 시간을
@@ -41,7 +43,11 @@ internal class GapAnalyzer(private val config: CoachConfig) {
         val gapS: Double,
         /** 정체 규칙일 때 정체 통과 시간 (초) */
         val congestionS: Double,
-    )
+        /** 가장 급한 한 사람만 봤다면 여기가 아니었다: 여럿이 타서 앞당겨진 마지막 기회 */
+        val groupDriven: Boolean = false,
+    ) {
+        fun groupDriven(): LastChance = if (groupDriven) this else LastChance(opp, index, trigger, gapS, congestionS, groupDriven = true)
+    }
 
     fun analyze(
         opps: List<Opportunity>,

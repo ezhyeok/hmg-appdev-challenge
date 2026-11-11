@@ -215,6 +215,7 @@ class CoachEngine(
         route.opportunities(input.candidates, restroomOpps, RouteContext::isRestroomOpportunity)
         val deadline = needs.deadlineMin(mono, config.restroomDecisionProbability)
         val lastChance = gap.analyze(restroomOpps, route, deadline, needs.sensitive, needs.preferredMaxGapMin())
+            ?.let { if (broughtForwardByGroup(it, deadline, mono)) it.groupDriven() else it }
         trackAccepted(mono)
 
         val urgentList = if (urgentRequested) {
@@ -676,7 +677,7 @@ class CoachEngine(
             }
         }
         if (lastChance != null) {
-            return rec(lastChance.opp.stop, purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx), listOf(lastChanceReason(lastChance)))
+            return rec(lastChance.opp.stop, purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx), lastChanceReasons(lastChance))
         }
         if (wantsRest && restTarget != null) {
             return rec(restTarget.stop, purposesFor(restTarget.stop, Purpose.REST, ctx), listOf(Reason("NEXT_REST", texts.reasonNextRest())))
@@ -733,10 +734,28 @@ class CoachEngine(
         return fuelOpps.firstOrNull { it.distanceM >= config.askWindowNearM }
     }
 
+    /**
+     * 여럿이 타서 앞당겨진 마지막 기회인지. 판단 마감은 '누군가 필요해질 확률'이라 가장 급한 한 사람의 마감보다 이르다
+     * (RestroomNeedModel). 한 사람 기준 마감으로 다시 판정했을 때 이곳이 아니면(더 뒤이거나 물을 일이 없으면) 묶음 때문이다.
+     * 이때는 게이지(한 사람 기준)가 넉넉해 보이는데 묻게 되므로 이유를 붙인다 (감사 O6). 마지막 기회가 있을 때만 계산한다.
+     */
+    private fun broughtForwardByGroup(lc: GapAnalyzer.LastChance, deadlineMin: Double?, mono: Long): Boolean {
+        if (lc.trigger == GapAnalyzer.Trigger.PREFERENCE || needs.tracked.size < 2 || deadlineMin == null) return false
+        val solo = needs.soloDeadlineMin(mono, config.restroomDecisionProbability) ?: return false
+        if (solo - deadlineMin < GROUP_REASON_MIN_DIFF_MIN) return false
+        val alone = gap.analyze(restroomOpps, route, solo, needs.sensitive, null)
+        return alone == null || alone.index != lc.index
+    }
+
     private fun lastChanceSpeech(lc: GapAnalyzer.LastChance): String = when (lc.trigger) {
         GapAnalyzer.Trigger.CONGESTION -> texts.lastChanceCongestion(lc.opp.stop.name, (lc.congestionS / 60.0).roundToInt())
         else -> texts.lastChanceGap(lc.opp.stop.name, (lc.gapS / 60.0).roundToInt())
     }
+
+    /** 마지막 기회의 이유. 여럿이 타서 앞당겨진 것이면 그 설명을 덧붙인다 */
+    private fun lastChanceReasons(lc: GapAnalyzer.LastChance): List<Reason> =
+        if (lc.groupDriven) listOf(lastChanceReason(lc), Reason("LAST_CHANCE_GROUP", texts.reasonLastChanceGroup(needs.tracked.size)))
+        else listOf(lastChanceReason(lc))
 
     private fun lastChanceReason(lc: GapAnalyzer.LastChance): Reason = when (lc.trigger) {
         GapAnalyzer.Trigger.CONGESTION ->
@@ -780,6 +799,8 @@ class CoachEngine(
     }
 
     private companion object {
+        /** 묶음 마감과 한 사람 마감의 차이가 이보다 작으면 같은 판단으로 본다 (한 사람이 거의 다 정하는 경우, 분) */
+        const val GROUP_REASON_MIN_DIFF_MIN = 1.0
         /** "쉬고 싶어"·"배고파" 요청을 추천에 유지하는 시간 */
         const val WANT_HOLD_MS = 30 * 60_000L
         /** 수락한 곳을 추천에 유지하는 최대 시간 */

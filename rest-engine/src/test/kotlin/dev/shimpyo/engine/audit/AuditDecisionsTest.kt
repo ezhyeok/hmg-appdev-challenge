@@ -194,9 +194,12 @@ class AuditDecisionsTest {
     private fun adults(n: Int) = (1..n).map { Occupant("p$it", OccupantType.ADULT) }
 
     @Test
-    fun manyAdultsAreNotAskedWhileTheGaugeShowsPlentyOfTime() {
-        // 정한 규칙: 판단 마감은 게이지와 같은 사람·같은 곡선(가장 급한 사람의 필요 확률 0.3). 예전 '누군가 필요해질 확률'은
-        // 8명이면 화장실 뒤 48분에 마감이 지나 게이지가 1시간 42분(OK)인데 '지나면 16분 동안 화장실이 없어요'를 물었다
+    fun manyAdultsAreAskedBeforeARealGapAndToldWhy() {
+        // 정한 규칙(2026-11-12 시뮬레이션으로 다시 정함, GroupNeedTest): 판단 마감은 '누군가 필요해질 확률 0.3'(묶음),
+        // 게이지는 가장 급한 한 사람. 8명이면 화장실 뒤 48분에 마감이 지나 게이지가 1시간 30분(OK)이어도 16분 공백 앞에서
+        // 묻는다: 8명 중 누군가 그 16분 안에 필요해질 확률이 약 0.67이기 때문이다. 감사가 짚은 것은 '게이지가 넉넉한데 왜
+        // 묻는지 알 수 없다'였으므로, 묶음 때문에 앞당긴 질문에는 그 이유(LAST_CHANCE_GROUP)를 함께 낸다.
+        // (한 사람 기준 마감으로 바꿨을 때는 어른 둘의 명절 위기 비율이 12.0 → 14.1%로 올랐다)
         val short = RouteState(guiding = true, remainDistanceM = 60 * KM, remainTimeS = 60 * KM / V100, nextManeuverDistanceM = 50 * KM)
         val cands = listOf(stop("a", 3.5 * KM, name = "가휴게소"), stop("b", 30 * KM, name = "나휴게소"))
         val people = adults(8)
@@ -206,23 +209,24 @@ class AuditDecisionsTest {
         )
         val outs = (0 until 60).map { s -> e.update(CoachInput(now = t0 + s * SEC, gear = Gear.DRIVE, speedKph = 100f, route = short, candidates = cands)) }
         assertEquals(Level.OK, outs.last().restroom.level, "게이지 90분")
-        assertTrue(outs.none { it.prompt?.kind == PromptKind.LAST_CHANCE }, outs.firstNotNullOfOrNull { it.prompt }.toString())
-        assertTrue(outs.none { it.next?.reasons.orEmpty().any { r -> r.code.startsWith("LAST_CHANCE") } })
+        assertTrue(outs.any { it.prompt?.kind == PromptKind.LAST_CHANCE }, "16분 공백 앞에서 묻는다")
+        val codes = outs.last().next?.reasons.orEmpty().map { it.code }
+        assertEquals(listOf("LAST_CHANCE_GAP", "LAST_CHANCE_GROUP"), codes, "왜 묻는지 말한다")
     }
 
     @Test
-    fun theDeadlineTrailsTheGaugeByTheSameMarginForAnyGroupSize() {
-        // 마감이 지나는 순간 게이지는 그 사람의 Q(0.5) − Q(0.3)(어른 약 38분)를 보인다. 1명이든 8명이든 같다
+    fun theGaugeAtTheDeadlineShowsHowFarTheGroupBringsItForward() {
+        // 마감이 지나는 순간의 게이지: 혼자면 그 사람의 Q(0.5) − Q(0.3)(어른 약 38분), 여럿이면 더 넉넉해 보인다.
+        // 이 차이가 LAST_CHANCE_GROUP 설명이 필요한 이유다
         fun gaugeWhenDeadlinePasses(n: Int): Int {
             val clock = EngineClock().apply { advance(t0) }
             val m = RestroomNeedModel(cfg).apply { sync(TripProfile(adults(n), tripStart = t0), clock, PersonalMemory()) }
             val minute = (0..300).first { m.deadlineMin(t0 + it * MIN, cfg.restroomDecisionProbability) == 0.0 }
             return m.gauge(t0 + minute * MIN, CoachTexts()).minutes!!
         }
-        val one = gaugeWhenDeadlinePasses(1)
-        assertTrue(one in 35..39, "어른 1명: $one")
-        assertEquals(one, gaugeWhenDeadlinePasses(2))
-        assertEquals(one, gaugeWhenDeadlinePasses(8))
+        assertTrue(gaugeWhenDeadlinePasses(1) in 35..39, "어른 1명")
+        assertTrue(gaugeWhenDeadlinePasses(2) in 64..68, "어른 2명 (감사 O6의 66분)")
+        assertTrue(gaugeWhenDeadlinePasses(8) in 100..104, "어른 8명 (감사 O6의 102분)")
     }
 
     // ---------------- S7·S8 정차 판정 ----------------
