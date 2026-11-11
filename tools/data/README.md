@@ -56,6 +56,13 @@ OSM 출처 필드 `src`/`osm`으로 구분된다).
 
 ## 출력 파일 (`app/src/main/assets/data/`)
 
+**앱이 실제로 읽는 것은 `stops.bin`이다.** JSON을 다시 만들었으면 `./gradlew -p rest-engine buildStopTable`로
+`stops.bin`(정차 후보 60,084행의 열 단위 이진 표, 약 4.5 MB)을 다시 만든다. 변환 규칙은
+`rest-engine/src/main/kotlin/dev/shimpyo/engine/stops/StopRows.kt` 하나이고, `StopTableTest`가 JSON 전 행과
+`stops.bin`을 비교한다(둘이 어긋나면 실패). JSON 파일은 공개 데이터 원본으로 저장소에 두되 APK에는 넣지 않는다
+(`app/build.gradle.kts`의 `ignoreAssetsPattern`). 예전처럼 앱이 JSON을 직접 읽으면 에뮬레이터에서 18초 동안 GC가 돌았다.
+
+
 모든 파일은 UTF-8, 공백 없는 JSON 배열이다. 숫자는 숫자로 쓴다. **키가 없으면 값이 없거나 모르는 것이다.**
 불리언은 `1`/`0`이고, 원천이 Y/N을 항상 채우는 필드(화장실의 `dp`·`bell`·`cctv`·`dis`)는 `1`일 때만 쓴다
 (행정안전부 행은 없으면 N, OSM 행은 없으면 모름). 좌표는 WGS84. `id`는 같은 원천 레코드에서 다시 만들면 같은 값이 나오는 짧은 해시다.

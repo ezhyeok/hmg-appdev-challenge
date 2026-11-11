@@ -46,7 +46,10 @@ class DemoDirector(private val realClock: () -> Long = System::currentTimeMillis
         val routeTotalM: Double,
         /** 시연 시각이 실제보다 몇 배 빨리 흐르는지 */
         val timeScale: Double = 1.0,
-    )
+    ) {
+        /** 후보 id → 시나리오 경로 위 위치(m). 시나리오마다 따로 둔다(바꾼 직후 옛 경로 값이 섞이지 않게) */
+        val along = java.util.concurrent.ConcurrentHashMap<String, Double>()
+    }
 
     @Volatile private var scenario: Scenario? = null
     @Volatile private var startedAtReal = 0L
@@ -120,7 +123,8 @@ class DemoDirector(private val realClock: () -> Long = System::currentTimeMillis
         val s = scenario ?: return list
         val travelled = progressM(s)
         return list.mapNotNull { c ->
-            val along = alongPath(s.path, Pt(c.lat, c.lon)) ?: return@mapNotNull null
+            // 시나리오 경로 위 위치는 후보마다 변하지 않으니 한 번만 계산한다 (매초 후보마다 경로 전체를 훑었다)
+            val along = s.along.getOrPut(c.id) { alongPath(s.path, Pt(c.lat, c.lon)) ?: NOT_ON_PATH }.takeIf { it != NOT_ON_PATH } ?: return@mapNotNull null
             val ahead = along - travelled
             // etaS는 넣지 않는다: 엔진이 시연 정체 구간으로 도착 시간을 계산한다 (StopCandidate.etaS 주석)
             if (ahead < -200) null else c.copy(routeDistanceM = ahead.coerceAtLeast(0.0), etaS = null, directionOk = true)
@@ -221,6 +225,11 @@ class DemoDirector(private val realClock: () -> Long = System::currentTimeMillis
     )
 
     // ------------------------------------------------------------ 경로 계산
+
+    private companion object {
+        /** alongCache에서 '경로 밖'을 뜻하는 값 */
+        const val NOT_ON_PATH = Double.NEGATIVE_INFINITY
+    }
 
     private fun pointAt(path: List<Pt>, distance: Double): Triple<Double, Double, Float> {
         var left = distance.coerceAtLeast(0.0)

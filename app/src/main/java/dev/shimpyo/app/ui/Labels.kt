@@ -254,7 +254,10 @@ object Labels {
     }
 
     private fun firstNumber(text: String, suffix: String): Int? =
-        Regex("(\\d+)\\s*$suffix").find(text)?.groupValues?.get(1)?.toIntOrNull()
+        numberBefore.getOrPut(suffix) { Regex("(\\d+)\\s*$suffix") }.find(text)?.groupValues?.get(1)?.toIntOrNull()
+
+    /** 접미어별 정규식 (부를 때마다 컴파일하지 않게) */
+    private val numberBefore = java.util.concurrent.ConcurrentHashMap<String, Regex>()
 
     private val DURATION = Regex("(\\d+)시간(?:\\s*(\\d+)분)?|(\\d+)분")
 }

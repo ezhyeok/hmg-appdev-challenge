@@ -67,7 +67,7 @@
 - `android.car.permission.CAR_SPEED`, `pleos.car.permission.FUSED_LOCATION`은 위험(dangerous) 권한이다. Manifest 선언만으로는 SecurityException이 나므로 실행 중에 `requestPermissions`로 요청한다. adb로 줄 때는 AAOS 포그라운드 사용자(user 10)에게 줘야 한다: `adb shell pm grant --user current <패키지> <권한>`
 - NaviHelper `requestRoute`를 보내면 Pleos 내비 앱이 포그라운드로 올라오고 실제 길안내가 시작된다. 경로 계산은 서버에서 하므로 네트워크가 필요하다
 - **내비가 떠 있는 동안에도 이벤트를 받으려면 포그라운드 서비스가 필요하다.** Activity만 있는 앱은 내비가 앞으로 오면 cached 프로세스가 되어 Android 14 freezer에 얼려지고(logcat `ActivityManager: freezing <pid> <패키지>`), 그동안 Vehicle·NaviHelper 이벤트를 받지 못한다. 포그라운드 서비스에서 리스너를 유지하면 받는다 (sdk-probe `ProbeService`로 확인)
-- NaviHelper 정보 조회(`getTBTInfo`, `getWaypointInfo`, `getDestinationInfo`, `getRouteStateInfo`, `getChargerOperatorInfo`)는 호출해야 응답 이벤트가 온다. 길안내 중 `onTBTInfo`는 앞으로의 회전 목록(type, distance, description)을 준다. `onRouteCancelled`, `onNavigationStatus`, `onDrivingInfo`, `onCurrentRoadSpeedLimit`는 내비가 먼저 보낸다. `onRouteStarted`는 내비 앱 로그에 `notifyRouteStarted`가 찍혀도 앱에서 받지 못했다(원인 미확인). 길안내 여부는 `RouteStateInfo.naviMode`(`ROUTE_GUIDING`/`SAFE_GUIDING`)로 판단할 것
+- NaviHelper 정보 조회(`getTBTInfo`, `getWaypointInfo`, `getDestinationInfo`, `getRouteStateInfo`, `getChargerOperatorInfo`)는 호출해야 응답 이벤트가 온다. 길안내 중 `onTBTInfo`는 앞으로의 회전 목록(type, distance, description)을 준다. `onRouteCancelled`, `onNavigationStatus`, `onDrivingInfo`, `onCurrentRoadSpeedLimit`는 내비가 먼저 보낸다. `onRouteStarted`는 내비 앱 로그에 `notifyRouteStarted`가 찍혀도 앱에서 받지 못했다(원인 미확인). 길안내 여부는 `RouteStateInfo.naviMode`가 `ROUTE_GUIDING`(내비 모의 주행이면 `SIMULATION_GUIDING`)인지로 판단할 것. `SAFE_GUIDING`은 경로 없는 안전운전 모드다(경로 전 상태, `NaviPoll.isGuiding`)
 - `requestTrip(TripRequest)`는 길안내를 시작하지 않고 `onTripInfo`로 거리(m), ETA(초), 도착 시 예상 SOC(%), 소모 에너지, 구간별 교통 정보를 준다 (성남→서울역: 27.5km, 약 31분, SOC 95%)
 - 내비 요청을 1초 안에 연달아 보내면(trip, route, waypoint) 시작된 경로가 곧바로 취소되는 일이 있었다. 요청 사이에 응답을 기다릴 것
 - **TBT(`getTBTInfo`)에 경로 위 휴게소(`TURN_ENTER_SERVICEAREA`)와 졸음쉼터(`TURN_RESTAREA`)가 이름과 함께 온다. 거리(`TBTInfo.distance`)는 직전 항목부터의 거리라서 누적해야 경로 거리가 된다** (2026-11-11 확인: 경유지 누적 47.1km = 내비 경유지 남은 거리 47.0km)
@@ -93,6 +93,8 @@
 - 로터리 컨트롤러(CCP), 오디오 포커스, IME 리사이즈 같은 차량 특화 동작은 `docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/` 참고
 - UI는 `docs/contest/02_Pleos_개발가이드/connect-guide/docs-design/`의 Pleos Connect UI Design Guide(레이아웃, 컬러, 타이포, 컴포넌트)를 따른다
 - 화면·인텐트가 서비스에 보내는 명령은 `CoachStore`의 Channel로 보낸다. 구독 전 값을 버리는 SharedFlow(replay 0)를 쓰면 첫 실행 때 `--es demo` 명령이 서비스의 collect보다 먼저 와서 사라진다(2026-11-11, `CoachStoreTest`가 지킨다). 앱 JVM 테스트는 노트북에서 `gradlew :app:testDebugUnitTest`
+- 정차 후보 데이터는 앱이 `assets/data/stops.bin`(rest-engine `buildStopTable`이 JSON에서 만든 이진 표)으로 읽는다. `tools/data` JSON을 바꾸면 stops.bin도 다시 만든다(`StopTableTest`가 둘이 어긋나면 실패)
+- 성능 개선은 결과가 같다는 테스트와 함께 한다(데이터: StopTableTest, 내비 조회 간격: NaviPollTest). 측정은 에뮬레이터에서 `top -p`, `dumpsys meminfo`, `dumpsys gfxinfo`, logcat의 내비 요청 수
 - 버그를 고칠 때는 같은 문제가 다시 생기지 않게 테스트·점검 스크립트·이 문서 중 맞는 곳에 막는 장치를 함께 남긴다
 - 생성형 AI 사용은 허용되지만, 참가자가 2차 PT 기술 Q&A에서 구조와 로직을 직접 설명해야 한다. 코드를 짤 때 아키텍처와 주요 흐름을 `docs/ARCHITECTURE.md` 같은 문서로 함께 정리한다. 참가자는 전산 전공이므로 구조는 설명하기 쉬운 쪽이 아니라 기술적으로 적절한 쪽으로 정한다
 

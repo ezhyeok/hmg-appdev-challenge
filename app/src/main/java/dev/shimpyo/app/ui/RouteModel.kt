@@ -1,5 +1,6 @@
 package dev.shimpyo.app.ui
 
+import androidx.compose.runtime.Immutable
 import dev.shimpyo.app.coach.CoachUiState
 import dev.shimpyo.app.ui.components.StripMark
 import dev.shimpyo.app.ui.components.StripSpan
@@ -72,6 +73,7 @@ fun congestionPlace(c: CongestionSegment): String? {
 }
 
 /** 경로 띠 데이터 */
+@Immutable
 data class StripData(val axisM: Double, val stops: List<StripStop>, val spans: List<StripSpan>, val destinationM: Double?) {
     val isEmpty: Boolean get() = stops.isEmpty() && spans.isEmpty() && destinationM == null
 }

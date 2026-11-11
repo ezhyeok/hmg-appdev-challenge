@@ -1,5 +1,6 @@
 package dev.shimpyo.app.ui.history
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -15,6 +16,10 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.runtime.remember
+import kotlinx.coroutines.delay
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -52,6 +57,7 @@ import kotlin.math.roundToInt
  */
 
 /** 기록에서 뽑은 요약 */
+@Immutable
 data class HistoryStats(
     val stops: Int,
     val restroomStops: Int,
@@ -73,9 +79,11 @@ fun historyStats(history: List<StopLog>): HistoryStats {
 @Composable
 fun HistoryScreen(history: List<StopLog>, modifier: Modifier = Modifier, lastStop: StopLog? = null) {
     // 기록 시각은 서비스 시계(시연 중에는 빨리 갈 수 있다)라서 '오늘'은 실제 시각과 가장 최근 기록 중 늦은 쪽으로 정한다
-    val nowMs = maxOf(System.currentTimeMillis(), history.maxOfOrNull { it.end } ?: 0L)
+    // 기록이 그대로면 이 화면은 다시 그려지지 않으므로(강한 건너뛰기) 시계는 1분마다 따로 갱신한다
+    val wallMs by produceState(System.currentTimeMillis()) { while (true) { delay(60_000); value = System.currentTimeMillis() } }
+    val nowMs = maxOf(wallMs, history.maxOfOrNull { it.end } ?: 0L)
     val layout = LocalLayout.current
-    val stats = historyStats(history)
+    val stats = remember(history) { historyStats(history) }
     if (history.isEmpty()) {
         Box(modifier.fillMaxSize().padding(layout.margin), contentAlignment = Alignment.Center) {
             EmptyMessage("아직 기록이 없어요", detail = "차를 세우고(P) 문을 열면 자동으로 기록돼요", icon = ShimpyoIcons.History)
@@ -178,7 +186,7 @@ private fun InsightCard(title: String, value: String, detail: String, modifier: 
 private fun StintChart(stats: HistoryStats) {
     val c = ShimpyoTheme.colors
     if (stats.stints.isEmpty()) return
-    val measurer = rememberTextMeasurer()
+    val measurer = rememberTextMeasurer(cacheSize = 32)
     val soon = Labels.config.fatigueSoonMin
     val now = Labels.config.fatigueNowMin
     ShimpyoCard(Modifier.fillMaxWidth(), contentPadding = PaddingValues(LocalLayout.current.cardPadding)) {

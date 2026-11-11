@@ -8,6 +8,7 @@ import ai.pleos.playground.vehicle.api.model.area.SeatArea
 import ai.pleos.playground.vehicle.constant.area.TurnSignalValue
 import ai.pleos.playground.vehicle.constant.control.CruiseControl
 import android.content.Intent
+import android.os.SystemClock
 import android.util.Log
 import dev.hmg.pleoskit.CarState
 import dev.hmg.pleoskit.LocationKit
@@ -44,12 +45,14 @@ import dev.shimpyo.engine.StopKind
 import dev.shimpyo.engine.TurnSignal
 import dev.shimpyo.engine.VoiceIntent
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withContext
 import kotlin.math.roundToInt
 
 /**
@@ -82,11 +85,35 @@ class CoachService : PleosForegroundService() {
     private lateinit var engine: CoachEngine
     private val intents = Channel<VoiceIntent>(Channel.UNLIMITED)
 
-    @Volatile private var route: RouteState? = null
+    // 내비에서 받은 값과 그때의 주행 거리는 한 묶음으로 바꾼다 (읽는 쪽이 새 목록과 옛 기준을 섞어 읽지 않게)
+    private data class RouteSnap(val route: RouteState?, val odometerM: Double)
+    /** TBT에서 읽은 경로 위 휴게소·졸음쉼터와 다음 회전 거리 */
+    private data class TbtSnap(val opportunities: List<RouteOpportunity>, val nextManeuverM: Double?, val odometerM: Double)
+    private data class CandidateSnap(val list: List<StopCandidate>, val odometerM: Double)
+
+    @Volatile private var routeSnap = RouteSnap(null, 0.0)
+    private val route: RouteState? get() = routeSnap.route
     @Volatile private var destinationName: String? = null
-    @Volatile private var candidates: List<StopCandidate> = emptyList()
-    /** TBT에서 읽은 경로 위 휴게소·졸음쉼터 */
-    @Volatile private var routeOpportunities: List<RouteOpportunity> = emptyList()
+    @Volatile private var tbtSnap = TbtSnap(emptyList(), null, 0.0)
+    @Volatile private var candidateSnap = CandidateSnap(emptyList(), 0.0)
+    private val candidates: List<StopCandidate> get() = candidateSnap.list
+    private val candidatesLock = Mutex()
+
+    // 차속을 적분한 주행 거리(m, 실제 시각). 내비를 덜 자주 조회해도 그 사이 경로 거리를 매초 줄여 쓴다 (NaviPoll).
+    // 내비가 그만큼 나아갔다고 확인할 때만 쓴다(odometerTrusted). 확인 전·경로 없음·어긋남이면 예전처럼 거리를 그대로 둔다
+    @Volatile private var odometerM = 0.0
+    private var odometerAtMs = 0L
+    @Volatile private var odometerTrusted = false
+    private var prevRemainM: Double? = null
+    private var prevRemainOdometerM = 0.0
+    private var lastNaviMode: NaviMode? = null
+    /** 길안내 시작·경유지 추가·재탐색 시각. 그 뒤 30초는 TBT를 5초마다 받는다 */
+    @Volatile private var naviResetAt = 0L
+    /** 다른 스레드(수락 처리)가 다음 조회를 앞당길 때 쓴다. 조회 시각 변수는 내비 루프만 바꾼다 */
+    @Volatile private var forceRoute = false
+    @Volatile private var forceTbt = false
+    private var lastTbtAt = 0L
+    private var lastRouteAt = 0L
     @Volatile private var activePrompt: Prompt? = null
     private var lastPromptId: String? = null
     private var hvacArea: SeatArea? = null
@@ -94,6 +121,7 @@ class CoachService : PleosForegroundService() {
     private var parkedSince: Long? = null
     private var doorWhileParked = false
     private var lastMemorySave = 0L
+    @Volatile private var lastSavedMemory: dev.shimpyo.engine.PersonalMemory? = null
     private var devJob: Job? = null
     /** 이번 여정의 시작 시각과 출발 전 마지막 화장실. 탑승자·설정을 바꿔도 여정은 이어지게 같은 값을 쓴다 */
     private var tripStart = 0L
@@ -102,27 +130,30 @@ class CoachService : PleosForegroundService() {
     private fun now(): Long = director.now()
 
     override fun onServiceStarted() {
-        val start = now()
-        val history = app.stopHistory.load()
-        // 마지막 화장실을 모르면 출발 60분 전으로 본다 (docs/research/ai-science.md 9-1)
-        val lastRestroom = history.lastOrNull { it.restroom && start - it.end < 6 * 3_600_000L }?.end ?: (start - 60 * 60_000L)
-        val occupants = app.settings.occupants
-        tripStart = start
-        lastRestroomAt = lastRestroom
-        engine = CoachEngine(
-            profile = profileFor(occupants),
-            memory = app.memory.load(),
-        )
-        CoachStore.update { copy(serviceRunning = true, occupants = occupants, history = history, lastStop = history.lastOrNull()) }
+        // 기록·학습·설정 파일 읽기는 메인 스레드 밖(IO)에서 한다. 엔진을 만든 뒤에 루프와 명령 처리를 시작한다
+        // (그 전에 온 명령은 CoachStore의 Channel에 남는다)
+        serviceScope.launch {
+            val start = now()
+            val (history, memory, occupants) = withContext(Dispatchers.IO) {
+                Triple(app.stopHistory.load(), app.memory.load(), app.settings.occupants)
+            }
+            // 마지막 화장실을 모르면 출발 60분 전으로 본다 (docs/research/ai-science.md 9-1)
+            val lastRestroom = history.lastOrNull { it.restroom && start - it.end < 6 * 3_600_000L }?.end ?: (start - 60 * 60_000L)
+            tripStart = start
+            lastRestroomAt = lastRestroom
+            engineLock.withLock { engine = CoachEngine(profile = profileFor(occupants), memory = memory) }
+            lastSavedMemory = memory
+            CoachStore.update { copy(serviceRunning = true, occupants = occupants, history = history, lastStop = history.lastOrNull()) }
 
-        serviceScope.launch { guard("car") { collectCar() } }
-        serviceScope.launch { guard("vehicle") { collectVehicle() } }
-        serviceScope.launch { guard("navi") { collectNavi() } }
-        serviceScope.launch { guard("location") { collectLocation() } }
-        serviceScope.launch { guard("voice") { voice.connect() } }
-        serviceScope.launch { guard("candidates") { candidateLoop() } }
-        serviceScope.launch { guard("coach") { coachLoop() } }
-        serviceScope.launch { CoachStore.commands.collect { handle(it) } }
+            launch { guard("car") { collectCar() } }
+            launch { guard("vehicle") { collectVehicle() } }
+            launch { guard("navi") { collectNavi() } }
+            launch { guard("location") { collectLocation() } }
+            launch { guard("voice") { voice.connect() } }
+            launch { guard("candidates") { candidateLoop() } }
+            launch { guard("coach") { coachLoop() } }
+            CoachStore.commands.collect { handle(it) }
+        }
     }
 
     /** 개발용: `--ez verify true`(설계 확인), `--ez selftest true [--ez route true]`(kit 점검) */
@@ -150,6 +181,9 @@ class CoachService : PleosForegroundService() {
                 hub.heading = h
                 hub.locationAt = t
             }
+            val real = SystemClock.elapsedRealtime()
+            if (odometerAtMs > 0) odometerM += NaviPoll.distanceM(hub.speedKph, real - odometerAtMs)
+            odometerAtMs = real
             val (samples, door) = hub.drain(t)
             trackStops(t, door)
             val intent = intents.tryReceive().getOrNull()
@@ -161,8 +195,8 @@ class CoachService : PleosForegroundService() {
                     samples = samples,
                     doorOpened = door,
                     cabin = CabinState(hvacOn = hub.hvacOn, recirculation = hub.recirculation, setTempC = hub.setTempC),
-                    route = route,
-                    candidates = director.candidates(candidates),
+                    route = liveRoute(),
+                    candidates = director.candidates(liveCandidates()),
                     intent = intent,
                     cabinAutoAllowed = app.settings.autoFreshAir,
                 ),
@@ -181,7 +215,9 @@ class CoachService : PleosForegroundService() {
             }
             if (!director.active && t - lastMemorySave > 60_000) {
                 lastMemorySave = t
-                engineLock.withLock { app.memory.save(engine.memory()) }
+                // 1분마다 확인하되 학습 상태가 바뀌었을 때만, 엔진 잠금 밖의 IO 스레드에서 쓴다 (쓰기는 MemoryStore가 하나씩 한다)
+                val (mem, gen) = engineLock.withLock { engine.memory() to app.memory.generation }
+                if (mem != lastSavedMemory) saveMemory(mem, gen)
             }
             delay(1_000)
         }
@@ -193,10 +229,11 @@ class CoachService : PleosForegroundService() {
             copy(
                 restroom = out.restroom,
                 fatigue = out.fatigue,
-                style = out.style,
+                // style(운전 스타일 편차)은 화면이 쓰지 않고 매초 바뀌어 화면 전체를 다시 그리게 해서 올리지 않는다
                 next = out.next,
                 parked = out.parked,
-                speedKph = hub.speedKph,
+                // 차속은 시연 패널이 정수로만 보여 준다. 소수점 흔들림으로 매초 상태가 바뀌지 않게 정수로 올린다
+                speedKph = hub.speedKph?.let { kotlin.math.truncate(it) },
                 guiding = r?.guiding == true,
                 destinationName = destinationName,
                 remainDistanceM = r?.remainDistanceM,
@@ -299,8 +336,8 @@ class CoachService : PleosForegroundService() {
             return
         }
         val t = now()
-        val local = app.stops.near(lat, lon, hub.heading, URGENT_RADIUS_M, URGENT_KINDS, now = t).take(URGENT_MAX)
-        val input = director.apply(CoachInput(now = t, gear = hub.gear, speedKph = hub.speedKph, route = route, candidates = local, intent = VoiceIntent.UrgentRestroom))
+        val local = app.stops.near(lat, lon, hub.heading, URGENT_RADIUS_M, URGENT_KINDS, now = t, limit = URGENT_MAX)
+        val input = director.apply(CoachInput(now = t, gear = hub.gear, speedKph = hub.speedKph, route = liveRoute(), candidates = local, intent = VoiceIntent.UrgentRestroom))
         val ranked = engineLock.withLock { engine.urgent(input) }
         CoachStore.update { copy(urgent = ranked) }
         val top = ranked.firstOrNull()
@@ -341,7 +378,12 @@ class CoachService : PleosForegroundService() {
                 else -> "${Hangul.euRo(stop.name)} 안내할게요"
             },
         )
-        if (ok) CoachStore.update { copy(urgent = null) }
+        if (ok) {
+            CoachStore.update { copy(urgent = null) }
+            // 경로가 바뀌었으니 다음 조회 때 경로 상태와 TBT를 바로 다시 받고, 30초 동안은 5초마다 받는다
+            forceRoute = true
+            markNaviReset()
+        }
     }
 
     private suspend fun applyFreshAir(announce: Boolean) {
@@ -352,7 +394,7 @@ class CoachService : PleosForegroundService() {
     }
 
     private suspend fun makePlan() {
-        val input = director.apply(CoachInput(now = now(), gear = hub.gear, speedKph = hub.speedKph, route = route, candidates = candidates))
+        val input = director.apply(CoachInput(now = now(), gear = hub.gear, speedKph = hub.speedKph, route = liveRoute(), candidates = liveCandidates()))
         val plan = engineLock.withLock { engine.plan(input) }
         CoachStore.update { copy(plan = plan) }
     }
@@ -368,10 +410,15 @@ class CoachService : PleosForegroundService() {
     }
 
     /** 정차 기록·학습 상태 지우기: 파일을 지우고 엔진을 빈 학습 상태로 다시 만든다 */
+    private fun saveMemory(mem: dev.shimpyo.engine.PersonalMemory, gen: Long) {
+        serviceScope.launch(Dispatchers.IO) { if (app.memory.save(mem, gen)) lastSavedMemory = mem }
+    }
+
     private suspend fun clearRecords() {
         engineLock.withLock {
             java.io.File(filesDir, "stops.json").delete()
-            java.io.File(filesDir, "memory.json").delete()
+            app.memory.clear()
+            lastSavedMemory = null
             engine = CoachEngine(profile = profileFor(CoachStore.state.value.occupants), memory = dev.shimpyo.engine.PersonalMemory())
         }
         CoachStore.update { copy(history = emptyList(), lastStop = null) }
@@ -462,14 +509,14 @@ class CoachService : PleosForegroundService() {
         val log = StopLog(start = since, end = t, lat = null, lon = null, restroom = doorWhileParked, name = place)
         val history = app.stopHistory.append(log)
         CoachStore.update { copy(history = history, lastStop = log) }
-        if (!director.active) serviceScope.launch { engineLock.withLock { app.memory.save(engine.memory()) } }
+        if (!director.active) serviceScope.launch { val (mem, gen) = engineLock.withLock { engine.memory() to app.memory.generation }; saveMemory(mem, gen) }
     }
 
     /** 지금 위치에서 300m 안의 알려진 정차지 이름 */
     private fun nearestKnownPlace(): String? {
         val lat = hub.lat ?: return null
         val lon = hub.lon ?: return null
-        return app.stops.near(lat, lon, null, 300.0, URGENT_KINDS).firstOrNull()?.name
+        return app.stops.near(lat, lon, null, 300.0, URGENT_KINDS, limit = 1).firstOrNull()?.name
     }
 
     // ------------------------------------------------------------ 신호 수집
@@ -528,19 +575,38 @@ class CoachService : PleosForegroundService() {
 
     private suspend fun collectNavi() {
         navi.connect()
-        var tick = 0
         while (true) {
             try {
-                if (tick % 3 == 0) refreshRoute()
-                if (route?.guiding == true) {
-                    val tbt = navi.tbt()
-                    routeOpportunities = RouteOpportunities.extract(tbt)
-                    route = route?.copy(nextManeuverDistanceM = RouteOpportunities.nextManeuverDistance(tbt))
-                } else {
-                    routeOpportunities = emptyList()
+                val real = SystemClock.elapsedRealtime()
+                if (forceRoute || lastRouteAt == 0L || real - lastRouteAt >= NaviPoll.ROUTE_MS) {
+                    forceRoute = false
+                    refreshRoute()
+                    lastRouteAt = real
                 }
-                // 위치 SDK 갱신이 끊기면 내비의 현재 위치로 대신한다
-                if (!director.active && now() - hub.locationAt > 15_000) {
+                if (route?.guiding == true) {
+                    // 다음 화장실·회전이 가까우면 5초, 멀고 주행 거리 보정을 믿을 수 있으면 20초마다 받는다 (NaviPoll)
+                    val ts = tbtSnap
+                    val m = moved(ts.odometerM)
+                    val interval = NaviPoll.tbtIntervalMs(
+                        nextOpportunityM = ts.opportunities.minOfOrNull { it.routeDistanceM - m },
+                        nextManeuverM = ts.nextManeuverM?.minus(m),
+                        speedKnown = hub.speedKph != null,
+                        trusted = odometerTrusted,
+                        afterReset = real - naviResetAt < NaviPoll.FAST_AFTER_RESET_MS,
+                    )
+                    if (forceTbt || lastTbtAt == 0L || real - lastTbtAt >= interval) {
+                        forceTbt = false
+                        val at = odometerM // 내비는 요청 시점의 위치에서 잰다
+                        val tbt = navi.tbt()
+                        tbtSnap = TbtSnap(RouteOpportunities.extract(tbt), RouteOpportunities.nextManeuverDistance(tbt), at)
+                        lastTbtAt = real
+                    }
+                } else if (tbtSnap.opportunities.isNotEmpty() || tbtSnap.nextManeuverM != null) {
+                    tbtSnap = TbtSnap(emptyList(), null, odometerM)
+                }
+                // 위치 SDK 갱신이 끊기면 내비의 현재 위치로 대신한다. P로 서 있으면 위치가 그대로라 다시 묻지 않는다
+                val standing = hub.gear == Gear.PARK && (hub.speedKph ?: 0f) < 1f
+                if (!director.active && now() - hub.locationAt > 15_000 && (hub.lat == null || !standing)) {
                     val c = navi.currentLocation()
                     hub.lat = c.latitude
                     hub.lon = c.longitude
@@ -551,22 +617,67 @@ class CoachService : PleosForegroundService() {
             } catch (e: Exception) {
                 Log.w(TAG, "navi poll failed: ${e.message}")
             }
-            tick++
-            delay(5_000)
+            delay(NaviPoll.NEAR_MS)
         }
+    }
+
+    /** [base] 이후 달린 거리. 주행 거리 보정을 믿을 수 없으면 0 (예전처럼 받은 거리를 그대로 쓴다) */
+    private fun moved(base: Double): Double = if (odometerTrusted) (odometerM - base).coerceAtLeast(0.0) else 0.0
+
+    private fun markNaviReset() {
+        naviResetAt = SystemClock.elapsedRealtime()
+        forceTbt = true
+    }
+
+    /** 엔진에 넣을 후보: 후보를 만든 뒤 달린 만큼 경로 거리를 줄인다 */
+    private fun liveCandidates(): List<StopCandidate> = candidateSnap.let { NaviPoll.advanceCandidates(it.list, moved(it.odometerM)) }
+
+    /** 엔진에 넣을 경로 상태: 마지막 조회 뒤 달린 만큼 남은 거리·정체 위치·다음 회전 거리를 줄인다 */
+    private fun liveRoute(): RouteState? {
+        val rs = routeSnap
+        val r = rs.route ?: return null
+        if (!r.guiding) return r
+        val sinceRoute = moved(rs.odometerM)
+        val ts = tbtSnap
+        val sinceTbt = moved(ts.odometerM)
+        return r.copy(
+            remainDistanceM = r.remainDistanceM?.let { (it - sinceRoute).coerceAtLeast(0.0) },
+            congestion = if (sinceRoute <= 0.0) r.congestion
+            else r.congestion.map { it.copy(startDistanceM = it.startDistanceM - sinceRoute) }.filter { it.startDistanceM + it.lengthM > 0 },
+            nextManeuverDistanceM = ts.nextManeuverM?.let { (it - sinceTbt).coerceAtLeast(0.0) },
+        )
     }
 
     private suspend fun refreshRoute() {
         val s = navi.routeState()
-        val guiding = s.naviMode in GUIDING
-        if (guiding && route?.guiding != true) CongestionMath.reset()
+        if (s.naviMode != lastNaviMode) {
+            Log.i(TAG, "navi mode: ${s.naviMode}")
+            lastNaviMode = s.naviMode
+        }
+        val guiding = NaviPoll.isGuiding(s.naviMode)
+        if (guiding && route?.guiding != true) {
+            CongestionMath.reset()
+            markNaviReset()
+        }
         if (!guiding) {
-            route = RouteState(guiding = false)
+            routeSnap = RouteSnap(RouteState(guiding = false), odometerM)
             destinationName = null
+            prevRemainM = null
+            odometerTrusted = false
             return
         }
+        val at = odometerM
         val d = navi.destination()
         val remain = d.remainDistance.toDouble()
+        // 내비가 확인한 진행으로 주행 거리 보정을 믿을지 정하고, 경로가 바뀌었으면 TBT를 바로 다시 받는다
+        val p = NaviPoll.checkProgress(prevRemainM, prevRemainOdometerM, remain, at, odometerTrusted)
+        odometerTrusted = p.trusted
+        if (p.rerouted) {
+            CongestionMath.reset()
+            markNaviReset()
+        }
+        prevRemainM = remain
+        prevRemainOdometerM = at
         val items = s.trafficStatus?.congestionItemList.orEmpty()
         items.forEach { c -> CongestionMath.observe("${c.roadName}|${c.startCrossName}", c.offset, remain) }
         val congestion = items.map { c ->
@@ -580,26 +691,17 @@ class CoachService : PleosForegroundService() {
                 endName = c.endCrossName,
             )
         }.filter { it.startDistanceM + it.lengthM > 0 }
-        route = RouteState(
-            guiding = true,
-            remainDistanceM = remain,
-            remainTimeS = d.remainTime.toDouble(),
-            congestion = congestion,
-            nextManeuverDistanceM = route?.nextManeuverDistanceM,
+        routeSnap = RouteSnap(
+            RouteState(guiding = true, remainDistanceM = remain, remainTimeS = d.remainTime.toDouble(), congestion = congestion),
+            at,
         )
         destinationName = d.name
     }
 
     private suspend fun candidateLoop() {
-        // 고속도로 휴게소·졸음쉼터가 올라오면 바로 경로 앞 후보를 만들고, 나머지(6만여 곳)는 이어서 읽는다
-        serviceScope.launch {
-            val n = app.stops.ensureLoaded { highway ->
-                CoachStore.update { copy(status = "정차 후보 데이터 ${highway}곳 (나머지 읽는 중)") }
-                refreshCandidates()
-            }
-            CoachStore.update { copy(status = "정차 후보 데이터 ${n}곳") }
-        }
-        while (app.stops.count == 0) delay(200)
+        // 정차 후보 표(stops.bin)는 1초 안팎에 읽힌다 (StopAssets 주석)
+        val n = app.stops.ensureLoaded()
+        CoachStore.update { copy(status = "정차 후보 데이터 ${n}곳") }
         while (true) {
             refreshCandidates()
             delay(if (director.active) 5_000 else 20_000)
@@ -607,23 +709,34 @@ class CoachService : PleosForegroundService() {
     }
 
     /** 진행 방향 앞쪽 화장실 기회를 추리고 상위 몇 곳은 내비 경로 거리로 보정한다 */
-    private suspend fun refreshCandidates() {
+    private suspend fun refreshCandidates() = candidatesLock.withLock { refreshCandidatesLocked() }
+
+    /** 후보 갱신은 한 번에 하나만 (시연 시작과 20초 주기가 겹치면 RouteOracle 캐시를 동시에 고쳤다) */
+    private suspend fun refreshCandidatesLocked() {
         val lat = hub.lat ?: return
         val lon = hub.lon ?: return
         val t = now()
         // 길안내 중이면 TBT의 경로 위 휴게소·졸음쉼터를 쓴다 (경로 거리와 방향이 정확하다)
-        val opps = routeOpportunities
+        val ts = tbtSnap
+        val at = odometerM
+        val opps = NaviPoll.advance(ts.opportunities, moved(ts.odometerM))
         if (opps.isNotEmpty() && !director.active) {
-            candidates = candidatesFromRoute(opps, lat, lon, t)
-            CoachStore.update { copy(ahead = candidates) }
+            val list = candidatesFromRoute(opps, lat, lon, t)
+            candidateSnap = CandidateSnap(list, at)
+            CoachStore.update { copy(ahead = list) }
             return
         }
         val raw = app.stops.ahead(lat, lon, hub.heading, AHEAD_RADIUS_M, PLANNED_KINDS)
             .filter { it.facilities.restroom }
             .take(ORACLE_MAX)
-        val refined = raw.map { oracle.refine(it, lat, lon, t) }
-        candidates = refined.filter { it.directionOk != false }
-        CoachStore.update { copy(ahead = director.candidates(candidates)) }
+        // requestTrip은 후보마다 요청 시점의 위치에서 잰다: 요청 때 주행 거리를 같이 적어 두고 마지막에 같은 기준으로 맞춘다
+        val refined = raw.map { c -> odometerM to oracle.refine(c, lat, lon, t) }
+        val base = odometerM
+        val list = refined.mapNotNull { (requestedAt, c) ->
+            if (c.directionOk == false) null else NaviPoll.advanceCandidates(listOf(c), moved(requestedAt) - moved(base)).firstOrNull()
+        }
+        candidateSnap = CandidateSnap(list, base)
+        CoachStore.update { copy(ahead = director.candidates(list)) }
     }
 
     /**
@@ -692,7 +805,7 @@ class CoachService : PleosForegroundService() {
     }
 
     override fun onDestroy() {
-        if (!director.active) runCatching { app.memory.save(engine.memory()) }
+        if (!director.active && ::engine.isInitialized) runCatching { app.memory.save(engine.memory()) }
         voice.stop()
         interpreter.release()
         car.release()
@@ -720,7 +833,6 @@ class CoachService : PleosForegroundService() {
         const val GEAR_DRIVE = 8
         const val GEAR_1 = 16
         val HEALTH_TYPES = setOf(dev.shimpyo.engine.OccupantType.PREGNANT, dev.shimpyo.engine.OccupantType.OAB, dev.shimpyo.engine.OccupantType.IBS)
-        val GUIDING = setOf(NaviMode.ROUTE_GUIDING, NaviMode.SAFE_GUIDING, NaviMode.SIMULATION_GUIDING)
         val PLANNED_KINDS = setOf(StopKind.HIGHWAY_REST_AREA, StopKind.DROWSY_SHELTER)
         val URGENT_KINDS = setOf(StopKind.HIGHWAY_REST_AREA, StopKind.DROWSY_SHELTER, StopKind.PUBLIC_RESTROOM, StopKind.GAS_STATION, StopKind.PUBLIC_PARKING)
     }

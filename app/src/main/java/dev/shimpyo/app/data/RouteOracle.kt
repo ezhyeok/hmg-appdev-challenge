@@ -12,7 +12,8 @@ import dev.shimpyo.engine.StopCandidate
 class RouteOracle(private val navi: NaviKit) {
     private data class Entry(val distanceM: Double, val etaS: Double, val at: Long, val fromLat: Double, val fromLon: Double)
 
-    private val cache = HashMap<String, Entry>()
+    // 후보 갱신 루프와 시연 시작(clear)이 다른 스레드에서 만진다
+    private val cache = java.util.concurrent.ConcurrentHashMap<String, Entry>()
 
     /** false면 requestTrip을 쓰지 않는다 (길안내를 방해한다고 확인되면 끈다) */
     @Volatile var enabled = true

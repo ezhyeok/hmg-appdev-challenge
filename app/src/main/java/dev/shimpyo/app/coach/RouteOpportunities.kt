@@ -53,9 +53,14 @@ object RouteOpportunities {
      * 예) "안성휴게소(부산방향)" → "안성", "오산 졸음쉼터" → "오산"
      */
     fun normalizeName(name: String): String = name
-        .replace(Regex("\\(.*?\\)|\\[.*?]"), "")
+        .replace(BRACKETS, "")
         .replace(" ", "")
-        .replace(Regex("(졸음쉼터|휴게소|쉼터|휴게시설)$"), "")
-        .replace(Regex("(상행|하행|[가-힣]+방향|[가-힣]+방면)$"), "")
+        .replace(FACILITY_SUFFIX, "")
+        .replace(DIRECTION_SUFFIX, "")
         .trim()
+
+    // 정규식은 한 번만 컴파일한다 (예전에는 부를 때마다 3개를 새로 컴파일했다. 이름 맞추기는 후보마다 부른다)
+    private val BRACKETS = Regex("\\(.*?\\)|\\[.*?]")
+    private val FACILITY_SUFFIX = Regex("(졸음쉼터|휴게소|쉼터|휴게시설)$")
+    private val DIRECTION_SUFFIX = Regex("(상행|하행|[가-힣]+방향|[가-힣]+방면)$")
 }

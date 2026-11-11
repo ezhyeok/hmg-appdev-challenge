@@ -74,6 +74,10 @@ fun parseOccupants(json: String): List<Occupant>? = runCatching {
 /** 엔진의 개인 학습 상태(PersonalMemory)를 filesDir에 JSON으로 저장한다 */
 class MemoryStore(context: Context) {
     private val file = File(context.filesDir, "memory.json")
+    private val store = AtomicFile(file)
+
+    /** 기록 지우기([clear])마다 오른다. 저장은 학습 상태를 꺼낼 때의 값을 들고 와서, 그 사이 지웠으면 쓰지 않는다 */
+    val generation: Long get() = store.generation
 
     fun load(): PersonalMemory = runCatching {
         if (!file.exists()) return PersonalMemory()
@@ -99,7 +103,7 @@ class MemoryStore(context: Context) {
         )
     }.getOrDefault(PersonalMemory())
 
-    fun save(memory: PersonalMemory) {
+    fun save(memory: PersonalMemory, generationAtSnapshot: Long = generation): Boolean {
         val o = JSONObject()
         fun putDoubles(key: String, map: Map<String, List<Double>>) {
             o.put(key, JSONObject().apply { map.forEach { (k, v) -> put(k, JSONArray(v)) } })
@@ -110,12 +114,13 @@ class MemoryStore(context: Context) {
         o.put("promptStats", JSONObject().apply {
             memory.promptStats.forEach { (k, v) -> put(k, JSONObject().put("a", v.accepted).put("d", v.declined)) }
         })
-        runCatching {
-            val tmp = File(file.parentFile, "memory.json.tmp")
-            tmp.writeText(o.toString())
-            tmp.renameTo(file)
-        }
+        // 쓰기는 AtomicFile이 한 번에 하나씩 한다. 예전에는 정차 기록 저장과 1분 저장이 같은 임시 파일을 동시에 써서
+        // memory.json이 깨질 수 있었다(2026-11-11 리뷰). 성공하면 true
+        return store.write(o.toString(), generationAtSnapshot)
     }
+
+    /** 학습 상태를 지운다. 이미 꺼내 둔 저장은 더 쓰지 않는다 */
+    fun clear() = store.clear()
 }
 
 /** 정차 기록 (최근 200건) */

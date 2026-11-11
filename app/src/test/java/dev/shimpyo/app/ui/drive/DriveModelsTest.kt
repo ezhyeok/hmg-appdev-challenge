@@ -3,9 +3,15 @@ package dev.shimpyo.app.ui.drive
 import dev.shimpyo.app.coach.CoachUiState
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.Facilities
+import dev.shimpyo.engine.Prompt
+import dev.shimpyo.engine.PromptKind
+import dev.shimpyo.engine.Purpose
+import dev.shimpyo.engine.Reason
+import dev.shimpyo.engine.Recommendation
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
@@ -31,6 +37,29 @@ class DriveModelsTest {
         assertEquals("다음 화장실", card.context)
         assertEquals("죽암휴게소(부산방향)", card.title)
         assertEquals(listOf("정체 뒤"), card.chips)
+    }
+
+    @Test
+    fun questionCardShowsTheLiveDistanceNotTheOneAtAskTime() {
+        val asked = stop("oksan", "옥산휴게소", 3.9)
+        val prompt = Prompt("q1", PromptKind.LAST_CHANCE, "앞에 1시간 정체가 있어요. 들를까요?", asked, expiresAt = Long.MAX_VALUE)
+        val now = stop("oksan", "옥산휴게소", 1.2)
+        val state = CoachUiState(
+            serviceRunning = true,
+            guiding = true,
+            prompt = prompt,
+            next = Recommendation(now, setOf(Purpose.RESTROOM), listOf(Reason("LAST_CHANCE_CONGESTION", "정체 전 마지막"))),
+        )
+        val card = stopCard(state, driving = true)
+        assertEquals("옥산휴게소", card.title)
+        assertTrue(card.meta!!, card.meta!!.startsWith("1.2km"))
+
+        // 엔진 추천이 다른 곳이면 질문 때 값을 쓴다 (20초마다만 바뀌는 경로 앞 목록의 더 오래된 값은 쓰지 않는다)
+        val other = state.copy(
+            next = Recommendation(stop("jukam", "죽암휴게소", 20.0), setOf(Purpose.RESTROOM), emptyList()),
+            ahead = listOf(stop("oksan", "옥산휴게소", 6.0)),
+        )
+        assertTrue(stopCard(other, driving = true).meta!!.startsWith("3.9km"))
     }
 
     @Test

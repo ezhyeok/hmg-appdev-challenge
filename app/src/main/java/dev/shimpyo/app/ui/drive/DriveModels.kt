@@ -1,5 +1,6 @@
 package dev.shimpyo.app.ui.drive
 
+import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.vector.ImageVector
 import dev.shimpyo.app.coach.CoachUiState
 import dev.shimpyo.app.ui.Labels
@@ -17,6 +18,7 @@ import dev.shimpyo.engine.Recommendation
  */
 
 /** 게이지 카드 값 */
+@Immutable
 data class GaugeModel(val minutes: Int?, val level: Level?, val fraction: Float?, val tick: Float?, val reason: String?)
 
 /** 화장실 게이지: 막대 = 남은 분 ÷ 게이지를 정한 탑승자의 기준 간격, 눈금 = SOON 경계(20분) */
@@ -56,6 +58,7 @@ fun fatigueReason(reasons: List<Reason>): String? {
 }
 
 /** 추천 카드 내용 */
+@Immutable
 data class StopCardModel(
     /** 맥락 한 줄 (예: "정체 전 마지막 화장실") */
     val context: String,
@@ -135,7 +138,11 @@ fun stopCard(state: CoachUiState, driving: Boolean): StopCardModel {
         if (stop == null) {
             return StopCardModel(context, prompt.speech, null, chips, icon, askingLevel = level, sentence = true)
         }
-        return StopCardModel(context, stop.name, Labels.stopMeta(stop), chips, icon, askingLevel = level)
+        // 질문의 장소는 물은 순간의 값이다. 같은 곳을 엔진이 지금 추천하고 있으면 그 거리·시간(매초 갱신)을 보여 준다
+        // (예전에는 질문하는 동안 3km를 더 가도 '3.9km'에 멈춰 있었다, 2026-11-11 에뮬레이터. DriveModelsTest가 지킨다).
+        // 경로 앞 후보 목록(ahead)은 20초마다만 바뀌어 질문 때 값보다 오래될 수 있으니 쓰지 않는다
+        val live = next?.stop?.takeIf { it.id == stop.id } ?: stop
+        return StopCardModel(context, stop.name, Labels.stopMeta(live), chips, icon, askingLevel = level)
     }
 
     // 정차 중이고 계획이 있으면 첫 정차를 보여 준다

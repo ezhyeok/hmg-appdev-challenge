@@ -38,13 +38,13 @@ case "$line" in
      echo "      check: tools/laptop/emu-health.ps1 (emulator suspended?) and adb logcat -s Shimpyo"
      exit 1 ;;
 esac
-# 고속도로 휴게소·졸음쉼터가 먼저 올라와야 한다 (2026-11-11 회귀: 6만여 곳을 다 읽을 때까지 1분 넘게 후보가 비었다)
+# 정차 후보 표가 곧 올라와야 한다 (2026-11-11 회귀: JSON 6만여 행을 읽느라 1분 넘게 후보가 비었다 → stops.bin)
 for _ in $(seq 1 10); do
-  hw=$(adb_ logcat -d -s Shimpyo:I | grep -c "stop assets loaded (highway)")
-  [ "$hw" -ge 1 ] && break
+  loaded=$(adb_ logcat -d -s Shimpyo:I | grep "stop table loaded" | tail -1)
+  [ -n "$loaded" ] && break
   sleep 2
 done
-if [ "${hw:-0}" -ge 1 ]; then echo "OK  highway stops loaded"; else echo "FAIL: highway stops not loaded within 20 s of the demo start"; exit 1; fi
+if [ -n "$loaded" ]; then echo "OK  ${loaded#*Shimpyo : }"; else echo "FAIL: stop table not loaded within 20 s of the demo start"; exit 1; fi
 [ "$SPLIT" = "1" ] || exit 0
 
 # 창 막대(오른쪽 끝)를 왼쪽으로 끌어 앱을 portrait 창으로 나눈다 → 화면이 다시 만들어진다

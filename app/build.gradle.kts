@@ -12,6 +12,13 @@ val keystoreProps = Properties().apply {
     if (f.exists()) f.inputStream().use { load(it) }
 }
 
+// 값이 같은 화면은 다시 그리지 않는다(강한 건너뛰기). 엔진 출력 타입(불변 data class)과 읽기 전용 컬렉션은 안정 타입으로 본다.
+// 예전에는 서비스가 상태를 매초 갱신할 때마다 화면 전체가 다시 구성됐다(2026-11-11 gfxinfo: 프레임 77% 지연)
+composeCompiler {
+    enableStrongSkippingMode.set(true)
+    stabilityConfigurationFile.set(project.layout.projectDirectory.file("compose-stability.conf"))
+}
+
 android {
     namespace = "dev.shimpyo.app"
     compileSdk = 34
@@ -53,6 +60,13 @@ android {
     }
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
+    }
+    // assets/data의 JSON(공개 데이터 원본, tools/data/README.md)은 APK에 넣지 않는다. 앱은 같은 내용으로 만든
+    // stops.bin만 읽는다 (rest-engine buildStopTable). 기본 무시 목록에 *.json을 더한 것
+    androidResources {
+        ignoreAssetsPattern = "!*.json:!.svn:!.git:!.ds_store:!*.scc:.*:!CVS:!thumbs.db:!picasa.ini:!*~"
+        // stops.bin은 압축하지 않는다: 앱이 압축 풀기 없이 메모리 매핑으로 읽는다 (StopAssets)
+        noCompress += "bin"
     }
 }
 

@@ -229,6 +229,8 @@ def main():
     with open(rep_path, "w", encoding="utf-8") as f:
         json.dump(rep, f, ensure_ascii=False, indent=1)
     print(f"[{time.time()-t0:5.0f}s] wrote {counts} total {rep['output_total_mb']} MB; report {rep_path}")
+    # 앱은 JSON이 아니라 같은 규칙으로 만든 stops.bin을 읽는다 (rest-engine StopRows/StopTable)
+    print("next: ./gradlew -p rest-engine buildStopTable   (stops.bin; StopTableTest fails until it matches the JSON)")
 
 
 if __name__ == "__main__":

@@ -46,3 +46,15 @@ tasks.register<JavaExec>("runSim") {
     )
     jvmArgs("-Xmx3g")
 }
+
+// ---- 앱에 넣는 정차 후보 표 (app/src/main/assets/data/stops.bin) ----
+// tools/data/build.py가 만든 JSON을 StopRows 규칙으로 변환해 이진 표로 쓴다. 앱은 JSON 대신 이 표를 읽는다.
+// JSON을 다시 만들었으면 이것도 다시 실행한다 (StopTableTest가 JSON과 stops.bin이 어긋나면 실패한다)
+tasks.register<JavaExec>("buildStopTable") {
+    group = "build"
+    description = "app/src/main/assets/data/*.json → stops.bin"
+    classpath = sourceSets["main"].runtimeClasspath
+    mainClass.set("dev.shimpyo.engine.stops.StopTableBuilderKt")
+    val data = rootDir.parentFile.resolve("app/src/main/assets/data")
+    args(data.absolutePath, data.resolve("stops.bin").absolutePath)
+}

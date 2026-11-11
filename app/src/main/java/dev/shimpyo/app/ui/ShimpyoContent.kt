@@ -241,7 +241,7 @@ fun ShimpyoContent(
                                 height = layout.headerHeight(driving),
                                 margin = layout.margin,
                                 // 주행 중에는 드롭다운과 숨은 메뉴를 끈다 (제목만, 화살표 없음)
-                                menu = if (driving) null else MenuScreens.map { s -> HeaderMenuItem(s.title, s.icon, s == shown) { open(s) } },
+                                menu = if (driving) null else remember(shown) { MenuScreens.map { s -> HeaderMenuItem(s.title, s.icon, s == shown) { open(s) } } },
                                 onTitleLongPress = if (driving) null else ({ open(Screen.DEMO) }),
                                 badge = badge,
                                 badgeShort = badgeShort,

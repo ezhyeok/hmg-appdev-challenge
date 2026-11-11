@@ -64,7 +64,8 @@ fun RouteStrip(
     description: String = "경로 띠",
 ) {
     val c = ShimpyoTheme.colors
-    val measurer = rememberTextMeasurer()
+    // 라벨이 8개(기본 캐시)를 넘으면 그릴 때마다 글자를 다시 쟀다. 넉넉하게 둔다
+    val measurer = rememberTextMeasurer(cacheSize = 32)
     val label = if (driving) DriveType.Minimum else PleosType.BodySmallStrong
     // 글자 줄 높이는 sp라 글꼴 배율을 따른다
     val labelH = with(LocalDensity.current) { label.lineHeight.toDp() } + 4.dp

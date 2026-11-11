@@ -1,5 +1,6 @@
 package dev.shimpyo.app.coach
 
+import androidx.compose.runtime.Immutable
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.DrivingStyle
 import dev.shimpyo.engine.Gauge
@@ -22,6 +23,7 @@ import kotlinx.coroutines.flow.update
 enum class VoiceState { IDLE, SPEAKING, LISTENING, THINKING, UNAVAILABLE }
 
 /** 정차 기록 한 건 (휴식 기록 화면) */
+@Immutable
 data class StopLog(
     val start: Long,
     val end: Long,
@@ -33,6 +35,7 @@ data class StopLog(
 )
 
 /** 화면이 그리는 상태. 서비스가 1초마다 갱신한다 */
+@Immutable
 data class CoachUiState(
     val serviceRunning: Boolean = false,
     val restroom: Gauge? = null,
