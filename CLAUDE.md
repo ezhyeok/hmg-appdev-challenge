@@ -74,6 +74,7 @@
 - 내비 요청을 1초 안에 연달아 보내면(trip, route, waypoint) 시작된 경로가 곧바로 취소되는 일이 있었다. 요청 사이에 응답을 기다릴 것
 - **TBT(`getTBTInfo`)에 경로 위 휴게소(`TURN_ENTER_SERVICEAREA`)와 졸음쉼터(`TURN_RESTAREA`)가 이름과 함께 온다. 거리(`TBTInfo.distance`)는 직전 항목부터의 거리라서 누적해야 경로 거리가 된다** (2026-11-11 확인: 경유지 누적 47.1km = 내비 경유지 남은 거리 47.0km)
 - 정체 구간(`RouteStateInfo.trafficStatus.congestionItemList`)은 길안내 중 실제로 온다. `trafficCongestionTime` 단위는 초. `offset`의 기준(출발지/현재 위치)은 미확인
+- **정체 시간(`trafficCongestionTime`)은 통과 시간이 아니다** (2026-11-12 에뮬레이터, 판교 출발 경로, `KitNaviPort`의 `congestion:` 로그): 항목마다 30~100m 구간도 모두 60초(분 단위, 최소 1분)라 통과 시간(거리÷`avrSpeed`(km/h), 1~16초)과 다르다. 요약(`TrafficCongestionSummary`)은 3,200m·45.0km/h → 120초, 3,300m·46.1km/h → 120초, 5,900m·34.9~35.2km/h → 300초로 통과 시간(256·258·604초)의 약 절반 = 자유 흐름(약 70~80km/h) 대비 늘어난 시간(분 단위)에 맞는다. 엔진은 항목 시간을 통과 시간으로 쓴다(`RouteContext`): 엔진 담당 확인 필요
 - 길안내 중 `requestTrip`은 경로를 방해하지 않는다. 휴게소 좌표로 `addWaypoint` 하면 가는 방향 휴게소로 잡힌다
 - `adb emu geo fix`는 FusedLocation만 바꾸고 Pleos 내비의 위치는 바꾸지 않는다 (내비는 판교 고정)
 - 조향각 리스너 값은 Virtual Console 값과 부호가 반대이고, 변화가 없어도 약 3초마다 온다
@@ -94,6 +95,7 @@
 - 주행 중 UX 제한: `CarUxRestrictions` 연동 필수 (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/driving-restriction-development-guide.md`, `docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-planning-guide/driver-distraction-guideline.md`). 심사 항목 "차량특화성"과 직결된다
 - 로터리 컨트롤러(CCP), 오디오 포커스, IME 리사이즈 같은 차량 특화 동작은 `docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/` 참고
 - UI는 `docs/contest/02_Pleos_개발가이드/connect-guide/docs-design/`의 Pleos Connect UI Design Guide(레이아웃, 컬러, 타이포, 컴포넌트)를 따른다
+- **코치 상태는 `CoachCore`(액터, `rest-engine/coach`) 하나가 소유한다.** 서비스(`CoachService`)는 조립만 한다. 새 기능은 순수 부품(엔진·`PromptMachine`·`CoreRules` 등)과 포트 뒤에 넣고, 코어 처리 안에서 일시 중단하지 않는다(오래 걸리는 일은 효과로 띄우고 결과를 메시지로 받는다). 시연/실제 차이는 `CoachWorld` 정책으로만 가른다. 시나리오는 `CoachCoreTest`(서버 JVM, 가상 시간)로 먼저 재현한다. 구조: `docs/design/coach-layer/core.md`
 - 화면·인텐트가 서비스에 보내는 명령은 `CoachStore`의 Channel로 보낸다. 구독 전 값을 버리는 SharedFlow(replay 0)를 쓰면 첫 실행 때 `--es demo` 명령이 서비스의 collect보다 먼저 와서 사라진다(2026-11-11, `CoachStoreTest`가 지킨다). 앱 JVM 테스트는 노트북에서 `gradlew :app:testDebugUnitTest`
 - 정차 후보 데이터는 앱이 `assets/data/stops.bin`(rest-engine `buildStopTable`이 JSON에서 만든 이진 표)으로 읽는다. `tools/data` JSON을 바꾸면 stops.bin도 다시 만든다(`StopTableTest`가 둘이 어긋나면 실패)
 - 성능 개선은 결과가 같다는 테스트와 함께 한다(데이터: StopTableTest, 내비 조회 간격: NaviPollTest). 측정은 에뮬레이터에서 `top -p`, `dumpsys meminfo`, `dumpsys gfxinfo`, logcat의 내비 요청 수
