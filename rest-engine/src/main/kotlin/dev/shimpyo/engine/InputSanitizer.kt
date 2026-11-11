@@ -7,8 +7,10 @@ import kotlin.math.abs
  * 엔진에 들어오는 곳(update·urgent·plan)에서 한 번만 고친다 (감사 R23).
  *
  * - 거리·시간이 NaN·무한대면 '모름'(null)으로 본다. 정체 항목은 그런 값이 하나라도 있으면 뺀다.
- * - 음수가 뜻이 없는 값(남은 거리·시간, 다음 회전, 후보 범위, ETA, 도보 거리, 주행가능거리)도 '모름'으로 본다.
+ * - 음수가 뜻이 없는 값(남은 거리·시간, 다음 회전, ETA, 도보 거리, 주행가능거리)도 '모름'으로 본다.
  *   후보의 경로 거리 음수는 '지나침'이라 그대로 둔다 (RouteContext가 뺀다).
+ * - 후보 범위(candidatesUntilM)만은 깨진 값(NaN·음수)을 0으로 본다: 이 값의 '모름'(null)은 '목적지까지 다 넣었다'는 뜻이라,
+ *   깨진 값을 null로 바꾸면 '아무것도 모른다'가 '빠짐없다'로 뒤집힌다 ([horizon]).
  * - 차속은 크기만 쓴다: AAOS 차속은 후진 때 음수로 온다.
  * 모두 정상이면 입력 객체를 그대로 돌려준다 (매초 새로 만들지 않게).
  */
@@ -59,12 +61,24 @@ internal object InputSanitizer {
         val rd = positive(r.remainDistanceM)
         val rt = positive(r.remainTimeS)
         val man = nonNegative(r.nextManeuverDistanceM)
-        val until = nonNegative(r.candidatesUntilM)
+        val until = horizon(r.candidatesUntilM)
         val jams = if (r.congestion.all(::validJam)) r.congestion else r.congestion.filter(::validJam)
         if (rd == r.remainDistanceM && rt == r.remainTimeS && man == r.nextManeuverDistanceM && until == r.candidatesUntilM &&
             jams === r.congestion
         ) return r
         return r.copy(remainDistanceM = rd, remainTimeS = rt, nextManeuverDistanceM = man, candidatesUntilM = until, congestion = jams)
+    }
+
+    /**
+     * 후보 목록을 넣은 범위. NaN·음수는 0('차 앞에 대해 아는 것이 없다')으로 본다: 그러면 엔진은 공백도 정체 전 마지막 기회도
+     * 주장하지 않는다. null로 바꾸면 '목적지까지 빠짐없이 넣었다'가 되어 마지막 후보 뒤를 목적지까지의 공백으로 본다(감사 R23의 남은 부분).
+     * +∞는 '끝없이 다 넣었다'로 읽어 null(빠짐없음)이다.
+     */
+    private fun horizon(v: Double?): Double? = when {
+        v == null -> null
+        v.isNaN() || v < 0.0 -> 0.0
+        v.isInfinite() -> null
+        else -> v
     }
 
     private fun validJam(c: CongestionSegment): Boolean =
