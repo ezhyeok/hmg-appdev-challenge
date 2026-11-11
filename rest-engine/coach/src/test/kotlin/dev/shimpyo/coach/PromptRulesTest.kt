@@ -15,4 +15,9 @@ class PromptRulesTest {
             assertEquals(k.name, false, PromptRules.withdrawWhenParked(k, parked = true))
         }
     }
+
+    @Test
+    fun onlyInfoIsSpokenWithoutACard() {
+        for (k in PromptKind.entries) assertEquals(k.name, k == PromptKind.INFO, PromptRules.speakOnly(k))
+    }
 }
