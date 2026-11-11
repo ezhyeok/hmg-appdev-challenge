@@ -13,6 +13,7 @@ import dev.hmg.pleoskit.NaviKit
 import dev.hmg.pleoskit.SttKit
 import dev.hmg.pleoskit.TtsKit
 import dev.hmg.pleoskit.VehicleKit
+import dev.shimpyo.app.coach.KitNaviPort
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.coroutineScope
@@ -32,6 +33,8 @@ import ai.pleos.playground.tts.constant.ErrorType as TtsErrorType
  * - `wp-add:<FIRST|SECOND>:<위도>,<경도>:<이름>`: 그 자리에 경유지를 넣고 20초 동안 목록과 이벤트를 본다
  * - `wp-rm:<FIRST|SECOND|ALL>`: 경유지를 뺀다
  * - `wp-set:<위도>,<경도>,<이름>;<위도>,<경도>,<이름>`: 목적지는 그대로 두고 경유지를 이 순서로 다시 정한다 (NaviKit.setWaypoints)
+ * - `port-add:<위도>,<경도>:<이름>`: 앱이 쓰는 길(KitNaviPort.addWaypoint)로 넣는다. 순서 규칙(WaypointOrder)까지 본다.
+ *   앱을 다시 시작하기 전까지 같은 포트를 쓴다 (이 앱이 넣은 경유지를 기억한다)
  * - `route:<위도>,<경도>:<이름>` / `route-cancel`: 길안내 시작 / 끝
  * - `tts:<stop-mid|stop-idle|stop-then-speak|stop-early>`: 말하기를 끊어 보고 이벤트 순서를 본다
  * - `stt:<stop-then-request>`: 듣기를 끊고 곧바로 다시 듣는다
@@ -56,6 +59,7 @@ class SdkProbe(
                 "wp-add" -> addWaypoint(name, WaypointIndex.valueOf(parts[1]), parts[2])
                 "wp-rm" -> removeWaypoint(name, WaypointIndex.valueOf(parts[1]))
                 "wp-set" -> setWaypoints(name, command.substringAfter(":"))
+                "port-add" -> portAdd(name, parts[1], parts.getOrElse(2) { "경유지" })
                 "route" -> route(name, parts[1], parts.getOrElse(2) { "목적지" })
                 "route-cancel" -> log(name, "cancelled=${connectedNavi().cancelRoute()}")
                 "tts" -> ttsProbe(name, parts.getOrElse(1) { "stop-mid" })
@@ -135,6 +139,15 @@ class SdkProbe(
         val ok = n.setWaypoints(RouteInfo(latitude = d.latitude, longitude = d.longitude, poiName = d.name, poiId = "", address = d.address, poiSubId = ""), list)
         val after = n.destination()
         log(name, "confirmed=$ok after=${describe(n.waypoints())} destination=${after.name} ${after.remainDistance}m mode=${n.routeState().naviMode}")
+    }
+
+    private suspend fun portAdd(name: String, coords: String, poi: String) {
+        val (lat, lon) = latLon(coords)
+        val n = connectedNavi()
+        log(name, "before=${describe(n.waypoints())}")
+        val started = SystemClock.elapsedRealtime()
+        val added = port(n).addWaypoint(lat, lon, poi)
+        log(name, "added=$added in ${SystemClock.elapsedRealtime() - started} ms after=${describe(n.waypoints())}")
     }
 
     private suspend fun removeWaypoint(name: String, index: WaypointIndex) {
@@ -271,5 +284,9 @@ class SdkProbe(
 
     private companion object {
         const val TAG = "PleosApp"
+
+        /** 실험 사이에 이어 쓰는 포트 (앱의 포트와는 다른 객체다: 앱이 넣은 경유지는 모른다) */
+        private var sharedPort: KitNaviPort? = null
+        fun port(navi: NaviKit): KitNaviPort = sharedPort ?: KitNaviPort(navi).also { sharedPort = it }
     }
 }

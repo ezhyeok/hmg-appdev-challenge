@@ -32,6 +32,14 @@ while [ "$(date +%s)" -lt "$DEADLINE" ]; do
     up=$(timeout 25 ssh hmg-laptop "$ADB shell cat /proc/uptime" 2>/dev/null | cut -d. -f1 | tr -d '\r\n')
     echo "$(date +%T) user=$user uptime=${up}s load1=$load"
     if [ "$user" = "10" ] && [ "${up:-0}" -ge "$MIN_UPTIME" ] && awk -v l="$load" -v m="$MAX_LOAD" 'BEGIN{exit !(l<m)}'; then
+      # 다시 부팅하면 시각대가 America/Los_Angeles로 돌아올 수 있다(자동 시각대, 2026-11-12). 앱의 시각 규칙(피로의 하루 리듬 등)은
+      # 기기 시각대를 쓰므로 한국 시각으로 맞춰 둔다
+      tz=$(timeout 25 ssh hmg-laptop "$ADB shell getprop persist.sys.timezone" 2>/dev/null | tr -d '\r\n')
+      if [ "$tz" != "Asia/Seoul" ]; then
+        timeout 25 ssh hmg-laptop "$ADB shell cmd time_zone_detector set_auto_detection_enabled false" >/dev/null 2>&1
+        timeout 25 ssh hmg-laptop "$ADB shell service call alarm 3 s16 Asia/Seoul" >/dev/null 2>&1
+        echo "time zone was ${tz:-unknown}: set to Asia/Seoul"
+      fi
       echo READY
       exit 0
     fi

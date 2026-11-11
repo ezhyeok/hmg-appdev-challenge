@@ -48,6 +48,10 @@
   - **부팅 후 `tools/laptop/wait-emulator.sh`로 기다린다**(가동 4분 이상, 운전자 프로필 user 10 활성). 그 전에 앱을 실행하거나 빌드하면 VHAL이 재시작되면서 시스템이 user 0으로 돌아가고 내비 앱이 조회에 응답하지 않는다. 그렇게 되면 에뮬레이터를 다시 부팅한다. 빌드는 에뮬레이터를 띄우기 전에 `run-app.ps1 -BuildOnly`로 해 둔다
   - **에뮬레이터가 멈춘 것처럼 보이면 재부팅 전에 `tools/laptop/emu-health.ps1`로 qemu 상태를 본다.** 증상은 `adb devices`에는 보이는데 `adb shell`이 응답하지 않고 qemu CPU가 0%다. 2026-11-11에는 에뮬레이터의 크래시 보고기(crashpad_handler)가 qemu를 덤프하려고 일시 정지시킨 뒤 자신이 죽어서 스레드가 모두 Suspended로 남았다. `emu-health.ps1 -Resume`으로 재개된다(`wait-emulator.sh`가 adb 무응답을 보면 자동으로 부른다). 재발 방지로 `start-emulator.ps1`은 `-crash-report-mode disabled -no-metrics`로 띄운다
   - 노트북 화면에서 창으로 띄우려면(시연 영상 녹화용) `tools/laptop/start-emulator-gui.cmd`를 더블클릭한다
+- 에뮬레이터 이미지는 user 빌드다(`adb root` 불가). 프로세스를 죽이는 방법: `am crash <패키지>`(크래시), `am force-stop --user 10 <패키지>`(멈춤, 다시 뜨지 않는다), debug 빌드의 앱은 `run-as dev.shimpyo.app --user 10 kill -9 <pid>`(크래시가 아닌 죽음). `run-as`에 `--user 10`을 빼면 user 0의 uid라 앱 프로세스에 닿지 않는다
+- 이미 떠 있는 앱에 보낸 `am start … --es …`는 Pleos 홈 화면이 창 다시 띄우기로 처리해 앱의 `onNewIntent`에 닿지 않는다(2026-11-12). 옵션을 주려면 `am start -S`(앱 재시작)로 보내거나, debug 빌드는 `adb shell am broadcast --user current -a dev.shimpyo.app.DEV -p dev.shimpyo.app --es probe wp`처럼 브로드캐스트로 보낸다
+- 에뮬레이터 부하: 평소 load average는 5~7이다. APK 설치 직후나 앱을 연달아 다시 시작하면 20을 넘는다(2026-11-12). 설치·재시작 뒤에는 `tools/laptop/wait-emulator.sh 8`로 가라앉기를 기다리고, 시간을 재는 점검은 그 뒤에 한다
+- 2026-11-12 에뮬레이터가 7시간 가동 뒤 `libgfxstream_backend.dll` 접근 위반(0xc0000005)으로 죽었다(`-gpu host`, 직전에 앱을 여러 번 죽였다 살렸다). 증상: `adb devices`가 비고 qemu 프로세스가 없다. `start-emulator.ps1`로 다시 띄운다. 다시 부팅하면 내비의 길안내는 사라지고 시각대가 America/Los_Angeles로 돌아올 수 있다(`wait-emulator.sh`가 Asia/Seoul로 맞춘다: `cmd time_zone_detector set_auto_detection_enabled false` + `service call alarm 3 s16 Asia/Seoul`)
 - GitHub private repo: https://github.com/ezhyeok/hmg-appdev-challenge (기본 브랜치 `main`)
 
 ## SDK 사용 조건 (설명회 기준, Playground 문서보다 우선)
@@ -79,6 +83,14 @@
 - `adb emu geo fix`는 FusedLocation만 바꾸고 Pleos 내비의 위치는 바꾸지 않는다 (내비는 판교 고정)
 - 조향각 리스너 값은 Virtual Console 값과 부호가 반대이고, 변화가 없어도 약 3초마다 온다
 - Pleos LLM SDK 2.1.3.2: ON_DEVICE 모드는 에뮬레이터에서 응답하지 않았다(40초). 문서의 `getOnDeviceModelPromptsContents`는 jar에 없다
+- **경유지(`addWaypoint`)** (2026-11-12 에뮬레이터, 판교→부산역 실제 경로, `SdkProbe wp-add`): ① 경유지는 둘까지고, 둘이 차 있으면 내비가 요청을 조용히 버린다(이벤트도 오류도 없다) ② `waypointIndex`와 상관없이 **이미 있는 경유지 뒤에 붙는다**: 옥산(101km) 뒤에 안성(47km)을 넣으니 [옥산 101km, 안성 177km]가 됐다(갔다가 되돌아온다) ③ 경유지 목록(`WaypointInfo`)의 좌표는 0.0이고 보낸 `poiName`이 `name`으로 돌아온다 ④ 넣는 동안 길안내가 취소됐다 다시 시작되고(약 14초) 그 사이 목록은 비어 있다. 순서를 지키려면 `requestRouteWithWaypoints`로 목적지와 경유지를 순서대로 다시 정한다(`NaviKit.setWaypoints`, 목적지 좌표는 `getDestinationInfo`가 준다). 앱은 `KitNaviPort.addWaypoint`가 이 규칙으로 넣는다(`WaypointOrder`, `KitRulesTest`)
+- TTS/STT 이벤트에는 요청 번호가 없다(API 레퍼런스). 2026-11-12 에뮬레이터(`SdkProbe tts`/`stt`): TTS는 `stop()`을 부르면 말하는 중이 아니어도 `onStop`이 오고(약 10ms), 말하는 중이면 약 15ms 뒤에 온다. STT는 `request()` 뒤 약 8초에 `onReady`가 오고 그 전에 `stop()` 하면 `onEndedRecognition`이 오지 않는다. 그래서 kit은 요청을 하나씩 보내고 앞 요청의 끝남 이벤트를 받은 뒤 다음을 보내며, 쉬는 SDK에는 stop을 보내지 않는다(`pleos-kit` `Turns.kt`, `TurnsTest`)
+- Pleos 차량 서비스(`ai.pleos.playground.service.vehicle`)가 죽었다 살아나면(`am crash`) Vehicle SDK 2.3.2가 스스로 다시 붙고 걸어 둔 리스너를 모두 다시 걸어 현재 값을 한 번씩 준다(약 1.4초). 서비스가 멈추면(`am force-stop`) SDK는 다시 붙지 않는다: 이벤트가 끊기고 조회는 답이 없다(예외도 `onFailed`도 없이 kit의 20초 시간 초과). 앱은 30초마다 값을 다시 읽다가 모두 실패하고 이벤트도 없으면 `VehicleKit.reconnect()`로 새로 붙는다(약 1분, coach `SignalCollector`, `tools/laptop/signals-check.sh`)
+- Vehicle 2.3.2 jar에는 문서의 `VehicleException`이 난독화된 이름(`callback.exception.a`)으로 들어 있어 `errorCode`를 타입으로 쓸 수 없다. 메시지에 오류 코드 이름이 들어 있다(`ERROR_NOT_SUPPORTED_PROPERTY`): `VehicleKit.notSupported(e)`
+- `CarPropertyManager.registerCallback`은 읽을 권한이 없는 속성에 예외 없이 false를 돌려준다(CAR_SPEED를 받기 전의 차속). 반환값을 보지 않으면 차속이 로그 없이 빈다(`CarState.speedMps()`가 예외로 바꾼다)
+- `Car.createCar(context)`로 만든 연결은 Car 서비스가 죽으면 플랫폼이 앱 프로세스를 죽인다. `createCar(Context, Handler, long, CarServiceLifecycleListener)`(android.car.jar, API 30+)는 죽이지 않고 알려 준다(`CarState.connected`). 한 프로세스의 Car 연결이 모두 이 방식이어야 한다(화면의 `UxRestrictionWatcher`는 아직 `createCar(context)`다)
+- **앱이 화면에 떠 있다가 죽으면** 시스템이 화면을 닫고 태스크를 지운 뒤 START_STICKY 서비스를 다시 만드는데, 다시 만든 서비스에는 `onStartCommand` 없이 `onTaskRemoved`만 온다(2026-11-12 `am crash`). `PleosForegroundService`는 `onTaskRemoved`에서도 시작한다. 화면 없이 서비스만 돌다 죽으면(`kill -9`) `onStartCommand(null)`이 오고 `startForeground`도 허용됐다(`tools/laptop/restart-check.sh`)
+- 개발용 점검(`KitSelfTest`, `SdkVerify`, `SdkProbe`)은 debug 빌드에만 있다(`app/src/debug`). 제출용(release)이 받는 인텐트 옵션은 `--es demo` 하나다(`DevHooks`, `LaunchExtras`). 제출용 APK를 만들면 `tools/laptop/devhooks-check.sh`를 돌린다(2026-11-12: 예전 release는 `--ez selftest true`로 좌석·창문을 움직였다)
 - NaviHelper에는 POI 검색 API가 없다. 목적지·경유지의 좌표와 poiId는 앱이 외부에서 구해야 한다. 요청은 Pleos 내비 앱으로 전달되고, 어떤 이벤트가 오는지는 내비 앱 구현에 따라 다르다
 - 에뮬레이터에서 재현할 수 있는 차량 상태는 `docs/contest/02_Pleos_개발가이드/pleos-connect/app-test-guide/virtual-console-guide.md`의 카드 목록이 기준이다
 - Virtual Console은 에뮬레이터 8088 포트의 HTTP API로도 조작할 수 있다 (`adb forward tcp:8088 tcp:8088`). 시연 시나리오를 스크립트로 재생할 수 있다

@@ -22,13 +22,13 @@ fail=0
 if ash_ "dumpsys package $PKG | grep -E 'pkgFlags|flags=\['" | grep -q DEBUGGABLE; then build=debug; else build=release; fi
 echo "installed build: $build"
 
-# restarted <이름> <죽이는 명령>
+# restarted <이름> <죽이는 명령 (PID는 지금 프로세스 번호로 바뀐다)>
 restarted() {
   local name="$1" kill="$2" old new line="" fatal
   old=$(ash_ "pidof $PKG")
   [ -n "$old" ] || { echo "FAIL $name: app not running (start it and let it run for a minute first)"; fail=1; return; }
   adb_ logcat -c >/dev/null
-  ash_ "$kill" >/dev/null
+  ash_ "${kill//PID/$old}" >/dev/null
   for _ in $(seq 1 30); do
     sleep 2
     new=$(ash_ "pidof $PKG")
@@ -49,7 +49,8 @@ restarted() {
 restarted "crash while on screen (am crash)" "am crash $PKG"
 if [ "$build" = "debug" ]; then
   sleep 75  # 다음 맥박(1분)을 기다린다
-  restarted "killed without a crash (kill -9)" "run-as $PKG sh -c 'kill -9 \$(pidof $PKG)'"
+  # AAOS의 앱 프로세스는 포그라운드 사용자(user 10)의 것이다: run-as에 --user를 줘야 같은 uid가 된다
+  restarted "killed without a crash (kill -9)" "run-as $PKG --user $(ash_ 'am get-current-user') kill -9 PID"
 fi
 fg=$(ash_ "dumpsys activity services $PKG" | grep -c "isForeground=true")
 [ "$fg" -ge 1 ] && echo "OK  the service is a foreground service" || { echo "WARN the service is not in the foreground (it retries every 10 s; open the app to promote it)"; }

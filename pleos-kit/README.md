@@ -14,16 +14,26 @@ Pleos Connect SDK(Vehicle, NaviHelper, TTS, STT, FusedLocation)와 AAOS Car API�
 | `onRouteStarted`가 앱에 오지 않는다 | `NaviKit.startRoute()`가 `naviMode`를 조회해 길안내 시작을 확인 |
 | 차속·위치 권한은 실행 중에 요청해야 한다 | `PleosPermissions.requestIfNeeded()` |
 | 영역(area)과 값 범위는 차종마다 다르다 | `hvacAreas()`, `windowAreas()` 등 capability 조회 함수로 얻는다 |
+| SDK 객체를 메인 스레드에서 만들거나 부르면 안 된다 | kit 객체는 어디서 만들어도 된다. SDK 객체는 `connect()`가 SDK 전용 스레드에서 처음 만든다 (`LazySdk`, logcat `PleosKit: Vehicle created on pleos-vehicle`). 놓을 때(`release`) 새로 만들지 않는다 |
+| 연결·구독 실패를 삼키면 값이 오지 않는 흐름을 영영 기다린다 | `CarState.connect()`, 신호의 `get()`·`changes()`는 실패하면 예외로 끝난다. 다시 시도는 쓰는 쪽이 한다 (쉼표: coach 모듈 `SignalCollector`) |
+| `CarPropertyManager.registerCallback`은 권한이 없으면 예외 없이 false를 준다 | `CarState.gear()`·`speedMps()`의 구독이 false를 예외로 바꾼다 |
+| Car 서비스가 죽으면 `createCar(context)`로 만든 연결은 프로세스를 죽인다 | `CarState`는 상태 리스너를 받는 `createCar`로 만들고 `connected`로 알린다 (API 30+) |
+| Pleos 차량 서비스가 멈추면(`force-stop`) SDK는 다시 붙지 않고 값이 언다 | `VehicleKit.reconnect()`, `LocationKit.reconnect()`가 SDK 객체를 버리고 새로 붙는다. 신호 객체는 그대로 쓸 수 있다 |
+| TTS/STT 이벤트에 요청 번호가 없다. 쉬는 TTS에 `stop()`을 보내도 `onStop`이 온다 | `TurnRunner`(Turns.kt): 요청을 하나씩 보내고, 앞 요청의 끝남 이벤트를 받은 뒤 다음을 보낸다. 하는 중이 아니면 `stop()`은 SDK를 부르지 않는다 |
+| 내비는 새 경유지를 늘 뒤에 붙이고, 셋째는 조용히 버리고, 경유지 좌표를 돌려주지 않는다 | `NaviKit.addWaypoint`는 이름으로 확인하고 가득 차 있으면 곧바로 false. 순서를 정하려면 `NaviKit.setWaypoints` |
+| 취소를 SDK 실패로 바꾸면 쓰는 쪽이 취소를 실패로 센다 | `sdkSend`·`sdkCall`은 취소를 `CancellationException` 그대로 던진다 |
+| 앱이 죽은 뒤 다시 만들어진 서비스에는 `onStartCommand` 없이 `onTaskRemoved`만 올 수 있다 | `PleosForegroundService`가 `onTaskRemoved`에서도 시작하고, `startForeground`가 거절돼도 죽지 않고 다시 시도한다 |
 
 ## 구성
 
 | 파일 | 내용 |
 |---|---|
 | `VehicleKit` | Vehicle SDK. 자주 쓰는 신호를 `ReadSignal`/`ReadWriteSignal`로 제공. 그 밖의 API는 `call`, `call2`, `observe`로 감싼다 |
-| `CarState` | AAOS Car API. 기어, 차속, 주행 중 UX 제한을 `StateFlow`로 제공 |
+| `CarState` | AAOS Car API. 기어·차속은 `ReadSignal`(`gear()`, `speedMps()`), 주행 중 UX 제한과 연결 여부(`connected`)는 `StateFlow` |
 | `UxRestrictions`, `UxRestrictionWatcher` | 주행 중 UX 제한(`CarUxRestrictions`). 모르는 상태를 `Unknown`으로 따로 두고 `restricted`는 모르면 true(fail closed). 기능별 비트(`UxRestrictionFlags`)와 최대 글자 수·항목 수. `UxRestrictionWatcher`는 권한 없이 제한만 구독한다(화면이 서비스 없이 쓸 때) |
 | `NaviKit` | NaviHelper. 조회(`routeState`, `tbt`, `waypoints`, `tripEstimate` 등)와 경로 변경(`startRoute`, `addWaypoint`, `cancelRoute`) |
-| `TtsKit`, `SttKit` | 음성 합성·인식(ON_DEVICE 기본). `speak()`는 재생이 끝날 때까지 기다린다 |
+| `TtsKit`, `SttKit` | 음성 합성·인식(ON_DEVICE 기본). `speak()`는 재생이 끝날 때까지 기다린다. `SpeechOutput`/`SpeechInput` 인터페이스를 구현한다(쓰는 쪽이 가짜로 시험할 수 있게) |
+| `Turns.kt` | 음성 요청과 요청 번호 없는 이벤트를 짝짓는 `TurnGate`·`TurnRunner` |
 | `LocationKit` | FusedLocation. 마지막 위치, 위치 갱신 Flow, 근접 알림 Flow |
 | `PleosForegroundService` | 주행 중 계속 살아 있어야 하는 로직을 두는 서비스의 바탕 |
 | `PleosPermissions` | 실행 중 요청이 필요한 권한 처리 |
@@ -92,13 +102,18 @@ vehicle.call2<SeatArea, MoveControl?>("moveSeatBackrestAngle") { ok, fail ->
 | `seatBackrestPosition` / `moveSeatBackrest` | `pleos.car.permission.CAR_SEATS` / `CONTROL_CAR_SEATS` |
 | `cruiseControl`, `tripDrivingTimeMin`, `brakePedal` | `pleos.car.permission.CAR_DRIVE` |
 | `evStateOfCharge` | `pleos.car.permission.CAR_ENERGY` |
-| `CarState.gear` | `android.car.permission.CAR_POWERTRAIN` |
-| `CarState.speedMps` | `android.car.permission.CAR_SPEED` (실행 중 요청) |
+| `CarState.gear()` | `android.car.permission.CAR_POWERTRAIN` |
+| `CarState.speedMps()` | `android.car.permission.CAR_SPEED` (실행 중 요청). 없으면 조회·구독이 예외로 실패한다 |
 | `NaviKit` 조회 / 경로 변경 | `pleos.car.permission.NAVI_ROUTE` / `NAVI_ROUTE_SEARCH` |
 | `TtsKit` / `SttKit` | `pleos.car.permission.TTS_SERVICE` / `STT_SERVICE` |
 | `LocationKit` | `pleos.car.permission.FUSED_LOCATION` (실행 중 요청) |
 
 포그라운드 서비스 권한(`FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_SPECIAL_USE`)은 kit의 Manifest가 선언한다. SDK 권한은 앱이 쓰는 것만 앱 Manifest에 선언한다.
+
+## 테스트
+
+SDK와 안드로이드를 부르지 않는 규칙은 JVM 테스트로 지킨다 (노트북에서 `gradle.ps1 :pleos-kit:testDebugUnitTest`): `TurnsTest`(음성 요청 순서, 늦은 멈춤 이벤트), `SdkCallTest`(취소는 취소로, SDK 객체는 처음 쓸 때 한 번, 미지원 오류 분류). 내비 경유지 확인 규칙은 앱의 `KitRulesTest`에 있다.
+기기에서만 볼 수 있는 것은 점검 스크립트가 본다: `tools/laptop/restart-check.sh`(서비스 다시 만들기), `tools/laptop/signals-check.sh`(차량 서비스가 죽거나 멈춘 뒤 신호가 다시 오는지).
 
 ## 에뮬레이터 확인 결과
 
