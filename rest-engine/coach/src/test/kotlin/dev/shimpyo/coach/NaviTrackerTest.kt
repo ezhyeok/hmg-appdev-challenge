@@ -194,6 +194,41 @@ class NaviTrackerTest {
         assertEquals(listOf(20_000L), r.navi.times("tbt"))
         assertEquals(listOf("안성휴게소"), r.snap.opportunities.map { it.name })
         assertEquals("경로 시작을 봤으니 전체 거리를 이때 잡는다", 200_000.0 - r.odo.meters, r.tracker.congestion.routeTotalM!!, 30.0)
+        assertTrue(r.tracker.congestion.routeOriginKnown)
+    }
+
+    @Test
+    fun startingMidRouteDoesNotKnowTheOrigin() = runTest {
+        // 서비스가 길안내 도중에 (다시) 켜졌다: 출발지에서 얼마나 왔는지 몰라 출발지 기준 정체 offset을 바꿀 수 없다
+        val r = Rig(this)
+        r.guide()
+        r.start()
+        runCurrent()
+        assertEquals(1, r.snap.epoch)
+        assertFalse(r.tracker.congestion.routeOriginKnown)
+    }
+
+    @Test
+    fun anEventWhileIdleOnlyRefreshes() = runTest {
+        val r = Rig(this)
+        r.start()
+        advanceTimeBy(7_000)
+        r.navi.changes.tryEmit(NaviChange.ROUTE_CANCELLED)
+        runCurrent()
+        assertEquals(listOf(0L, 7_000L), r.navi.times("routeStatus"))
+        assertEquals("바뀔 경로가 없으면 epoch를 늘리지 않는다", 0, r.snap.epoch)
+    }
+
+    @Test
+    fun aBrokenRemainingDistanceIsUnknownNotZero() = runTest {
+        val r = Rig(this)
+        r.navi.mode = { NaviMode.ROUTE_GUIDING }
+        r.navi.destination = { dest(Double.NaN) }
+        r.start()
+        runCurrent()
+        assertTrue(r.snap.guiding)
+        assertNull(r.snap.route!!.remainDistanceM)
+        assertEquals("남은 거리를 못 읽었으면 5초 뒤 다시", 5_000L, run { advanceTimeBy(5_001); r.navi.times("routeStatus")[1] })
     }
 
     @Test
@@ -421,6 +456,25 @@ class NaviTrackerTest {
         advanceTimeBy(5_000)
         assertTrue(r.snap.tbtReceived)
         assertTrue(r.log.lines.any { "tbt ok after" in it })
+    }
+
+    @Test
+    fun onceReceivedTheTbtStaysForTheRestOfTheEpoch() = runTest {
+        // 후보 담당과의 약속: tbtReceived는 epoch가 바뀔 때만 false로 돌아간다. 뒤의 실패·무응답은 지난 TBT를 지우지 않는다
+        val r = Rig(this)
+        r.guide()
+        r.navi.tbt = { listOf(TbtItem(TbtType.SERVICE_AREA, 9_000.0, "안성휴게소"), TbtItem(TbtType.OTHER, 1_000.0, "분기")) }
+        r.start()
+        runCurrent()
+        val epoch = r.snap.epoch
+        assertEquals(10_000.0, r.snap.tbtCoverageM!!, 0.0)
+        r.navi.faults["tbt"] = Fault.THROW
+        advanceTimeBy(30_000)
+        r.navi.faults["tbt"] = Fault.HANG
+        advanceTimeBy(30_000)
+        assertEquals(epoch, r.snap.epoch)
+        assertTrue(r.published.filter { it.epoch == epoch }.dropWhile { !it.tbtReceived }.all { it.tbtReceived && it.tbtCoverageM == 10_000.0 })
+        assertEquals(listOf("안성휴게소"), r.snap.opportunities.map { it.name })
     }
 
     @Test

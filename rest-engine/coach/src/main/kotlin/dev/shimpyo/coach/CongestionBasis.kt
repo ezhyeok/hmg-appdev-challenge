@@ -125,6 +125,8 @@ class CongestionBasis {
     internal val votes: Pair<Int, Int> get() = votesCar to votesOrigin
     /** 테스트용: 이번 경로의 전체 거리 */
     internal val routeTotalM: Double? get() = totalRouteM
+    /** 테스트용: 이번 경로의 시작을 봤는지 */
+    internal val routeOriginKnown: Boolean get() = originKnown
 
     companion object {
         /** 판정에 쓰는 최소 offset (정체 안·바로 앞은 기준을 가를 수 없다) */
