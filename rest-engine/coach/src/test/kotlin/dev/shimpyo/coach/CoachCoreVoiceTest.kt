@@ -3,8 +3,10 @@ package dev.shimpyo.coach
 import dev.shimpyo.coach.fakes.CoreRig
 import dev.shimpyo.coach.fakes.DRIVER
 import dev.shimpyo.coach.fakes.FakeInterpreter
+import dev.shimpyo.coach.fakes.FakeNaviPort
 import dev.shimpyo.coach.fakes.FakeSettings
 import dev.shimpyo.coach.fakes.FakeVoice
+import dev.shimpyo.coach.fakes.Gyeongbu
 import dev.shimpyo.coach.fakes.InMemoryMemory
 import dev.shimpyo.coach.fakes.KID
 import dev.shimpyo.engine.Level
@@ -86,6 +88,78 @@ class CoachCoreVoiceTest {
         assertEquals("물어봤을 뿐인데 화장실이 필요하다고 말한 것이 됐다 (${rig.state.restroom?.reasons?.map { it.code }})", Level.OK, rig.state.restroom?.level)
         assertTrue("물어봤을 뿐인데 화장실 간격을 배웠다: ${memory.stored.restroomIntervalsMin}", memory.stored.restroomIntervalsMin.isEmpty())
         assertTrue("남은 시간을 답한다: said=${rig.voice.said} asked=${rig.voice.asked}", rig.voice.said.any { "여유" in it })
+    }
+
+    // ------------------------------------------------------------ 서 있을 때 한 말 (엔진 닫힘 검증 E6)
+
+    @Test
+    fun aRestroomRequestSpokenWhileParkedIsAnsweredWithACardThatStays() = runTest {
+        // 꽉 막힌 정체에서 P로 서 있을 때 "아이가 화장실 가고 싶대"라고 했다. 엔진은 서 있어도 가장 가까운 화장실을 묻는다
+        // (마지막 기회와 같은 종류의 질문, Prompt.userRequested). 예전에는 코치가 '정차 중 주행 질문'으로 거둬서 게이지만 NOW가 되고
+        // 카드도 말도 없었다
+        val rig = CoreRig(this)
+        rig.voice.listens += "아이가 화장실 가고 싶대"
+        rig.park()
+        rig.fix(37.0, 127.19) // 입장졸음쉼터 10km 전에 서 있다
+        rig.start()
+        rig.run(5_000)
+        assertNull("전제: 서 있는 동안 엔진은 먼저 묻지 않는다", rig.state.prompt)
+        rig.command(UiCommand.Listen)
+        rig.runUntil(5_000) { rig.state.prompt != null } ?: error("답이 없다: said=${rig.voice.said} asked=${rig.voice.asked}")
+        val card = rig.state.prompt!!
+        assertEquals(PromptKind.LAST_CHANCE, card.kind)
+        assertTrue("말한 것에 대한 답이다", card.userRequested)
+        assertNotNull("들를 곳을 묻는다", card.stop)
+        assertTrue("말로도 묻는다: ${rig.voice.asked}", rig.voice.asked.any { "화장실" in it && "들를까요" in it })
+        rig.run(20_000)
+        assertEquals("서 있는 동안 카드가 남아 있다", card.id, rig.state.prompt?.id)
+        assertEquals("전제: 계속 서 있다", true, rig.state.parked)
+        // [들르기]를 누르면 서 있는 채로 내비에 넣는다
+        rig.command(UiCommand.Answer(card.id, true))
+        rig.runUntil(10_000) { rig.state.goToResult != null } ?: error("들르기 결과 없음")
+        assertEquals(card.stop!!.id, rig.state.goToResult!!.stop.id)
+    }
+
+    @Test
+    fun parkedNextToARestroomTheAnswerIsSpokenOrShown() = runTest {
+        // 선 곳 가까이에 화장실이 있으면 엔진은 안내(INFO)로 답한다: 서 있어도 말하고, 음성 안내를 껐으면 화면 알림으로 낸다.
+        // (가짜 내비의 경로 거리는 목적지와 상관없이 10km라서 여기서는 경로 보정을 끈다: 후보는 위치 기준 직선거리로 온다)
+        fun parkedAtManghyang(settings: FakeSettings): CoreRig {
+            val rig = CoreRig(this, settings = settings)
+            rig.fakeNavi.faults["tripEstimate"] = FakeNaviPort.Fault.THROW
+            rig.voice.listens += "아이가 화장실 가고 싶대"
+            rig.park()
+            rig.fix(Gyeongbu.manghyang.lat, Gyeongbu.manghyang.lon)
+            rig.start()
+            rig.run(5_000)
+            rig.command(UiCommand.Listen)
+            return rig
+        }
+
+        val spoken = parkedAtManghyang(FakeSettings(listOf(DRIVER, KID)))
+        spoken.runUntil(8_000) { spoken.voice.said.any { "가까이에 화장실이 있어요" in it } }
+            ?: error("답이 없다: said=${spoken.voice.said} asked=${spoken.voice.asked} ahead=${spoken.state.ahead.map { it.id to it.straightDistanceM }}")
+        assertTrue("서 있는 곳의 이름으로 답한다: ${spoken.voice.said}", spoken.voice.said.any { "망향휴게소" in it })
+        assertNull("안내는 카드를 띄우지 않는다", spoken.state.prompt)
+
+        val quiet = parkedAtManghyang(FakeSettings(listOf(DRIVER, KID)).also { it.voiceEnabled = false })
+        quiet.runUntil(8_000) { quiet.state.notice != null } ?: error("알림이 없다")
+        assertTrue(quiet.state.notice!!, "가까이에 화장실이 있어요" in quiet.state.notice!!)
+        assertTrue("말하지 않는다", quiet.voice.said.isEmpty())
+    }
+
+    @Test
+    fun theEnginesOwnLastChanceIsStillWithdrawnWhenTheCarParks() = runTest {
+        // 엔진이 먼저 건 주행 질문은 차를 세우면 거둔다 (서 있는 사람에게 '앞 휴게소에 들를까요'는 뜻이 없다): 말한 것의 답만 남긴다
+        val rig = CoreRig(this)
+        rig.drive(100f)
+        rig.start()
+        rig.command(UiCommand.Demo("holiday"))
+        rig.runUntil(150_000) { rig.state.prompt?.kind == PromptKind.LAST_CHANCE } ?: error("카드가 뜨지 않았다")
+        assertFalse("엔진이 먼저 건 질문이다", rig.state.prompt!!.userRequested)
+        rig.park()
+        rig.run(2_000)
+        assertNull("세우면 거둔다", rig.state.prompt)
     }
 
     // ------------------------------------------------------------ 음성 안내 끔 (리뷰 R-F4, UI 닫힘 검증 #12)

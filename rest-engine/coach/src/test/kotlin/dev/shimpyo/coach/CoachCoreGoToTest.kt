@@ -136,6 +136,25 @@ class CoachCoreGoToTest {
     }
 
     @Test
+    fun aStopThatBecameTheNaviDestinationStaysInTheEnginesCandidates() = runTest {
+        // 길안내 없이 달리다 고른 곳은 새 길안내의 목적지가 된다. 그 뒤 후보는 새 경로의 TBT로 만드는데, 목적지는 경로 위 휴게소 안내가
+        // 아니라서 후보에 없다. 엔진은 들르기로 한 곳이 후보에서 1분 넘게 빠지면 잊는다(noteAccepted의 약속: 앱이 같은 id로 계속 넣는다):
+        // 내비는 그곳으로 가는데 엔진은 1분 뒤 그곳을 잊고 다른 정차를 물을 수 있었다
+        val rig = drivingRig(this)
+        rig.fakeNavi.destination = { FakeNaviPort.dest(85_000.0, Gyeongbu.oksan.lat, Gyeongbu.oksan.lon, Gyeongbu.oksan.name) }
+        rig.fakeNavi.tbt = { listOf(TbtItem(TbtType.OTHER, 85_000.0, "목적지")) } // 가는 길에 휴게소 안내가 없다
+        rig.command(UiCommand.GoTo(Gyeongbu.oksan))
+        rig.runUntil(10_000) { rig.state.goToResult != null } ?: error("결과 없음")
+        assertEquals(GoToOutcome.ROUTE_STARTED, rig.state.goToResult!!.outcome)
+        rig.runUntil(60_000) { rig.state.ahead.none { it.id == "oksan" } } ?: error("전제: 새 경로의 후보(TBT)에는 목적지가 없다: ${rig.state.ahead.map { it.id }}")
+        val asked = rig.voice.asked.size
+        rig.run(150_000)
+        assertEquals("2분 30초 뒤에도 엔진의 추천은 고른 곳이다", "oksan", rig.state.next?.stop?.id)
+        assertEquals(listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
+        assertEquals("그곳으로 가는 동안 다른 정차를 묻지 않는다: ${rig.voice.asked.drop(asked)}", asked, rig.voice.asked.size)
+    }
+
+    @Test
     fun aConfirmedStopIsWrittenToTheTripHeartbeatAndAFailedOneIsNot() = runTest {
         // 주행 중 재시작해도 이어받게 여정 맥박에 적는다 (서비스 닫힘 검증 N7)
         val rig = drivingRig(this)

@@ -186,6 +186,35 @@ class CoachCoreUrgentTest {
     }
 
     @Test
+    fun aLaterUrgentQuestionAboutAnotherPlaceDoesNotMakeTheCoachForgetTheChosenStop() = runTest {
+        // 목록에서 2순위를 골라 그곳으로 가는 중에 급해를 다시 열었다. 엔진은 더 빠른 1순위를 다시 묻고, 그 질문이 떠 있는 동안(45초)
+        // 엔진의 추천은 질문의 장소를 따라간다. 예전에는 추천이 15초 동안 다른 곳이면 고정을 풀어서, 대답 없이 급해 화면을 닫으면
+        // 고른 곳이 엔진 후보에서 빠지고(경로 후보가 아니다) 엔진이 1분 뒤 그곳을 잊었다: 길안내는 그곳으로 가는데 다른 정차를 물었다
+        val rig = urgentRig(this)
+        rig.command(UiCommand.Urgent(3L))
+        rig.run(2_000)
+        val first = rig.state.urgent!![0].stop
+        val second = rig.state.urgent!![1].stop
+        rig.command(UiCommand.GoTo(second))
+        rig.runUntil(10_000) { rig.state.goToResult != null } ?: error("들르기 결과 없음")
+        rig.run(35_000) // 고른 직후의 조용한 30초가 지난다
+        assertEquals("전제: 고른 곳이 추천이다", second.id, rig.state.next?.stop?.id)
+
+        rig.command(UiCommand.Urgent(4L))
+        rig.runUntil(5_000) { rig.state.prompt?.kind == PromptKind.URGENT_RESULT } ?: error("급해 질문이 없다: ${rig.voice.asked}")
+        assertEquals("전제: 엔진은 더 빠른 1순위를 묻는다", first.id, rig.state.prompt!!.stop!!.id)
+        rig.run(20_000)
+        assertEquals("전제: 질문이 떠 있는 동안 추천은 질문의 장소다", first.id, rig.state.next?.stop?.id)
+        rig.runUntil(60_000) { rig.state.prompt == null } ?: error("질문이 끝나지 않았다")
+        rig.command(UiCommand.DismissUrgent(4L))
+        val asked = rig.voice.asked.size
+        rig.run(90_000)
+        assertEquals("대답 없이 닫은 뒤에도 고른 곳이 추천이다", second.id, rig.state.next?.stop?.id)
+        assertEquals(listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
+        assertEquals("그곳으로 가는 중에 다른 정차를 묻지 않는다: ${rig.voice.asked.drop(asked)}", asked, rig.voice.asked.size)
+    }
+
+    @Test
     fun theUrgentStopIsNoLongerRecommendedOnceTheCarIsFarPastIt() = runTest {
         // 급해에서 수락한 곳은 직선거리만 아는 후보로 매 틱 엔진에 다시 들어간다. 직선거리는 지나쳐도 0보다 크므로 엔진은 그곳을
         // '아직 앞에 있다'고 보고 90분까지 들고 있었고, 고정은 엔진이 추천을 멈춰야만 풀렸다: 들르지 않고 지나치면 90분 동안 추천이 뒤에

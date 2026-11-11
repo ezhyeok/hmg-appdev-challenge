@@ -120,10 +120,11 @@ class StopDetectorTest {
     @Test
     fun reparkingWithinThreeMinutesIsTheSameStop() {
         // 휴게소에서 화장실 앞에 섰다가(14분) 식당 앞으로 옮겨 댔다(5분): 정차 하나, 19분 + 옮긴 시간
+        // (틱이 1분 간격이라 지난 틱의 차속으로 1분을 간 것으로 센다: 시속 5km 83m + 시속 6km 100m)
         val d = StopDetector()
         d.onTick(t0, Gear.PARK, 0f, doorOpened = true)
-        assertNull(d.onTick(t0 + 14 * min, Gear.DRIVE, SLOW, false))
-        assertNull(d.onTick(t0 + 15 * min, Gear.DRIVE, 15f, false))
+        assertNull(d.onTick(t0 + 14 * min, Gear.DRIVE, 5f, false))
+        assertNull(d.onTick(t0 + 15 * min, Gear.DRIVE, 6f, false))
         assertNull(d.onTick(t0 + 16 * min, Gear.PARK, 0f, false))
         assertEquals(ParkState(t0, doorSeen = true), d.parkState)
         assertEquals(ParkedStop(t0, t0 + 21 * min, doorOpened = true), d.onTick(t0 + 21 * min, Gear.DRIVE, 60f, false))
@@ -140,11 +141,12 @@ class StopDetectorTest {
 
     @Test
     fun aSlowDepartureIsRecordedWhenTheReparkWindowCloses() {
+        // 주차장 안을 시속 2km로 3분(100m): 거리도 차속도 넘지 않으니 3분 창이 끝날 때 확정된다
         val d = StopDetector()
         d.onTick(t0, Gear.PARK, 0f, false)
-        assertNull(d.onTick(t0 + 5 * min, Gear.DRIVE, SLOW, false))
-        assertNull(d.onTick(t0 + 8 * min, Gear.DRIVE, 20f, false))
-        assertEquals("끝은 P에서 나온 때", ParkedStop(t0, t0 + 5 * min, false), d.onTick(t0 + 8 * min + 1_000, Gear.DRIVE, 20f, false))
+        assertNull(d.onTick(t0 + 5 * min, Gear.DRIVE, 2f, false))
+        assertNull(d.onTick(t0 + 8 * min, Gear.DRIVE, 2f, false))
+        assertEquals("끝은 P에서 나온 때", ParkedStop(t0, t0 + 5 * min, false), d.onTick(t0 + 8 * min + 1_000, Gear.DRIVE, 2f, false))
         assertNull("한 번만", d.onTick(t0 + 9 * min, Gear.DRIVE, 50f, false))
     }
 
@@ -172,6 +174,140 @@ class StopDetectorTest {
         d.onTick(t0 + 5 * min, Gear.DRIVE, SLOW, false)
         d.onTick(t0 + 6 * min, Gear.DRIVE, 0f, doorOpened = true)
         assertFalse(d.onTick(t0 + 9 * min, Gear.DRIVE, 20f, false)!!.doorOpened)
+    }
+
+    // ---------------------------------------------------------------- 다시 대기는 300m 안에서만 (엔진 닫힘 검증 E4)
+
+    /** [from] 다음 초부터 [seconds]초 동안 1초 틱을 넣는다. 낸 정차는 [out]에 모으고 마지막 틱 시각을 돌려준다 */
+    private fun StopDetector.feed(from: Long, seconds: Int, gear: Gear, kph: Float?, out: MutableList<ParkedStop>): Long {
+        var t = from
+        repeat(seconds) {
+            t += 1_000
+            onTick(t, gear, kph, false)?.let { out += it }
+        }
+        return t
+    }
+
+    @Test
+    fun movingLessThanThreeHundredMetresIsStillTheSameStop() {
+        val d = StopDetector()
+        val out = mutableListOf<ParkedStop>()
+        d.onTick(t0, Gear.PARK, 0f, false)
+        var t = d.feed(t0 + 10 * min - 1_000, 50, Gear.DRIVE, 20f, out) // 50초 동안 D: 다시 P가 되는 틱까지 278m
+        t = d.feed(t, 1, Gear.PARK, 0f, out)
+        assertTrue(out.isEmpty())
+        assertEquals("같은 정차", ParkState(t0, doorSeen = false), d.parkState)
+    }
+
+    @Test
+    fun creepingMoreThanThreeHundredMetresEndsTheStopWithoutWaitingForTheWindow() {
+        // 정체 속에서 P로 섰다가 시속 20km로 기어간다: 3분 창도 시속 30km도 넘지 않았지만 300m를 넘는 틱(55초쯤)에 정차가 확정된다
+        val d = StopDetector()
+        d.onTick(t0, Gear.PARK, 0f, true)
+        val left = t0 + 5 * min
+        assertNull(d.onTick(left, Gear.DRIVE, 20f, false))
+        var at = 0
+        var done: ParkedStop? = null
+        for (sec in 1..70) {
+            done = d.onTick(left + sec * 1_000L, Gear.DRIVE, 20f, false)
+            if (done != null) {
+                at = sec
+                break
+            }
+        }
+        assertEquals("끝은 P에서 나온 때", ParkedStop(t0, left, doorOpened = true), done)
+        assertTrue("300m를 넘는 때는 54~56초 ($at)", at in 54..56)
+        // 그 뒤 다시 서면 새 정차다
+        d.onTick(left + 90_000, Gear.PARK, 0f, false)
+        assertEquals(ParkState(left + 90_000, doorSeen = false), d.parkState)
+    }
+
+    @Test
+    fun theDistanceAddsUpOverSeveralMovesAndStartsAgainWithANewStop() {
+        val d = StopDetector()
+        val out = mutableListOf<ParkedStop>()
+        d.onTick(t0, Gear.PARK, 0f, false)
+        var t = d.feed(t0 + 6 * min - 1_000, 54, Gear.DRIVE, 10f, out) // 150m
+        t = d.feed(t, 5 * 60, Gear.PARK, 0f, out)
+        assertEquals("150m 옮김: 같은 정차", ParkState(t0, doorSeen = false), d.parkState)
+        val secondLeave = t + 1_000
+        t = d.feed(t, 72, Gear.DRIVE, 10f, out) // 200m를 더해 350m
+        assertEquals("두 번째 옮김에서 300m를 넘는 순간 앞 정차가 확정된다", listOf(ParkedStop(t0, secondLeave, false)), out)
+        t = d.feed(t, 1, Gear.PARK, 0f, out)
+        val newStop = t
+        assertEquals("새 정차", ParkState(newStop, doorSeen = false), d.parkState)
+        // 새 정차의 거리는 0부터: 100m 옮긴 것은 다시 대기다
+        t = d.feed(t, 5 * 60, Gear.PARK, 0f, out)
+        t = d.feed(t, 36, Gear.DRIVE, 10f, out)
+        d.feed(t, 1, Gear.PARK, 0f, out)
+        assertEquals(ParkState(newStop, doorSeen = false), d.parkState)
+        assertEquals(1, out.size)
+    }
+
+    @Test
+    fun anUnknownSpeedCountsAsThirtyKilometresAnHour() {
+        // 차속을 모르는 동안은 다시 대기로 볼 수 있는 가장 빠른 속도로 갔다고 본다: 같은 정차라고 확인할 수 있을 때만 이어 센다
+        val within = StopDetector()
+        val out = mutableListOf<ParkedStop>()
+        within.onTick(t0, Gear.PARK, 0f, false)
+        var t = within.feed(t0 + 10 * min - 1_000, 30, Gear.DRIVE, null, out) // 250m로 본다
+        within.feed(t, 1, Gear.PARK, 0f, out)
+        assertEquals(ParkState(t0, doorSeen = false), within.parkState)
+
+        val beyond = StopDetector()
+        beyond.onTick(t0, Gear.PARK, 0f, false)
+        t = beyond.feed(t0 + 10 * min - 1_000, 40, Gear.DRIVE, null, out) // 333m로 본다
+        assertEquals(listOf(ParkedStop(t0, t0 + 10 * min, false)), out)
+        beyond.feed(t, 1, Gear.PARK, 0f, out)
+        assertEquals(ParkState(t + 1_000, doorSeen = false), beyond.parkState)
+    }
+
+    @Test
+    fun speedOnTheTickTheCarParksAgainIsNoise() {
+        // 다시 P가 된 틱에 함께 온 차속은 다시 대기의 최고 차속에 넣지 않는다 (P에서는 바퀴가 잠긴다, 엔진과 같다)
+        val d = StopDetector()
+        d.onTick(t0, Gear.PARK, 0f, false)
+        d.onTick(t0 + 10 * min, Gear.DRIVE, SLOW, false)
+        assertNull(d.onTick(t0 + 10 * min + 30_000, Gear.PARK, 45f, false))
+        assertEquals(ParkState(t0, doorSeen = false), d.parkState)
+    }
+
+    @Test
+    fun aRestoredStopCanStillBeReparkedWithinTheWindowFromTheLastSeenTime() {
+        // 옮겨 대는 사이에 앱이 다시 떴다 (마지막 맥박 20초 전에는 P, 지금은 D): 떠난 것으로 판정하지만 다시 대기 창은 마지막으로 본
+        // 때부터 열려 있다. 보지 못한 20초는 차속을 모르는 것으로 센다 (167m)
+        val now = t0 + 140_000
+        val seen = now - 20_000
+        val d = StopDetector()
+        val out = mutableListOf<ParkedStop>()
+        d.restore(ParkState(t0, doorSeen = true), now = now, lastSeenMs = seen)
+        var t = d.feed(now - 1_000, 20, Gear.DRIVE, SLOW, out) // 첫 틱이 판정, 그 뒤 19초 동안 53m
+        assertEquals("엔진에는 마지막으로 본 때 P에서 나왔다고 알린다", seen, d.takeRestoredEnd())
+        assertTrue("아직 확정하지 않는다", out.isEmpty())
+        t = d.feed(t, 1, Gear.PARK, 0f, out)
+        assertEquals("같은 정차", ParkState(t0, doorSeen = true), d.parkState)
+        assertEquals(
+            "선 시간에는 옮긴 시간도 든다",
+            ParkedStop(t0, t + 5 * min, doorOpened = true),
+            d.onTick(t + 5 * min, Gear.DRIVE, FAST, false),
+        )
+    }
+
+    @Test
+    fun aRestoredStopLeftSlowlyIsRecordedWhenTheWindowClosesOrAtOnceWhenItAlreadyHas() {
+        // 보지 못한 사이가 40초면 시속 30km로 333m다: 판정하는 틱에 확정한다
+        val far = StopDetector()
+        far.restore(ParkState(t0, doorSeen = false), now = t0 + 5 * min + 40_000, lastSeenMs = t0 + 5 * min)
+        assertEquals(ParkedStop(t0, t0 + 5 * min, false), far.onTick(t0 + 5 * min + 40_000, Gear.DRIVE, SLOW, false))
+
+        // 방금 본 정차에서 천천히 떠났다: 300m를 넘거나 3분이 지날 때 확정한다. 끝은 마지막으로 본 때다
+        val near = StopDetector()
+        val out = mutableListOf<ParkedStop>()
+        near.restore(ParkState(t0, doorSeen = false), now = t0 + 10 * min)
+        near.feed(t0 + 10 * min, 3 * 60, Gear.DRIVE, 2f, out)
+        assertTrue("3분 창 안이고 100m다", out.isEmpty())
+        near.feed(t0 + 13 * min, 1, Gear.DRIVE, 2f, out)
+        assertEquals(listOf(ParkedStop(t0, t0 + 10 * min, false)), out)
     }
 
     // ---------------------------------------------------------------- 시계
@@ -372,7 +508,7 @@ class StopDetectorTest {
     fun withoutALastSeenTimeTheStopEndsAtTheRestore() {
         val d = StopDetector()
         d.restore(ParkState(t0, doorSeen = false), now = t0 + 10 * min)
-        assertEquals(ParkedStop(t0, t0 + 10 * min, false), d.onTick(t0 + 10 * min + 1_000, Gear.DRIVE, SLOW, false))
+        assertEquals(ParkedStop(t0, t0 + 10 * min, false), d.onTick(t0 + 10 * min + 1_000, Gear.DRIVE, FAST, false))
     }
 
     @Test

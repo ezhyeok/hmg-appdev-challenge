@@ -2,8 +2,8 @@
 
 코드: `rest-engine/coach/src/main/kotlin/dev/shimpyo/coach/`
 `PromptMachine.kt`, `PromptRules.kt`, `GoTo.kt`(GoToPlanner, GoToRunner), `StopDetector.kt`(StopDetector, ParkState), `StopRecorder.kt`.
-테스트: `rest-engine/coach/src/test/kotlin/dev/shimpyo/coach/` 의 `PromptMachineTest`(40), `PromptRulesTest`, `GoToPlannerTest`,
-`StopDetectorTest`(34), `StopRecorderTest`(13), `StopRulesCrossCheckTest`(8), 가짜는 `fakes/PromptFakes.kt`.
+테스트: `rest-engine/coach/src/test/kotlin/dev/shimpyo/coach/` 의 `PromptMachineTest`(43), `PromptRulesTest`(3), `GoToPlannerTest`,
+`StopDetectorTest`(41), `StopRecorderTest`(13), `StopRulesCrossCheckTest`(11), 가짜는 `fakes/PromptFakes.kt`.
 실행: `./gradlew -q -p rest-engine :coach:test --tests 'dev.shimpyo.coach.PromptMachineTest'` (서버에서 돈다, 안드로이드 불필요).
 
 2026-11-12 닫힘 검증 뒤 바뀐 것: 앱이 만든 질문(AppPrompt) 경로를 지웠다(급해 결과도 엔진의 질문이다), 급해 목록에서 고른 곳이 급해
@@ -83,6 +83,8 @@ PromptCard(prompt, key, reasons, shownAtMs, deadlineMs)   ← 시각은 ElapsedC
 ### 2.3 전이표 (상태 다이어그램)
 
 "닫음" = closed에 넣어 다시 띄우지 않음. "내림" = 카드를 내리지만 닫지 않음(엔진이 다시 내면 띄운다).
+"주행 질문" = 엔진이 먼저 건 마지막 기회·휴식 권유·상태 확인 (`PromptRules.withdrawWhenParked`). 사용자의 말에 대한 답
+(`Prompt.userRequested`)은 같은 종류로 와도 주행 질문이 아니다: 서 있어도 띄우고 남긴다 (아래).
 
 | 지금 상태 | 사건 | 조건 | 다음 상태 | 효과 |
 |---|---|---|---|---|
@@ -115,6 +117,12 @@ PromptCard(prompt, key, reasons, shownAtMs, deadlineMs)   ← 시각은 ElapsedC
 
 [CancelVoice]는 Asking일 때만 낸다(AwaitingTap이면 멈출 음성이 없다). Heard가 오면 음성 작업이 끝난 것이라 먼저 AwaitingTap으로 본다.
 한 사건에서 카드를 내리고 새 카드를 띄우면 Show(null) 없이 Show(새 질문)만 낸다.
+
+서 있을 때 한 말의 답 (엔진 닫힘 검증 E6): 엔진은 서 있는 동안(기어 P) 정차를 먼저 묻지 않지만 사용자의 말에는 서 있어도 답한다.
+꽉 막힌 정체에서 P로 서서 "아이가 화장실 가고 싶대"라고 하면 가장 가까운 화장실을 묻고(마지막 기회와 같은 종류), 선 곳 300m 안에
+화장실이 있으면 "가까이에 화장실이 있어요. …"라고 안내한다. 예전에는 기계가 종류만 보고 '정차 중 주행 질문'으로 거둬서 게이지만
+NOW가 되고 답이 보이지 않았다. 엔진이 그런 답에 `Prompt.userRequested`를 싣고, 기계는 그 표시가 있으면 P에서도 띄우고, 떠 있는 동안
+차를 세워도 거두지 않는다. 엔진이 먼저 건 질문은 전처럼 세우면 거둔다. 안내(INFO)는 원래 P와 상관없이 말한다.
 
 안내(INFO)가 Asking 중에 오면 묻던 음성을 멈추고 카드는 버튼 대기로 둔다. 운전자가 방금 물은 것의 대답이 카드 질문보다 지금 더 맞고,
 다음 틱에 엔진이 카드 질문을 버려 카드를 내릴 때 멈출 음성이 없어 그 대답을 끊지 않는다 (엔진은 지금 사용자 요청에 답하면서
@@ -187,6 +195,9 @@ PromptCard(prompt, key, reasons, shownAtMs, deadlineMs)   ← 시각은 ElapsedC
 | 대답한 질문을 엔진이 한 틱 더 냄 | 다시 띄우지 않음 | `anAnsweredPromptIsNotAskedAgainWhileTheEngineCatchesUp` |
 | 수명이 지난 질문을 엔진이 계속 냄 | 다시 띄우지 않음 | `anExpiredEngineCardIsNotShownAgainEvenIfStillOffered` |
 | P로 세움 | 주행 질문 거둠(다시 안 띄움), 정차 중 처음 온 질문은 출발 뒤 띄움 | `aParkedWithdrawalIsFinalButAnUnshownOfferWaitsForDriving`, 표 "P로 세움" 행 |
+| 서 있을 때 한 말("아이가 화장실 가고 싶대", "쉬고 싶어")의 답 | 서 있어도 띄우고 묻는다. 수락하면 서 있는 채로 들르기 (E6) | `anAnswerToASpokenRequestIsShownAndStaysWhileParked`, `PromptRulesTest.anAnswerToWhatSomeoneSaidStaysWhileParked`, `CoachCoreVoiceTest.aRestroomRequestSpokenWhileParkedIsAnsweredWithACardThatStays` |
+| 달리다 한 말의 답이 떠 있는 동안 세움 / 엔진이 먼저 건 마지막 기회가 떠 있는 동안 세움 | 남긴다 / 거둔다 | `anAnswerShownWhileDrivingStaysWhenTheCarParks`, `CoachCoreVoiceTest.theEnginesOwnLastChanceIsStillWithdrawnWhenTheCarParks` |
+| 선 곳 가까이에 화장실 (엔진의 안내) | 서 있어도 말한다. 음성 끔이면 화면 알림 | `anInfoAnswerIsSpokenWhileParked`, `CoachCoreVoiceTest.parkedNextToARestroomTheAnswerIsSpokenOrShown` |
 | "얼마나 남았어?"의 대답(INFO) | 말만, 카드 그대로, 한 번만 (D16) | `anInfoTickDoesNotHideTheCardAndTheCardIsNotReasked`, `anInfoIsSpokenOnce` |
 | 엔진이 잠깐 다른 질문을 냈다가 원래 질문을 다시 냄 | 원래 질문을 다시 띄움 | `aDisplacedEngineCardReturnsIfTheEngineStillOffersIt` |
 | 엔진 질문 위에 엔진의 급해 결과, 그 대답 뒤 | 급해 결과가 카드를 바꾸고, 대답하면 엔진이 다시 내는 원래 질문을 띄움 | `theEnginesUrgentResultDisplacesTheCardAndTheCardReturnsAfterTheAnswer` |
@@ -261,7 +272,8 @@ PromptCard(prompt, key, reasons, shownAtMs, deadlineMs)   ← 시각은 ElapsedC
 
 ### 4.1 판정 규칙 (엔진 StopTracker와 같게)
 
-출발 차속이 30km/h를 넘으면 그 틱에 정차가 확정된다. 느리게 떠나면 다시 대기 창(3분)이 끝날 때 확정된다(끝 시각은 P에서 나온 때).
+출발 차속이 30km/h를 넘으면 그 틱에 정차가 확정된다. 느리게 떠나면 다시 대기 창이 끝날 때(3분이 지나거나, 그 정차를 시작한 뒤
+움직인 거리가 300m를 넘을 때) 확정된다(끝 시각은 P에서 나온 때).
 
 | 상황 | 예전 (trackStops) | 지금 | 테스트 (StopDetectorTest) |
 |---|---|---|---|
@@ -270,8 +282,11 @@ PromptCard(prompt, key, reasons, shownAtMs, deadlineMs)   ← 시각은 ElapsedC
 | P인데 차속이 들어옴 (잡음) | — | P를 믿는다 (엔진 감사 S8) | `parkTrustsTheGearOverSpeed` |
 | P 중 기어 UNKNOWN (Car 서비스 재연결) | 정차가 사라지고 다시 센 정차에 문 열림이 빠짐 | 차속 3km/h 초과가 아니면 정차 유지 | `unknownGearWhileParkedKeepsTheStop`, `unknownGearWithSpeedMeansMoving`, `unknownGearSlowOrSpeedUnknownKeepsThePreviousState` |
 | P→D 틱에 함께 온 문 열림 | 버림 (엔진은 셈) | 셈 | `doorOnTheDepartureTickCounts` |
-| 휴게소 안에서 옮겨 대기 (3분 안, 30km/h 이하, 후진 포함) | 정차 둘 (14분 + 5분 → 휴식이 안 됨) | 정차 하나, 옮긴 시간도 선 시간 (엔진 감사 S7) | `reparkingWithinThreeMinutesIsTheSameStop`, `reversingIntoAnotherSpotIsTheSameStop`, `aDoorDuringTheGapIsNotAStopDoor` |
-| 천천히 떠남 | 바로 기록 | 3분 창이 끝나거나 30km/h를 넘을 때 기록 | `aSlowDepartureIsRecordedWhenTheReparkWindowCloses`, `speedAboveThirtyEndsTheStopAtOnce`, `parkingAgainAfterTheWindowIsANewStop` |
+| 휴게소 안에서 옮겨 대기 (3분 안, 30km/h 이하, 움직인 거리 합쳐 300m 이하, 후진 포함) | 정차 둘 (14분 + 5분 → 휴식이 안 됨) | 정차 하나, 옮긴 시간도 선 시간 (엔진 감사 S7) | `reparkingWithinThreeMinutesIsTheSameStop`, `reversingIntoAnotherSpotIsTheSameStop`, `movingLessThanThreeHundredMetresIsStillTheSameStop`, `aDoorDuringTheGapIsNotAStopDoor` |
+| 정체 속에서 P로 섰다가 기어가기를 되풀이 (P 2분 · 시속 20km 2분 × 5) | — (앞 판: 18분 정차 하나, 문이 열렸으면 화장실 정차) | 300m를 넘는 틱에 정차를 확정한다. 거리는 다시 대기를 거쳐도 이어 더하고 새 정차에서 0부터다 (엔진 닫힘 검증 E4) | `creepingMoreThanThreeHundredMetresEndsTheStopWithoutWaitingForTheWindow`, `theDistanceAddsUpOverSeveralMovesAndStartsAgainWithANewStop` |
+| 다시 대기 사이에 차속을 모름 | — | 시속 30km로 갔다고 본다 (36초면 300m): 같은 정차라고 확인할 수 있을 때만 이어 센다 | `anUnknownSpeedCountsAsThirtyKilometresAnHour` |
+| 다시 P가 된 틱에 차속이 함께 옴 | 그 차속이 30km/h를 넘으면 새 정차 | 잡음으로 본다 (P를 믿는다, 엔진과 같다) | `speedOnTheTickTheCarParksAgainIsNoise` |
+| 천천히 떠남 | 바로 기록 | 3분 창이 끝나거나 30km/h·300m를 넘을 때 기록 | `aSlowDepartureIsRecordedWhenTheReparkWindowCloses`, `speedAboveThirtyEndsTheStopAtOnce`, `parkingAgainAfterTheWindowIsANewStop` |
 | 정차 중 시계가 뒤로 맞춰짐 (NTP) | 끝 - 시작이 짧아져 정차가 사라짐 (엔진은 셈) | 선 시간 = 틱 사이 시간의 합, 거꾸로 간 걸음은 0 (엔진 EngineClock과 같다) | `aClockJumpBackWhileParkedDoesNotLoseTheStop`, `clockGoingBackwardsCountsNoParkedTimeForThatStep` |
 
 예전 동작은 먼저 그대로 고정한 테스트(`currentBehavior_*`)로 커밋한 뒤 다음 커밋에서 뒤집었다 (git log로 바뀐 점이 보인다).
@@ -300,7 +315,7 @@ world 담당이 TripSession.kt에 먼저 정의했고 감지기도 이 타입을
 | 되돌린 뒤의 틱 | 판정 |
 |---|---|
 | 기어 P | 아직 서 있다. 보지 못한 사이도 선 시간으로 센다 |
-| 기어 D·R·N, 또는 기어는 모르지만 차속 3km/h 초과 | 떠났다. `lastSeenMs`에 끝난 정차로 확정한다 (3분 이상이면 기록) |
+| 기어 D·R·N, 또는 기어는 모르지만 차속 3km/h 초과 | 떠났다. `lastSeenMs`에 P에서 나온 정차다. 다시 대기 창은 그때부터 세고 보지 못한 사이는 차속을 모르는 것(시속 30km)으로 센다: 대개 이 틱에 확정되고(3분 이상이면 기록), 방금 본 정차에서 옮겨 대는 중이었으면 다시 서서 이어질 수 있다 |
 | 기어 UNKNOWN, 움직이지 않음 | 미룬다. 선 시간을 더하지 않고, 문 열림은 이 정차의 것으로 적는다 |
 | 10초(`RESTORE_WAIT_MS`)가 지나도 UNKNOWN | 떠난 것으로 본다 (보지 못한 시간을 선 것으로 세지 않는다) |
 
@@ -356,12 +371,17 @@ world 담당이 TripSession.kt에 먼저 정의했고 감지기도 이 타입을
 | 문 열림의 때 (서기 전, 정차 중, 떠나는 틱, 떠난 뒤) | `doorTiming` |
 | 기어가 흔들림, UNKNOWN (느림·빠름) | `flappingAndUnknownGear` |
 | 휴게소 안에서 옮겨 대기 (3분 안·밖, 시속 30km 경계, 후진) | `reparking` |
-| 정체 속에서 P와 기어가기를 되풀이 | `creepingBetweenParks` |
+| 정체 속에서 P와 기어가기를 되풀이 (시속 20km·15km) | `creepingBetweenParks` |
+| 움직인 거리 300m (278m·333m, 150m + 200m, 새 정차는 0부터, 차속 모름 30초·40초, 화장실 정차) | `reparkingOnlyWithinThreeHundredMetresOfTheStop` |
+| 다시 세운 틱의 차속 잡음 | `speedNoiseOnTheTickTheCarParksAgain` |
 | 정차 중 시계가 뒤로 | `aClockSetBackWhileParked` |
 | 재시작으로 되돌린 정차 (본 것 2분·5분, 이미 떠남·아직 P) | `aRestoredStopAfterARestart` |
+| 옮겨 대는 사이에 재시작 (20초 전에는 P, 지금은 D, 곧 다시 섬 / 멀리 감 / 떠남) | `aRestoredStopThatIsMovedToAnotherSpotAroundTheRestart` |
 
-`creepingBetweenParks`는 지금은 둘 다 18분 정차 하나로 본다. 엔진이 다시 대기에 '움직인 거리 300m 이하'를 더하면(엔진 닫힘 검증 E4)
-여기서 어긋난다: 그때 감지기도 다시 대기 사이의 차속을 적분해 300m를 넘으면 새 정차로 본다.
+2026-11-12에 이 테스트가 먼저 깨졌다: 엔진이 다시 대기에 '그 정차를 시작한 뒤 움직인 거리 300m 이하'를 더하자(엔진 닫힘 검증 E4)
+`creepingBetweenParks`에서 엔진은 2분 정차 다섯, 감지기는 18분 화장실 정차 하나로 갈렸다. 감지기에 같은 규칙을 넣으면서 경우를
+넓혔더니 두 곳이 더 어긋나 있었다: 다시 세운 틱의 차속(엔진은 보지 않는다)과, 옮겨 대는 사이에 재시작한 정차(감지기는 판정하는
+틱에 정차를 끝냈고 엔진은 다시 대기로 이었다). 둘 다 엔진 쪽 규칙에 맞췄다.
 
 ## 5. 스레드
 
