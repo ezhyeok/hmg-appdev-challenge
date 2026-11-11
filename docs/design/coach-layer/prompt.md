@@ -28,7 +28,7 @@
 ```
 PromptState = Idle
             | Asking(card)        카드가 떠 있고 음성 작업(묻기·듣기)이 돌고 있다
-            | AwaitingTap(card)   카드가 떠 있고 음성은 끝났다 (못 알아들음, 음성 끔). 버튼·마이크로 대답을 받는다
+            | AwaitingTap(card)   카드가 떠 있고 음성은 끝났다 (못 알아들음, 음성 끔, 안내가 끼어듦). 버튼·마이크로 대답을 받는다
 
 PromptCard(prompt, key, origin = ENGINE | APP, reasons, shownAtMs, deadlineMs)   ← 시각은 ElapsedClock(실제 시간)
 ```
@@ -37,11 +37,13 @@ PromptCard(prompt, key, origin = ENGINE | APP, reasons, shownAtMs, deadlineMs)  
 
 | 값 | 뜻 |
 |---|---|
-| `generation` | Reset마다 1씩 오른다. 카드 key = `엔진id#세대` |
+| `generation` | Reset마다 1씩 오른다. 들르기의 보고 대상(옛 엔진에 보고하지 않기)을 가른다 |
+| `showSeq` | 카드를 띄울 때마다 1씩 오른다. 카드 key = `질문id#순번` (2.6) |
 | `closed` | 이 세대에 닫은 질문 id (대답·만료·정차로 거둠·밀려난 앱 질문). 엔진이 계속 내도 다시 띄우지 않는다 |
+| `everShown` | 이 세대에 띄운 적 있는 질문 id. P에서 주행 질문을 닫을지 정한다 |
 | `lastParked` | 마지막 틱의 정차 여부. 모르면 주행 (주행 중 화면을 여는 쪽으로 틀리지 않게) |
-| `inFlight`, `queued` | 실행 중인 들르기 하나, 대기 하나 (새 요청이 대기를 바꾼다) |
-| `retryLink` | 실패한 질문 수락 (장소 → 엔진 질문). 화면의 다시 시도가 같은 곳이면 그 질문의 수락으로 알린다 |
+| `inFlight`, `queued` | 실행 중인 들르기 하나(시작 시각 포함), 대기 하나 (새 요청이 대기를 바꾼다). 요청마다 보고할 질문 목록과 세대 |
+| `retryLink` | 실패한 질문 수락 (장소 → 질문들, 실패 시각). 2분 안에 같은 곳 GoTo가 오면 그 질문들의 수락으로 알린다. 결과 카드를 닫으면 버린다 |
 
 ### 2.2 사건과 효과
 
@@ -49,11 +51,12 @@ PromptCard(prompt, key, origin = ENGINE | APP, reasons, shownAtMs, deadlineMs)  
 |---|---|
 | `EngineTick(offered, next, parked)` | 코어, 1초 틱마다 (`CoachOutput.prompt`, `.next`, `.parked`) |
 | `AppPrompt(prompt, reasons)` | 코어의 급해 처리 (URGENT_RESULT). reasons = `RankedStop.why` |
-| `Heard(promptId, answer, other)` | Ask 음성 작업이 끝날 때 반드시 (못 들었으면 UNKNOWN). 마이크 버튼으로 들은 말이 지금 질문의 대답일 때도 |
-| `Tapped(promptId, accept)` | `UiCommand.Answer` |
+| `Heard(promptId, answer, other)` | 카드의 Ask 음성 작업이 끝날 때 한 번 (못 들었으면 UNKNOWN). 음성 작업이 끝났다는 뜻이다 |
+| `Tapped(promptId, accept)` | `UiCommand.Answer`, 마이크 버튼으로 들은 `VoiceIntent.Accept/Decline(id)` |
 | `Expired(promptId)` | ScheduleExpiry 타이머 |
 | `GoTo(stop)` | `UiCommand.GoTo` (급해 목록, 계획 화면, 실패 뒤 다시 시도) |
 | `GoToFinished(requestId, outcome, stop?)` | StartGoTo를 실행한 GoToRunner의 결과 |
+| `DismissGoToResult` | `UiCommand.DismissGoToResult` (결과 카드 닫기) |
 | `Reset` | 세계(시연·실제) 교체, 엔진 교체, 기록 지우기 |
 
 | 효과 | 코어가 하는 일 |
@@ -64,7 +67,7 @@ PromptCard(prompt, key, origin = ENGINE | APP, reasons, shownAtMs, deadlineMs)  
 | `Speak(text)` | 대답을 받지 않는 말 (안내, 들르기 결과) |
 | `ScheduleExpiry(key, atElapsedMs)` | 그 실제 시각에 `Expired(key)` (같은 key면 앞의 타이머를 바꾼다) |
 | `Report(engineId, accept)` | `engine.onPromptResult(engineId, accept, now)` |
-| `StartGoTo(requestId, stop, parked)` | 지금 위치 기준 후보로 바꿔(`candidates`에서 같은 id) `GoToRunner.run` launch → `GoToFinished` |
+| `StartGoTo(requestId, stop, parked)` | 지금 위치 기준 후보로 바꿔(`candidates`에서 같은 id) `GoToRunner.run` launch → `GoToFinished`. 세계 전환에도 취소하지 않는다 |
 | `FreshAir(announce)` | 외기 전환 (`CabinPort.freshAir`), 성공하면 알림. 마지막 환기 시각(실제 시간)은 코어가 든다 |
 | `Forward(intent)` | 마이크로 들은 요청처럼 처리 (급해 → 급해 처리, 그 밖은 다음 틱 엔진 입력) |
 | `PublishGoToResult(result?)` | `CoachUiState.goToResult` |
@@ -75,16 +78,19 @@ E = 엔진 카드, A = 앱 카드. "닫음" = closed에 넣어 다시 띄우지 
 
 | 지금 상태 | 사건 | 조건 | 다음 상태 | 효과 |
 |---|---|---|---|---|
+| 아무 상태 | EngineTick | 들르기 결과가 130+10초 동안 안 왔다 | (아래 계속) | 그 들르기를 FAILED로 끝냄 (2.4) |
 | 아무 상태 | EngineTick | 카드 수명이 지났다 | (아래 계속) | 닫음: [CancelVoice] Show(null) |
 | 아무 상태 | EngineTick | 카드가 주행 질문이고 P | (아래 계속) | 닫음: [CancelVoice] Show(null) |
-| 아무 상태 | EngineTick(INFO) | 처음 보는 id | 그대로 | Speak, Report(id, true) |
+| 아무 상태 | EngineTick(INFO) | 처음 보는 id | Asking이었으면 AwaitingTap, 아니면 그대로 | [CancelVoice] Speak, Report(id, true) |
 | Idle | EngineTick(p) | p가 닫히지 않음, P에서 주행 질문이 아님 | Asking (음성 끔: AwaitingTap) | Show(p), ScheduleExpiry(+45초), Ask |
-| Idle | EngineTick(null / 닫힌 p / P의 주행 질문) | | Idle | 없음 |
+| Idle | EngineTick(null / 닫힌 p) | | Idle | 없음 |
+| Idle | EngineTick(P의 주행 질문 p) | p를 띄운 적 있음 | Idle | 없음 (p를 닫음) |
+| Idle | EngineTick(P의 주행 질문 p) | 처음 봄 | Idle | 없음 (출발하면 띄운다) |
 | E 카드 | EngineTick(같은 id) | | 그대로 | 없음 |
 | E 카드 | EngineTick(다른 p) | | Asking(p) | 내림 [CancelVoice] → Show(p), ScheduleExpiry, Ask (같은 틱) |
 | E 카드 | EngineTick(null) | | Idle | 내림 [CancelVoice] Show(null) |
 | A 카드 | EngineTick(아무것) | INFO 아님 | 그대로 | 없음 (엔진 질문은 A 카드가 끝난 뒤 틱에) |
-| 아무 상태 | AppPrompt(INFO) | | 그대로 | Speak |
+| 아무 상태 | AppPrompt(INFO) | | Asking이었으면 AwaitingTap | [CancelVoice] Speak |
 | 아무 상태 | AppPrompt(u) | 같은 앱 카드 아님, 닫히지 않음 | Asking(A u) | 지금 카드 내림(앱 카드면 닫음) → Show(u), ScheduleExpiry(+90초), Ask |
 | 카드 | Heard(key, YES) / Tapped(key, true) | | Idle | 닫음 → 수락 처리 (2.4) |
 | 카드 | Heard(key, NO) / Tapped(key, false) | | Idle | 닫음, E면 Report(id, false) |
@@ -95,10 +101,15 @@ E = 엔진 카드, A = 앱 카드. "닫음" = closed에 넣어 다시 띄우지 
 | 아무 상태 | Expired(그 밖) | | 그대로 | 없음 |
 | 아무 상태 | GoTo(stop) | | 그대로 | 들르기 요청 (2.4) |
 | 아무 상태 | GoToFinished(실행 중인 id) | | 그대로 또는 Idle | 2.4 |
-| 아무 상태 | Reset | | Idle | CancelVoice, Show(null), PublishGoToResult(null); 세대+1, closed·대기·retryLink 비움 |
+| 아무 상태 | DismissGoToResult | | 그대로 | PublishGoToResult(null), retryLink 버림 |
+| 아무 상태 | Reset | | Idle | CancelVoice, Show(null), PublishGoToResult(null); 세대+1, closed·everShown·대기·retryLink 비움 |
 
 [CancelVoice]는 Asking일 때만 낸다(AwaitingTap이면 멈출 음성이 없다). Heard가 오면 음성 작업이 끝난 것이라 먼저 AwaitingTap으로 본다.
 한 사건에서 카드를 내리고 새 카드를 띄우면 Show(null) 없이 Show(새 질문)만 낸다.
+
+안내(INFO)가 Asking 중에 오면 묻던 음성을 멈추고 카드는 버튼 대기로 둔다. 운전자가 방금 물은 것의 대답이 카드 질문보다 지금 더 맞고,
+다음 틱에 엔진이 카드 질문을 버려 카드를 내릴 때 멈출 음성이 없어 그 대답을 끊지 않는다 (엔진은 지금 사용자 요청에 답하면서
+떠 있던 질문을 버린다, 엔진 감사 P1. `PromptEngineScenarioTest.aSpokenRequestDuringTheCardIsAnsweredWithoutBeingCutOff`).
 
 ### 2.4 수락과 들르기
 
@@ -111,11 +122,18 @@ E = 엔진 카드, A = 앱 카드. "닫음" = closed에 넣어 다시 띄우지 
 
 들르기 요청:
 - 실행 중이 없으면 `PublishGoToResult(null)`(지난 실패 카드를 내림)와 `StartGoTo`. 실행 중이면 줄을 선다. 대기는 하나, 새 요청이 바꾼다.
-- 같은 장소가 실행 중이거나 대기 중이면 다시 보내지 않는다(두 번 누름). 새 요청이 질문 수락이면 그 질문을 이어 붙인다.
-- 결과: `PublishGoToResult(GoToResult(stop, outcome, 코치 시각))`, 결과 문장 Speak, 성공이고 같은 세대의 질문이면 Report(true).
-  실패면 retryLink를 남긴다: 화면의 다시 시도 버튼(같은 곳 GoTo)이 성공하면 그 질문의 수락으로 알린다.
-- 성공했는데 같은 장소를 묻는 카드가 떠 있으면(계획 화면에서 같은 곳을 눌렀다) 그 카드는 답한 것으로 닫고, 엔진 카드면 수락을 알린다.
-- 다음 대기 요청이 있으면 시작한다.
+- 같은 장소가 실행 중이거나 대기 중이면 다시 보내지 않는다(두 번 누름). 새 요청이 질문 수락이면 그 질문을 보고 목록에 더한다
+  (같은 곳을 두 질문에서 수락하면 둘 다 알린다).
+- 결과: `PublishGoToResult(GoToResult(stop, outcome, 코치 시각))` → (성공이고 같은 장소를 묻는 카드가 있으면 그 카드 닫기) → 결과 문장 Speak
+  → 같은 세대 질문들의 Report(true). 카드를 말하기 전에 닫는 것은 CancelVoice가 방금 시작한 결과 안내를 끊지 않게 하려는 것이다.
+- 같은 장소를 묻는 카드: 계획 화면에서 같은 곳을 눌러 성공했으면 카드는 답한 것이다. 닫고 엔진 카드면 수락을 알린다. Reset 전에 보낸
+  명령이면 새 세계의 카드는 건드리지 않는다.
+- 실패면 retryLink를 남긴다: 2분(`RETRY_LINK_MS`) 안에 화면의 다시 시도 버튼(같은 곳 GoTo)이 성공하면 그 질문의 수락으로 알린다.
+  결과 카드를 닫으면(DismissGoToResult) 버린다. 30분 뒤 계획 화면에서 같은 곳을 누른 것은 그 질문의 다시 시도가 아니다.
+- 다음 대기 요청은 지금 결과를 지우지 않고 시작한다(실패 카드가 보여야 "다시 눌러 주세요"가 맞다).
+- **감시**: 결과가 `GO_TO_WATCHDOG_MS`(140초 = GoToRunner 상한 130초 + 10초) 안에 안 오면 틱이 그 들르기를 FAILED로 끝내고 대기를
+  시작한다. 실행이 취소됐거나, 내비 SDK 스레드가 막혀 시간 초과가 듣지 않거나, Error가 났을 때 뒤의 모든 들르기가 영영 줄만 서던
+  것을 막는다. 늦게 온 결과는 버린다(내비에 실제로는 들어갔을 수 있다: 남은 위험).
 
 왜 보고를 미루나: 예전에는 수락하자마자 엔진에 알려서, 내비가 경유지를 못 넣어도 엔진은 '들르기로 했다'고 보고 그곳을 지나칠 때까지
 다른 화장실을 권하지 않았고 화면은 "경유지로 넣었어요"를 보였다(UI 감사 #3). 엔진은 `recent` 8개 안의 id면 늦은 보고도 받는다
@@ -129,17 +147,20 @@ E = 엔진 카드, A = 앱 카드. "닫음" = closed에 넣어 다시 띄우지 
   TTS(6~8초) + 듣기(6초) 뒤에도 30초 넘게 누를 수 있고, 시속 100km로 1.25km라 마지막 기회(진입로 2~5km 전)는 진입로 전에 끝난다.
 - 앱 카드 90초 = 예전 급해 결과와 같다. 급해 화면에서 목록을 보고 고를 시간을 준다.
 - 음성이 대답 없이 늦게 끝나도 적어도 10초는 누를 수 있게 늘리되, 처음 수명 + 10초를 넘지 않는다. 카드가 언제까지나 남지 않는다.
+  엔진 카드는 엔진 수명(실제 주행 45초)이 먼저 끝나 이 연장이 쓰이지 않을 수 있다. 연장이 뜻을 갖는 것은 앱 카드와, 엔진 수명을
+  카드 수명보다 길게 둔 세계다(시연 엔진을 55초 × 배속으로 두면 엔진 카드도 연장을 쓴다).
 - 엔진 카드는 엔진이 먼저 거둘 수 있다(대상 500m 안, 지나침, 엔진 수명). 그때는 바로 내린다(2.3). 기계의 수명은 엔진이 멈췄거나
   틱 출력이 없을 때의 상한이다. 만료는 Expired 타이머와 틱 둘 다 본다(타이머를 잃어도 1초 안에 거둔다).
 - **시연 주의**: 엔진 수명은 코치 시각으로 흐르므로, 시연 엔진은 `promptTtlS`를 배속만큼 늘려 만들어야 한다(예: holiday 7.2배면
   45 × 7.2 = 324초 코치 시각 = 실제 45초). 그러지 않으면 엔진이 6초 만에 질문을 거두고 기계는 엔진을 따라 카드를 내린다. CoachWorld 담당.
 
-### 2.6 왜 key에 세대를 붙이나
+### 2.6 왜 카드마다 새 key인가
 
 엔진을 새로 만들면(시연 켜기·끄기, 기록 지우기) 엔진 질문 id가 p1부터 다시 시작했다(엔진 감사 P3, 엔진 쪽에서도 고친다). 옛 카드의
-"들르기"가 늦게 오면 새 엔진의 p1에 수락이 들어갔다(서비스 감사 D1). 기계는 화면에 `p1#0`처럼 세대를 붙인 key를 올리고, 대답은
-key가 지금 카드와 같을 때만 받는다. Reset 뒤에는 세대가 달라 옛 대답이 절대 새 질문에 닿지 않는다(엔진 id 규칙과 무관). 엔진에 알릴
-때는 원래 id를 쓴다. 코어는 IntentParser의 `activePromptId`로 `current.key`를 넘긴다.
+"들르기"가 늦게 오면 새 엔진의 p1에 수락이 들어갔다(서비스 감사 D1). 또 같은 질문을 다시 띄우면(급해 카드가 끝난 뒤) 취소된 첫 음성
+작업이 늦게 보낸 대답이 새 카드에 닿아 상태가 어긋날 수 있다. 그래서 기계는 카드를 띄울 때마다 `p1#3`처럼 순번을 붙인 새 key를
+화면과 음성 작업에 주고, 대답은 key가 지금 카드와 같을 때만 받는다. 엔진 id 규칙과 상관없이 옛 카드·옛 음성 작업의 대답은 절대 지금
+카드에 닿지 않는다. 엔진에 알릴 때는 원래 id를 쓴다. 코어는 IntentParser의 `activePromptId`로 `current.key`를 넘긴다.
 
 ### 2.7 시나리오 표 (상황 → 동작 → 테스트)
 
@@ -172,6 +193,24 @@ key가 지금 카드와 같을 때만 받는다. Reset 뒤에는 세대가 달�
 | 음성 끔 | Ask·Speak 없음, 환기 알림 없음 (UI #12) | `voiceOffNeverSpeaksOrListens`, 표 "음성 끔" 행 |
 | STT 없음 | 말만 하고 마이크는 열지 않음 | 표 "STT 없음" 행 |
 | 질문 도중 추천이 다음 곳으로 | 카드 이유는 띄울 때 것 (UI #6) | `currentCardExposesWhatTheCoreNeeds` |
+| 안내가 묻는 중에 끼어듦, 다음 틱 카드 철회 | 안내를 끊지 않음 | `anInfoAnswerIsNotCutOffWhenTheCardGoesAway` |
+| 급해 카드에 밀린 주행 질문, 그 사이 P | 출발해도 다시 안 띄움 | `aDrivingPromptDisplacedByTheUrgentCardDoesNotReturnAfterParking` |
+| 취소된 음성 작업의 늦은 대답, 같은 질문을 다시 띄운 뒤 | 새 카드에 안 닿음 | `aStaleHeardFromACancelledAskDoesNotTouchTheReshownCard` |
+| 들르기 결과가 끝내 안 옴 (취소·막힘) | 140초 뒤 FAILED, 대기 시작 | `aGoToThatNeverFinishesIsFailedByTheWatchdog`, `theWatchdogAlsoFreesAGoToCancelledByAWorldSwitch` |
+| 실패 직후 대기 들르기 시작 | 실패 카드가 보인다 | `aFailedResultStaysVisibleWhenTheQueuedGoToStarts` |
+| 같은 곳을 두 질문에서 수락 | 둘 다 보고 | `twoAcceptsForTheSamePlaceAreBothReported` |
+| 다시 시도 연결 | 2분, 결과 카드 닫으면 끝 | `theRetryLinkIsShortLivedAndDismissable` |
+| Reset 전 들르기가 새 세계의 같은 곳 카드와 만남 | 새 카드 그대로 | `aGoToFromBeforeResetDoesNotAnswerTheNewEnginesCard` |
+
+실제 엔진과 함께 (`PromptEngineScenarioTest`, 귀성길 시연 + 엔진에 보고를 돌려줌):
+
+| 상황 | 확인하는 것 |
+|---|---|
+| 마지막 기회 수락 → 내비가 넣는 동안 → 성공 | 엔진이 같은 질문을 계속 내도 다시 안 띄움, 성공 뒤 보고, 그 뒤 옥산을 다시 묻지 않음 |
+| 거절 | 다시 묻지 않음 |
+| 대답 없이 달림 | 옥산 500m 앞에서 엔진과 함께 카드가 내려감, 늦은 수락은 내비 명령 없음 |
+| 카드가 떠 있는 동안 "얼마나 남았어?" | 대답을 말하고 끊지 않음 |
+| 시연 엔진 기본 수명 | 실제 10초 안에 카드가 사라진다 → 시연 엔진은 수명을 배속만큼 늘려야 한다 (늘리면 버튼을 누를 수 있다) |
 
 ## 3. GoToPlanner, GoToRunner
 
@@ -190,11 +229,13 @@ key가 지금 카드와 같을 때만 받는다. Reset 뒤에는 세대가 달�
 - **다시 시도는 한 번, 보내지 못한 것만**: 예외(명령을 못 보냄)와 모드 조회 실패만 3초(NaviKit 명령 간격) 뒤 다시 한다. 보냈는데
   확인 시간 안에 반영되지 않은 명령(false)은 늦게 들어갔을 수 있어 다시 보내지 않는다(경유지가 두 번 들어간다). 화면의 다시 시도에 맡긴다.
 - **장소 검색은 정차 중에만** 연다(주행 중 화면 조작 유도 금지). 예전에는 검색을 못 열어도 "찾아 두었어요"라고 했다.
-- 실행 전체 상한 130초(조회 15초 + 길안내 확인 45초를 두 번). 넘으면 FAILED. 취소(세계 전환으로 코어가 취소)는 결과로 바꾸지 않는다.
+- 실행 전체 상한 130초(조회 15초 + 길안내 확인 45초를 두 번). 넘으면 FAILED. 우리 취소(서비스 종료)는 결과로 바꾸지 않고 그대로
+  던진다. 포트 안의 자체 시간 초과(TimeoutCancellationException)는 실패로 본다(다시 던지면 결과가 영영 안 나온다).
+  내비 SDK 스레드가 막혀 시간 초과가 듣지 않아도 PromptMachine의 감시(140초)가 들르기를 끝낸다.
 - 남은 위험: 보냈지만 확인이 안 된 경유지가 실제로는 늦게 들어갔으면, 사용자가 다시 시도를 누를 때 두 번 들어갈 수 있다.
   NaviPort에 경유지 조회가 없어 확인하지 못한다.
 
-테스트: `GoToPlannerTest` (순수 판단 4개 + 가짜 내비로 실행 13개).
+테스트: `GoToPlannerTest` (순수 판단 4개 + 가짜 내비로 실행 14개).
 
 ## 4. StopDetector, StopRecorder, ParkState
 
@@ -206,9 +247,11 @@ key가 지금 카드와 같을 때만 받는다. Reset 뒤에는 세대가 달�
 | 정확히 3분 / 2분 59초 | 기록 / 안 함 | 같음 | `exactlyThreeMinutesCountsAndJustUnderDoesNot` |
 | P 중 기어 UNKNOWN (Car 서비스 재연결) | 정차가 사라지고 다시 센 정차에 문 열림이 빠짐 | 차속 3km/h 초과가 아니면 정차 유지 | `unknownGearWhileParkedKeepsTheStop`, `unknownGearWithSpeedMeansMoving`, `unknownGearSlowOrSpeedUnknownKeepsThePreviousState` |
 | P→D 틱에 함께 온 문 열림 | 버림 (엔진은 셈) | 셈 | `doorOnTheDepartureTickCounts` |
-| 정차 중 시계가 거꾸로 감 | — | 기록 안 함 | `clockGoingBackwardsWhileParkedRecordsNothing` |
+| 정차 중 시계가 뒤로 맞춰짐 (NTP) | 끝 - 시작이 짧아져 정차가 사라짐 (엔진은 셈) | 선 시간 = 틱 사이 시간의 합, 거꾸로 간 걸음은 0 (엔진 EngineClock과 같다) | `aClockJumpBackWhileParkedDoesNotLoseTheStop`, `clockGoingBackwardsCountsNoParkedTimeForThatStep` |
 | 실제 10:00에 세운 채 시연(14:00) 켜고 출발 | 10:00→14:00 정차 기록 (서비스 감사 D3) | `rebase`: 새 시계로 다시 셈 | `parkedAcrossADemoStartDoesNotInventAFourHourStop` |
-| 정차 중 앱 재시작 | 정차를 잃음 (D12) | `resume(ParkState)` | `restartWhileParkedResumesTheStop`, `resumeKeepsTheEarlierStartIfATickCameFirst`, `resumeFromTheFutureIsIgnored` |
+| 정차 중 앱 재시작 | 정차를 잃음 (D12) | `resume(ParkState)` (첫 틱 전에만) | `restartWhileParkedResumesTheStop`, `resumeOnlyBeforeTheFirstTick`, `resumeFromTheFutureIsIgnored` |
+| 정차 중 꺼졌다가 출발한 뒤 재시작 | — | 정차 끝 = 마지막으로 서 있는 것을 본 때 | `departedWhileTheAppWasDownEndsTheStopAtTheLastSeenTime` |
+| 정차 중 이미 화장실 정차인지 | — | `restroomReachedAt` | `restroomIsKnownWhileStillParked` |
 
 예전 동작은 먼저 그대로 고정한 테스트(`currentBehavior_*`)로 커밋한 뒤 다음 커밋에서 뒤집었다 (git log로 바뀐 점이 보인다).
 기록의 '화장실' 표시와 엔진이 배운 화장실 간격이 같은 규칙에서 나오게 하려는 것이다(구조 리뷰 §2.3e). 나중에 엔진이 정차 사건을
@@ -217,13 +260,18 @@ key가 지금 카드와 같을 때만 받는다. Reset 뒤에는 세대가 달�
 ### 4.2 ParkState (world 담당과의 약속)
 
 ```kotlin
-data class ParkState(val sinceMs: Long, val doorAtMs: Long?)   // 코치 시각. 정차 중일 때만 있다
+// 코치 시각. 정차 중일 때만 있다
+data class ParkState(val sinceMs: Long, val doorAtMs: Long?, val lastSeenMs: Long = sinceMs)
 ```
 
 - `StopRecorder.parkState`(= `StopDetector.parkState`)를 TripSession이 trip heartbeat에 함께 저장한다. **실제 세계일 때만** 저장한다
   (시연 값은 가상 시각이다).
-- 재시작하면 TripSession이 이어 가기로 정했을 때(heartbeat가 충분히 최근일 때) `StopRecorder.resume(state, now)`를 부른다.
-  미래 시각은 버린다. 다음 틱이 P가 아니면 그 틱에 정차가 끝난다(앱이 꺼진 사이 출발했으면 정차 끝이 늦게 잡힌다).
+- 재시작하면 TripSession이 이어 가기로 정했을 때(heartbeat가 충분히 최근일 때) **첫 틱 전에** `StopRecorder.resume(state, now)`를
+  부른다(첫 틱 뒤에는 무시한다: 겹치는 정차를 만들지 않게). 미래 시각은 버린다.
+- 다음 틱이 P면 앱이 꺼진 사이도 서 있던 것으로 센다. P가 아니면 앱이 꺼진 사이 출발한 것이라 정차 끝을 `lastSeenMs`(마지막으로 서
+  있는 것을 본 때 = heartbeat를 쓴 때의 마지막 틱)로 한다. 재시작 시각까지 늘리지 않는다.
+- 엔진에는 재시작 전 정차를 이어 주는 방법이 없다(엔진 StopTracker는 새로 센다). 재시작 전에 이미 화장실 정차였다면 그 시각은
+  아래 `restroomReachedAt`으로 TripSession이 `lastRestroomAt`에 넣는다.
 - `StopRecorder.restroomReachedAt(now)`: 정차 중 이미 화장실 정차가 됐으면 그 시각(엔진과 같은 식 `max(첫 문 열림, 세운 시각 + 3분)`).
   TripSession이 heartbeat의 마지막 화장실 시각을 출발 전에 갱신하는 데 쓴다(재시작해도 잃지 않게, D12).
   테스트: `restroomIsKnownWhileStillParked`.
@@ -234,12 +282,13 @@ data class ParkState(val sinceMs: Long, val doorAtMs: Long?)   // 코치 시각.
   이름만 남긴다. 출발 틱 위치보다 정차 중 마지막 위치를 쓴다.
 - `persist`(= `CoachWorld.persistsHistory`)가 true일 때만 HistoryPort에 쓴다. 아니면 화면 목록에만 넣고, 세계가 바뀌면
   (`onWorldChanged`) 버린다. 시연 정차가 실제 기록에 미래 시각으로 들어가던 것(D3, UI #15)을 막는다.
-- 저장이 실패해도 화면에는 보인다(`persisted = false`).
+- 저장이 실패해도 화면에는 보인다(`persisted = false`). 화면 목록은 시간 순이다.
+- 세계가 바뀌면 정차 중 마지막 위치도 잊는다(시연 위치의 휴게소 이름이 실제 정차에 붙지 않게).
 - 기록 지우기는 HistoryPort.clear로 한다(파일 이름을 서비스가 알지 않게, D14). 지금 서 있는 정차는 차의 상태라 지우지 않는다.
 - 미래 시각 기록 정리(로드 때 `end > now` 버리기)와 `lastRestroomAt` 갱신은 TripSession(world 담당)이 한다. `Recorded.log`의
   `restroom`, `end`를 쓰면 된다.
 
-테스트: `StopRecorderTest` 10개.
+테스트: `StopRecorderTest` 12개.
 
 ## 5. 스레드
 
@@ -252,13 +301,16 @@ data class ParkState(val sinceMs: Long, val doorAtMs: Long?)   // 코치 시각.
 
 1. Ask 음성 작업은 끝나면 **반드시** `Heard(key, …)`를 보낸다 (못 들음·STT 없음·실패 = UNKNOWN). 취소됐으면 보내지 않아도 된다.
    대답 판정: `answer = parser.yesNo(text)`, `other = parser.parse(text, occupants, activePromptId = null)`.
-2. 마이크 버튼으로 들은 말이 `VoiceIntent.Accept/Decline(id)`이면 `Tapped(id, accept)`(또는 `Heard`)로 넣는다. 엔진 update의
-   intent로 넣지 않는다. IntentParser의 `activePromptId`에는 `machine.current?.key`를 넘긴다.
+2. 마이크 버튼으로 들은 말이 `VoiceIntent.Accept/Decline(id)`이면 `Tapped(id, accept)`로 넣는다(`Heard`는 카드의 Ask 작업 결과만).
+   엔진 update의 intent로 넣지 않는다. IntentParser의 `activePromptId`에는 `machine.current?.key`를 넘긴다.
 3. `promptStop`은 `machine.current?.prompt?.stop`의 id로 지금 후보에서 찾는다. `promptReasons`는 Show 효과의 reasons.
 4. `StartGoTo`를 실행할 때 지금 위치 기준 후보(같은 id)로 바꿔 `GoToRunner.run`에 넘기고, `GoToFinished`에 그 후보를 함께 넣는다.
    성공(FAILED 외)이면 내비 즉시 재조회(`NaviTracker.requestRefresh`)와 급해 목록 닫기도 한다.
 5. `Expired` 타이머는 취소하지 않아도 된다(다른 key는 무시한다). `ScheduleExpiry`가 같은 key로 다시 오면 시각을 바꾼다.
-6. 세계 전환·엔진 교체·기록 지우기 때 `Reset`을 넣는다. 그 뒤 실행 중인 GoToRunner는 둬도 된다(결과는 보고 없이 알린다).
+6. 세계 전환·엔진 교체·기록 지우기, 그리고 엔진에 새 tripStart로 `setProfile`할 때(엔진 질문 id가 다시 시작한다) `Reset`을 넣는다.
+   실행 중인 GoToRunner는 취소하지 않는다(결과는 보고 없이 알린다). 서비스 종료로 취소되면 결과를 안 보내도 된다(기계의 감시가 끝낸다).
+   GoToRunner를 launch할 때 `finally`에서 결과를 못 보냈으면 `GoToFinished(FAILED)`를 보내면 더 좋다(Error 등).
+9. `UiCommand.DismissGoToResult`는 `PromptEvent.DismissGoToResult`로 넣는다(다시 시도 연결을 끊는다).
 7. 급해 결과는 `AppPrompt`로, id는 요청마다 달라야 한다(예: `urgent-<requestId>`).
 8. `Speak`는 지금 음성 뒤에 이어 말해도 된다(VoiceAgent의 Mutex). `CancelVoice`는 지금 말·듣기를 멈춘다.
 
@@ -270,3 +322,7 @@ data class ParkState(val sinceMs: Long, val doorAtMs: Long?)   // 코치 시각.
   다시 시작된다(INFO를 낼 때 이미 한 번 시작했으므로 실제로는 몇 초 늘어날 뿐이다). 사용자와 대화했으니 맞는 동작이다.
 - 앱 질문(급해 결과) 수락은 엔진에 알리지 않는다(엔진이 모르는 질문). 엔진이 급해를 알게 하는 것은 코어의 급해 처리(서비스 감사 D7) 몫이다.
 - GoToOutcome에 '실행 중'이 없다. 실행 중에는 카드가 내려가고 결과만 나중에 뜬다. 필요하면 UI 계약에 PENDING을 더하는 것을 UI 담당과 정한다.
+- **엔진 (engine)**: 사용자 요청(얼마나 남았어, 배고파)에 답하는 질문(INFO 등)이 떠 있던 질문을 버리고 쉼(쿨다운)을 건다(엔진 감사 P1).
+  기계는 엔진을 따라 카드를 내리고, 그 대답을 끊지 않게만 한다. 고치는 것은 엔진 담당이다.
+- **pleos-kit (NaviKit)**: `startRoute` 확인이 `ROUTE_GUIDING`만 본다(모의 주행이면 확인 실패 → FAILED). `addWaypoint`는 경유지 조회가
+  실패하면 '전'을 0개로 보고 거짓 성공을 낼 수 있다(서비스 감사 P11). NaviPort 계약("경로가 있는 모드가 되면 true")과 맞춰야 한다.
