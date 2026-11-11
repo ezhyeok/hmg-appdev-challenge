@@ -15,6 +15,7 @@ import dev.shimpyo.engine.PlannedStop
 import dev.shimpyo.engine.Prompt
 import dev.shimpyo.engine.PromptKind
 import dev.shimpyo.engine.Purpose
+import dev.shimpyo.engine.RankedStop
 import dev.shimpyo.engine.Reason
 import dev.shimpyo.engine.Recommendation
 import dev.shimpyo.engine.StopCandidate
@@ -316,6 +317,30 @@ class DriveModelsTest {
             next = rec(stop("a", "안성휴게소", 5.0), Reason("LAST_CHANCE_CONGESTION", "이곳을 지나면 1시간 정체 구간에 화장실이 없어요"), Reason("NEXT_REST", "…"), Reason("URGENT_OPEN", "…")),
         )
         assertTrue(stopCard(s, driving = true).chips.size <= 2)
+    }
+
+    // ---------------------------------------------------------------- 급해 질문의 시간 (엔진 닫힘 검증 E1)
+
+    @Test
+    fun theUrgentQuestionCardPrintsTheTotalTimeItsSpeechAndTheListSay() {
+        // 급해 질문의 문장("…까지 약 18분이에요")과 급해 목록은 주행 + 주차·걷기 + 유턴을 합친 시간(RankedStop.totalTimeS)을 말한다.
+        // 카드는 주행 시간(etaS)만 보여서 "약 18분"이라고 묻는 카드에 17분이 찍혔다
+        val wc = stop("wc", "역삼공원 화장실", 6.0, eta = 17 * 60.0)
+        val gas = stop("gas", "역삼주유소", 7.5, eta = 20 * 60.0)
+        val asked = Prompt("u1", PromptKind.URGENT_RESULT, "역삼공원 화장실까지 약 18분이에요. 바로 안내할까요?", wc, expiresAt = Long.MAX_VALUE)
+        val list = listOf(RankedStop(wc, 18 * 60.0 + 10.0, emptyList()), RankedStop(gas, 23 * 60.0, emptyList()))
+        val state = running.copy(prompt = asked, promptStop = wc, urgent = list)
+        assertEquals("6km · 18분 · 경로 위", stopCard(state, driving = true).meta)
+        // 엔진 추천(next)이 같은 곳일 때도 같다
+        assertEquals("6km · 18분 · 경로 위", stopCard(state.copy(next = rec(wc)), driving = true).meta)
+        // 목록에 그곳이 없으면(급해 화면을 닫았다, 다시 찾은 목록에서 빠졌다) 아는 것은 주행 시간뿐이다
+        assertEquals("6km · 17분 · 경로 위", stopCard(state.copy(urgent = null), driving = true).meta)
+        assertEquals("6km · 17분 · 경로 위", stopCard(state.copy(urgent = list.drop(1)), driving = true).meta)
+        // 다른 질문은 급해 목록에 같은 곳이 있어도 주행 시간이다 (그 질문의 문장은 합친 시간을 말하지 않는다)
+        val lastChance = asked.copy(kind = PromptKind.LAST_CHANCE, speech = "다음 화장실은 6km 앞 역삼공원 화장실이에요. 들를까요?")
+        assertEquals("6km · 17분 · 경로 위", stopCard(state.copy(prompt = lastChance), driving = true).meta)
+        // 질문 장소의 지금 위치를 모르면(후보에서 빠졌다) 전처럼 위치만 보인다: 물은 때의 거리·시간을 지금 값처럼 쓰지 않는다
+        assertEquals("경로 위", stopCard(state.copy(promptStop = null), driving = true).meta)
     }
 
     // ---------------------------------------------------------------- 내비에 넣는 중 (닫힘 검증 UI-N2)

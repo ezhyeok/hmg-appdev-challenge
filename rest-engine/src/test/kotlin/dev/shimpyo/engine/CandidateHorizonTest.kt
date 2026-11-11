@@ -4,6 +4,7 @@ import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNotEquals
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -81,6 +82,26 @@ class CandidateHorizonTest {
         )
         assertTrue(plan.notes.none { it.code == "PLAN_GAP" }, plan.notes.toString())
         assertTrue(plan.notes.any { it.code == "PLAN_NOW" && it.text.contains("안성휴게소") }, plan.notes.toString())
+    }
+
+    @Test
+    fun aBrokenHorizonClaimsNothing() {
+        // 회귀(감사 R23의 남은 부분, 닫힘 검증 2026-11-12): 입력 경계가 깨진 candidatesUntilM(NaN·음수)을 '모름'(null)으로 바꿨는데,
+        // 이 값의 null은 '목적지까지 다 넣었다'는 뜻이라 반대 방향이었다(옥산휴게소 뒤 2시간 넘는 공백을 지어냈다).
+        // 0('차 앞에 대해 아는 것이 없다')으로 본다. 지금 앱은 이런 값을 만들지 않는다
+        for (h in listOf(Double.NaN, -5.0, Double.NEGATIVE_INFINITY)) {
+            val out = output(candidatesUntilM = h)
+            assertTrue(out.next?.reasons.orEmpty().none { it.code.startsWith("LAST_CHANCE") }, "candidatesUntilM = $h → ${out.next?.stop?.id} ${out.next?.reasons?.map { it.code }}")
+            assertNotEquals(PromptKind.LAST_CHANCE, out.prompt?.kind)
+        }
+        // 경계 정리 결과: 깨진 값은 0, 끝없는 값(+∞)과 없는 값은 '빠짐없음'(null), 정상 값은 그대로
+        fun cleaned(h: Double?) =
+            InputSanitizer.clean(CoachInput(now = start, gear = Gear.DRIVE, route = RouteState(guiding = true, candidatesUntilM = h))).route!!.candidatesUntilM
+        assertEquals(0.0, cleaned(Double.NaN))
+        assertEquals(0.0, cleaned(-5.0))
+        assertNull(cleaned(Double.POSITIVE_INFINITY))
+        assertNull(cleaned(null))
+        assertEquals(30 * km, cleaned(30 * km))
     }
 
     @Test

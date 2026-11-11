@@ -151,6 +151,10 @@ class UiSeamPinnedTest {
         assertEquals(VoiceState.THINKING, rig.state.voice)
         rig.run(4_000)
         assertEquals("해석이 끝나면 돌아온다", VoiceState.IDLE, rig.state.voice)
+        // 서 있을 때 한 말("졸려")에도 엔진의 답이 카드로 뜨고 묻는다 (엔진 닫힘 검증 E6). 묻는 동안의 마이크 버튼은 멈추기라서,
+        // 그 질문이 끝난 뒤(버튼 대기)에 다시 누른다
+        rig.run(4_000)
+        assertNotNull("전제: 말한 것의 답이 서 있어도 뜬다", rig.state.prompt)
 
         rig.command(UiCommand.Listen)
         rig.run(2_000)

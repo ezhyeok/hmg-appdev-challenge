@@ -18,6 +18,11 @@ import dev.shimpyo.engine.EngineMath.NONE
  * 늦은 기어 몇 초는 3분·15분 판정에 영향이 없고, 잡음 한 번이 15분 휴식을 처음부터 다시 세게 하면 안 된다 (감사 S8).
  * 다시 대기: P에서 나와 [REPARK_MAX_GAP_MS] 안에, [REPARK_MAX_KPH]를 넘지 않고 다시 P면 같은 정차로 이어 센다.
  * 휴게소에서 화장실 앞에 섰다가 식당·주유기 앞으로 옮겨 대는 일은 흔하다. 예전에는 14분 + 5분 정차를 휴식으로 보지 않았다(감사 S7).
+ * 단 그 정차를 시작한 뒤 P 밖에서 움직인 거리가 모두 합쳐 [REPARK_MAX_MOVE_M] 이하일 때만이다(차속을 적분한다). 휴게소는
+ * 수백 미터 크기라 그 안에서 옮겨 대는 것은 이 안에 들고, 꽉 막힌 정체에서 P로 섰다가 기어가기를 되풀이하는 것은 넘는다.
+ * 예전에는 P 2분·시속 15km로 2분을 다섯 번 되풀이하면 한 정차로 이어져 '15분 휴식'이 되고, 그 사이 문이 한 번 열렸으면 화장실
+ * 시계까지 돌아갔다(닫힘 검증 2026-11-12). 차속을 모르는 동안은 다시 대기로 볼 수 있는 가장 빠른 속도로 움직였다고 본다(거리의 위 한계):
+ * 같은 정차라고 확인할 수 있을 때만 이어 센다.
  */
 internal class StopTracker(private val config: CoachConfig) {
     /** 한 update에서 생긴 사건. 할당을 줄이려고 같은 객체를 재사용한다 */
@@ -51,6 +56,9 @@ internal class StopTracker(private val config: CoachConfig) {
     private var mealFired = false
     private var leftAt = NONE // 마지막으로 P에서 나온 시각
     private var leftMaxKph = 0f // 그 뒤 잰 가장 높은 차속
+    private var movedM = 0.0 // 지금(또는 마지막) 정차를 시작한 뒤 P 밖에서 움직인 거리 (다시 대기를 거쳐도 이어 더한다)
+    private var lastMono = NONE // 지난 update의 시각과 차속 (움직인 거리 적분용)
+    private var lastKph: Float? = null
     private val events = Events()
 
     private val restroomMs get() = config.restroomStopMinParkedMin * 60_000L
@@ -64,19 +72,27 @@ internal class StopTracker(private val config: CoachConfig) {
             Gear.DRIVE, Gear.REVERSE, Gear.NEUTRAL -> false
             Gear.UNKNOWN -> if (speedKph != null && speedKph > MOVING_KPH) false else parked
         }
+        // P에서 나와 있던 지난 update부터 지금까지 움직인 거리: 지난 update의 차속으로 달렸다고 본다 (모르면 위 한계)
+        if (!parked && leftAt != NONE && lastMono != NONE && mono > lastMono) {
+            movedM += (lastKph ?: REPARK_MAX_KPH) / 3.6 * (mono - lastMono) / 1000.0
+        }
+        lastMono = mono
+        lastKph = speedKph
         if (parked && !nowParked) {
             leftAt = mono
             leftMaxKph = 0f
         }
         if (!nowParked && speedKph != null && speedKph > leftMaxKph) leftMaxKph = speedKph
         if (!parked && nowParked) {
-            val repark = leftAt != NONE && mono - leftAt <= REPARK_MAX_GAP_MS && leftMaxKph <= REPARK_MAX_KPH
+            val repark = leftAt != NONE && mono - leftAt <= REPARK_MAX_GAP_MS && leftMaxKph <= REPARK_MAX_KPH &&
+                movedM <= REPARK_MAX_MOVE_M
             if (!repark) {
                 parkStart = mono
                 firstDoorAt = NONE
                 restroomFired = false
                 restFired = false
                 mealFired = false
+                movedM = 0.0
             }
             leftAt = NONE
         }
@@ -117,5 +133,10 @@ internal class StopTracker(private val config: CoachConfig) {
         const val REPARK_MAX_GAP_MS = 3 * 60_000L
         /** 다시 대기로 보는 최고 차속 (km/h): 휴게소 주차장 안 속도. 본선 합류로 가속하면 넘는다 */
         const val REPARK_MAX_KPH = 30f
+        /**
+         * 다시 대기로 보는 최대 이동 거리 (m): 한 정차를 시작한 뒤 P 밖에서 움직인 거리의 합. 휴게소는 수백 미터 크기다.
+         * 정체 속 가다 서다(시속 15km로 2분 = 500m)는 넘는다. 근거: 닫힘 검증 2026-11-12에서 정한 값
+         */
+        const val REPARK_MAX_MOVE_M = 300.0
     }
 }

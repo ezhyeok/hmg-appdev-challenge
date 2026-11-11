@@ -35,6 +35,34 @@ class StopHoursTest {
     }
 
     @Test
+    fun sameOpenAndCloseAt2359IsAllDayLikeOtherTimes() {
+        // 회귀(데이터 감사 #8의 남은 행, 닫힘 검증 2026-11-12): "23:59-23:59"는 닫는 23:59를 먼저 하루 끝(0)으로 바꿔서
+        // 23:59부터 1분만 여는 것으로 읽혔다. 표에 그런 주차장이 평일 2칸·토요일 2칸·공휴일 7칸 있었다(한글비공영주차장 등)
+        val p = parking("oh" to "23:59-23:59", "ohs" to "23:59-23:59", "ohh" to "23:59-23:59", "days" to "wsh")
+        for (at in listOf("2026-11-11T10:00", "2026-11-11T23:58", "2026-11-11T23:59", "2026-11-12T00:00", "2026-11-14T03:00", "2026-11-15T12:00")) {
+            assertEquals(true, openAt(p, StopFile.PARKABLES, at), at)
+        }
+        assertEquals(true, DayHours.of(23 * 60 + 59, 23 * 60 + 59)?.contains(10 * 60), "23:59-23:59의 오전 10시")
+    }
+
+    @Test
+    fun aRangeCoveringTheWholeDayOrMoreIsAllDay() {
+        // 회귀(같은 감사): "00:00-24:01"은 넘친 1분을 다음 날의 닫는 시각으로 읽어 00:00부터 1분만 여는 화장실이 됐다
+        val r = restroom("h24" to 0, "oh" to "00:00-24:01")
+        for (at in listOf("2026-11-11T00:00", "2026-11-11T00:01", "2026-11-11T10:00", "2026-11-11T23:59")) {
+            assertEquals(true, openAt(r, StopFile.RESTROOMS, at), at)
+        }
+        assertEquals(DayHours.Open(0, 0), DayHours.of(0, 24 * 60 + 1))
+        assertEquals(DayHours.Open(540, 540), DayHours.of(540, 33 * 60 + 20), "09:00-33:20: 24시간 20분")
+        assertEquals(DayHours.Open(0, 0), DayHours.of(0, 24 * 60 - 1), "00:00-23:59 (23:59 = 하루 끝)")
+        // 24시간에 못 미치면 그대로 구간이다
+        assertEquals(DayHours.Open(1, 0), DayHours.of(1, 24 * 60 - 1), "00:01-23:59")
+        assertEquals(false, DayHours.of(1, 24 * 60)?.contains(0))
+        assertEquals(DayHours.Open(300, 20), DayHours.of(300, 24 * 60 + 20), "05:00-24:20은 19시간 20분")
+        assertEquals(DayHours.Open(22 * 60, 6 * 60), DayHours.of(22 * 60, 6 * 60), "22:00-06:00은 자정을 넘는 8시간")
+    }
+
+    @Test
     fun closingPastMidnight() {
         // 역 화장실 "05:00-24:20": 예전에는 24:20을 못 읽어 '모름'이었다
         val r = restroom("h24" to 0, "oh" to "05:00-24:20")

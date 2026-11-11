@@ -119,6 +119,12 @@ open class CoachTexts {
 
     open fun restroomRequestedNone(): String = "경로 앞에서 들를 수 있는 곳을 아직 찾지 못했어요."
 
+    /** 서 있는 곳 가까이(걸어갈 거리)에 화장실이 있을 때 "화장실 가고 싶대"의 답: "가까이에 화장실이 있어요. 가휴게소예요." */
+    open fun restroomHere(stop: String): String = "가까이에 화장실이 있어요. $stop${copula(stop)}."
+
+    /** 서 있는 동안 수유·반려견 요청의 답 */
+    open fun careHere(stop: String): String = "지금 서 있는 ${stop}에서 잠깐 쉬어 갈 수 있어요."
+
     /** 주유 요청에 대한 응답 */
     open fun fuelSuggestion(stop: String, distanceM: Double): String =
         "${distance(distanceM)} 앞 ${stop}에서 주유할 수 있어요. 들를까요?"

@@ -231,7 +231,7 @@ class PromptMachine {
             when {
                 // 실제 수명 (만료 타이머를 잃어도 틱이 거둔다)
                 ctx.elapsedMs >= card.deadlineMs -> close(card, out)
-                PromptRules.withdrawWhenParked(card.prompt.kind, e.parked) -> close(card, out)
+                PromptRules.withdrawWhenParked(card.prompt, e.parked) -> close(card, out)
             }
         }
         val offered = e.offered
@@ -251,7 +251,7 @@ class PromptMachine {
             withdraw(out)
         }
         if (offered == null || offered.id in closed) return
-        if (PromptRules.withdrawWhenParked(offered.kind, e.parked)) {
+        if (PromptRules.withdrawWhenParked(offered, e.parked)) {
             // 띄웠던 주행 질문(다른 질문에 밀려 있던 것 포함)은 P에서 닫는다. 처음 보는 것은 출발하면 띄운다
             if (offered.id in everShown) markClosed(offered.id)
             return
