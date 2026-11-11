@@ -180,7 +180,11 @@ class CoachCore(private val d: CoachDeps) {
         started = true
         val shown = shownHistory(now)
         ui.update {
-            copy(serviceRunning = true, occupants = a.world.occupants(d.settings), history = shown, lastStop = shown.lastOrNull(), demo = null)
+            copy(
+                serviceRunning = true, occupants = a.world.occupants(d.settings), history = shown, lastStop = shown.lastOrNull(), demo = null,
+                // 지난 코어가 화면 상태에 남긴 진행 중 값 (같은 프로세스에서 서비스만 다시 뜬 경우): 새 코어의 것이 아니다
+                goToPending = null, notice = null, asleepOccupantIds = emptySet(),
+            )
         }
         log.i("coach started: trip ${a.session.origin}, parked ${a.session.restoredPark != null}")
     }

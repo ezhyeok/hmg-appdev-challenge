@@ -241,6 +241,22 @@ class CoachCoreTripTest {
         assertEquals("5시간 정차는 기록에 남는다", 1, rig.appended().size)
     }
 
+    // ------------------------------------------------------------ 시작
+
+    @Test
+    fun aNewCoreDoesNotInheritWhatTheLastOneLeftInProgressOnTheScreen() = runTest {
+        // 같은 프로세스에서 서비스만 다시 뜨면 화면 상태(CoachStore)에 죽은 코어의 값이 남아 있다. 넣는 중 표시가 남으면 화면의 버튼이
+        // 끝내 켜지지 않는다 (새 코어에는 끝낼 들르기가 없다)
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER, KID)), wallBase = wall)
+        rig.ui.update { copy(goToPending = dev.shimpyo.coach.fakes.Gyeongbu.oksan, notice = "누가 함께 타나요?", asleepOccupantIds = setOf("kid")) }
+        rig.park()
+        rig.start()
+        assertTrue(rig.state.serviceRunning)
+        assertNull(rig.state.goToPending)
+        assertNull(rig.state.notice)
+        assertTrue(rig.state.asleepOccupantIds.isEmpty())
+    }
+
     // ------------------------------------------------------------ 종료 (shutdown)
 
     @Test

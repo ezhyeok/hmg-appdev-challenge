@@ -23,8 +23,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * CoachCore를 서비스처럼 조립해(CoreRig: 같은 부품, 같은 루프, 가상 시간 하나) 시나리오 끝까지 돌린다 (docs/design/coach-layer/core.md 7장).
- * 엔진은 실제 엔진(고정 난수), 내비·음성·공조·저장소는 가짜다.
+ * CoachCore를 서비스처럼 조립해(CoreRig: 같은 부품, 같은 루프, 가상 시간 하나) 시나리오 끝까지 돌린다
+ * (docs/design/coach-layer/core.md 11장 '시나리오 → 테스트'). 엔진은 실제 엔진(고정 난수), 내비·음성·공조·저장소는 가짜다.
+ * 급해는 CoachCoreUrgentTest, 들르기는 CoachCoreGoToTest, 음성은 CoachCoreVoiceTest, 재시작·새 여정·종료는 CoachCoreTripTest,
+ * 자는 중 표시는 CoachCoreAsleepTest.
  */
 class CoachCoreTest {
 
