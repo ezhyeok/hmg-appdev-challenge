@@ -7,6 +7,10 @@ import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.PersonalMemory
+import dev.shimpyo.engine.PitStopPlan
+import dev.shimpyo.engine.PlannedStop
+import dev.shimpyo.engine.Purpose
+import dev.shimpyo.engine.Recommendation
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -108,6 +112,22 @@ class CoreRulesTest {
         assertEquals(listOf(DRIVER, KID), HealthConsent.allowed(all, consent = false))
         assertSame("동의했으면 그대로", all, HealthConsent.allowed(all, consent = true))
         assertEquals(setOf(OccupantType.PREGNANT, OccupantType.OAB, OccupantType.IBS), OccupantType.entries.filter(HealthConsent::isHealth).toSet())
+    }
+
+    // ------------------------------------------------------------ 고른 정차의 목적 (서비스 닫힘 검증 D7)
+
+    @Test
+    fun theAcceptedStopsPurposesAreWhatIsKnownAboutThePick() {
+        val oksan = PromptFakes.stop("oksan")
+        val lot = PromptFakes.stop("lot").let { it.copy(facilities = it.facilities.copy(restroom = false)) }
+        val next = Recommendation(oksan, setOf(Purpose.RESTROOM, Purpose.MEAL), emptyList())
+        val plan = PitStopPlan(listOf(PlannedStop(oksan, setOf(Purpose.REST, Purpose.FUEL), dwellMin = 15, arriveInS = 600.0)), totalStopMin = 15)
+        assertEquals("급해 목록에서 골랐으면 화장실", setOf(Purpose.RESTROOM), CoreRules.acceptedPurposes(oksan, urgentPick = true, next, plan))
+        assertEquals("엔진이 지금 추천하는 곳이면 그 목적", setOf(Purpose.RESTROOM, Purpose.MEAL), CoreRules.acceptedPurposes(oksan, false, next, plan))
+        assertEquals("계획에 있는 정차면 계획의 목적", setOf(Purpose.REST, Purpose.FUEL), CoreRules.acceptedPurposes(oksan, false, null, plan))
+        assertEquals("추천이 다른 곳이면 쓰지 않는다", setOf(Purpose.REST, Purpose.FUEL), CoreRules.acceptedPurposes(oksan, false, next.copy(stop = lot), plan))
+        assertEquals("모르면 화장실이 있는 곳은 화장실", setOf(Purpose.RESTROOM), CoreRules.acceptedPurposes(oksan, false, null, null))
+        assertEquals("화장실이 없는 곳은 휴식", setOf(Purpose.REST), CoreRules.acceptedPurposes(lot, false, null, null))
     }
 
     // ------------------------------------------------------------ 검색 위치 (데이터 감사 #10)

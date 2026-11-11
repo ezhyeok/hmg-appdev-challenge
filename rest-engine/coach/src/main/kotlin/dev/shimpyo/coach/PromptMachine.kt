@@ -73,8 +73,12 @@ sealed interface PromptEvent {
     data class Tapped(val promptId: String, val accept: Boolean) : PromptEvent
     /** ScheduleExpiry 타이머 */
     data class Expired(val promptId: String) : PromptEvent
-    /** 화면의 들르기 (급해 목록, 계획 화면, 실패 뒤 다시 시도) */
-    data class GoTo(val stop: StopCandidate) : PromptEvent
+    /**
+     * 화면의 들르기 (급해 목록, 계획 화면, 실패 뒤 다시 시도).
+     * [urgentPick]: 급해 목록에서 고른 곳이다. 그 선택이 떠 있는 급해 질문(URGENT_RESULT)의 대답이다: 같은 곳이면 수락, 다른 곳이면
+     * 질문은 끝난 것이다(거절이 아니다). 화면이 뒤이어 보내는 그 질문의 거절은 닿을 카드가 없어 버려진다 (UI 닫힘 검증 9a)
+     */
+    data class GoTo(val stop: StopCandidate, val urgentPick: Boolean = false) : PromptEvent
     /** StartGoTo 실행 결과. [stop]: 코어가 실행에 쓴 지금 위치 기준 후보 (거리를 말하는 데), 없으면 요청한 후보 */
     data class GoToFinished(val requestId: Long, val outcome: GoToOutcome, val stop: StopCandidate? = null) : PromptEvent
     /** 화면이 들르기 결과 카드를 닫았다 (UiCommand.DismissGoToResult) */
@@ -121,7 +125,8 @@ sealed interface PromptEffect {
  * 4. 대답은 지금 카드의 key에만 반영한다. key는 띄울 때마다 새로 만든다. 대답·만료·정차로 닫은 질문은 엔진이 계속 내도 다시 띄우지
  *    않는다. 대답하면 Idle이 되므로 음성 '응'과 버튼이 함께 와도 두 번째는 무시된다(구조 리뷰 D7).
  * 5. 수락: 장소가 있으면 들르기를 실행하고, 내비 명령이 성공했을 때만 엔진에 수락을 알린다. 실패하면 GoToResult(FAILED)를 올리고
- *    화면의 다시 시도(같은 곳 GoTo, [RETRY_LINK_MS] 안)가 성공하면 그때 알린다. 환기는 공조 효과와 함께, 장소 없는 질문은 바로 알린다.
+ *    화면의 다시 시도(같은 곳 GoTo, [RETRY_LINK_MS] 안, 결과 카드를 닫은 뒤라도)가 성공하면 그때 알린다. 환기는 공조 효과와 함께,
+ *    장소 없는 질문은 바로 알린다. 급해 목록에서 고른 곳(GoTo.urgentPick)은 떠 있는 급해 질문의 대답이다.
  *    내비 명령은 한 번에 하나다. 결과가 오지 않으면 [GO_TO_WATCHDOG_MS] 뒤 FAILED로 끝낸다. 결과는 [GO_TO_RESULT_TTL_MS] 뒤 거둔다.
  * 6. 카드 수명은 실제 시간 [ENGINE_CARD_MS]다. 음성이 대답 없이 끝나면 적어도 [MIN_TAP_MS]는 누를 수 있게 늘리되
  *    수명 + [MIN_TAP_MS]를 넘지 않는다 (엔진 수명이 먼저 끝날 수 있다).
@@ -164,6 +169,7 @@ class PromptMachine {
         val generation: Int,
         val startedAtMs: Long = 0,
     )
+    /** 실패한 질문 수락. [failedAtMs]부터 [RETRY_LINK_MS] 동안 같은 곳의 GoTo를 그 질문의 다시 시도로 본다 */
     private data class RetryLink(val stopId: String, val links: List<Link>, val failedAtMs: Long)
 
     private var nextRequestId = 1L
@@ -183,16 +189,15 @@ class PromptMachine {
             is PromptEvent.Tapped -> current?.takeIf { it.key == event.promptId }?.let { answer(it, event.accept, ctx, out) }
             is PromptEvent.Expired -> current?.takeIf { it.key == event.promptId && ctx.elapsedMs >= it.deadlineMs }?.let { close(it, out) }
             is PromptEvent.GoTo -> {
-                val links = retryLink
+                val retried = retryLink
                     ?.takeIf { it.stopId == event.stop.id && ctx.elapsedMs - it.failedAtMs <= RETRY_LINK_MS }
                     ?.links?.filter { it.generation == generation }.orEmpty()
-                requestGoTo(event.stop, links, ctx, out)
+                val picked = if (event.urgentPick) answerUrgentCard(event.stop, out) else emptyList()
+                requestGoTo(event.stop, (retried + picked).distinct(), ctx, out)
             }
             is PromptEvent.GoToFinished -> inFlight?.takeIf { it.id == event.requestId }?.let { finish(it, event.outcome, event.stop, ctx, out) }
-            PromptEvent.DismissGoToResult -> {
-                retryLink = null
-                publishResult(null, ctx, out)
-            }
+            // 다시 시도 연결은 끊지 않는다: 화면의 [다시 시도]는 닫기 다음에 같은 곳 GoTo를 보낸다 (서비스 닫힘 검증 D9)
+            PromptEvent.DismissGoToResult -> publishResult(null, ctx, out)
             PromptEvent.Reset -> {
                 generation++
                 closed.clear()
@@ -215,10 +220,7 @@ class PromptMachine {
         // 결과가 끝내 오지 않는 들르기 (실행 취소, 내비 스레드가 막힘): 뒤의 들르기가 영영 줄만 서지 않게 끝낸다
         inFlight?.takeIf { ctx.elapsedMs - it.startedAtMs >= GO_TO_WATCHDOG_MS }?.let { finish(it, GoToOutcome.FAILED, null, ctx, out) }
         // 오래된 결과는 거둔다 (지나간 실패 카드·다시 시도가 남지 않게). 화면이 닫은 것과 같다
-        resultShownAtMs?.takeIf { ctx.elapsedMs - it >= GO_TO_RESULT_TTL_MS }?.let {
-            retryLink = null
-            publishResult(null, ctx, out)
-        }
+        resultShownAtMs?.takeIf { ctx.elapsedMs - it >= GO_TO_RESULT_TTL_MS }?.let { publishResult(null, ctx, out) }
         current?.let { card ->
             when {
                 // 실제 수명 (만료 타이머를 잃어도 틱이 거둔다)
@@ -297,6 +299,16 @@ class PromptMachine {
     }
 
     // ------------------------------------------------------------ 들르기
+
+    /**
+     * 급해 목록에서 [stop]을 골랐다. 급해 질문 카드가 떠 있으면 그 선택이 대답이다: 카드를 내리고, 같은 곳을 묻던 질문이면
+     * 들르기가 성공할 때 수락으로 알릴 연결을 돌려준다. 다른 곳을 묻던 질문은 보고 없이 끝낸다 (운전자는 거절한 것이 아니라 골랐다)
+     */
+    private fun answerUrgentCard(stop: StopCandidate, out: Effects): List<Link> {
+        val card = current?.takeIf { it.prompt.kind == PromptKind.URGENT_RESULT } ?: return emptyList()
+        close(card, out)
+        return if (card.prompt.stop?.id == stop.id) listOf(Link(card.prompt.id, generation)) else emptyList()
+    }
 
     private fun requestGoTo(stop: StopCandidate, links: List<Link>, ctx: PromptContext, out: Effects) {
         // 같은 곳이 이미 실행 중이거나 줄 서 있으면 다시 보내지 않는다(두 번 누름). 새 요청의 질문은 그 요청에 붙인다
@@ -446,7 +458,10 @@ class PromptMachine {
         val ENGINE_CARD_MS: Long = CoachConfig().promptTtlS * 1_000L
         /** 음성이 대답 없이 끝난 뒤 적어도 이만큼은 버튼을 누를 수 있다 */
         const val MIN_TAP_MS = 10_000L
-        /** 실패한 질문 수락을 화면의 다시 시도에 이어 붙이는 시간. 그 뒤 같은 곳을 누른 것은 새 들르기다 */
+        /**
+         * 실패한 질문 수락을 화면의 다시 시도에 이어 붙이는 시간. 그 뒤 같은 곳을 누른 것은 새 들르기다.
+         * 결과 카드를 닫아도 이 시간 안에는 이어진다: 화면의 [다시 시도]가 닫기를 먼저 보낸다
+         */
         const val RETRY_LINK_MS = 120_000L
         /** 들르기 결과를 기다리는 상한. GoToRunner의 상한보다 조금 길다 */
         const val GO_TO_WATCHDOG_MS = GoToPlanner.MAX_TOTAL_MS + 10_000L

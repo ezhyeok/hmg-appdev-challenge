@@ -132,6 +132,35 @@ class CoachCoreUrgentTest {
     }
 
     @Test
+    fun aListedResultOtherThanTheEnginesTopIsKeptAsTheChosenStop() = runTest {
+        // 목록에서 엔진 질문(1등)과 다른 곳을 고르면 화면은 GoTo(고른 곳) + Answer(급해 질문, 거절)을 보낸다 (ContentActions.pick).
+        // 예전에는 엔진이 거절만 알고 고른 곳을 몰라서, 30초 뒤 "화장실 여유가 거의 없어요. … 들를까요?"를 다시 묻고 추천도 다른 곳으로
+        // 넘어갔다 (2026-11-12 에뮬레이터: 급해 목록에서 기흥휴게소를 고른 뒤 엔진이 다른 주유소를 다시 물었다).
+        // 고른 것이 급해 질문의 대답이다: 질문은 거절 없이 끝나고, 내비가 확인하면 고른 곳을 엔진에 '들르기로 한 곳'으로 알린다
+        val rig = urgentRig(this)
+        rig.command(UiCommand.Urgent(3L))
+        rig.run(2_000)
+        val question = checkNotNull(rig.state.prompt) { "엔진의 급해 질문이 없다" }
+        assertEquals(PromptKind.URGENT_RESULT, question.kind)
+        val second = rig.state.urgent!![1].stop
+        assertNotEquals("전제: 2순위는 엔진 질문과 다른 곳", question.stop!!.id, second.id)
+        rig.command(UiCommand.GoTo(second))
+        assertNull("고르는 순간 급해 질문 카드는 내려간다 (묻던 음성도 멈춘다)", rig.state.prompt)
+        rig.command(UiCommand.Answer(question.id, false))
+        rig.runUntil(10_000) { rig.state.goToResult != null } ?: error("들르기 결과 없음")
+        assertEquals(second.id, rig.state.goToResult!!.stop.id)
+        assertEquals("화면은 같은 번호의 IDLE을 보고 닫는다", UrgentState.IDLE, rig.state.urgentState)
+        val note = rig.accepted.notes.single()
+        assertEquals("고른 곳을 엔진에 알린다", second.id, note.stopId)
+        assertEquals(setOf(dev.shimpyo.engine.Purpose.RESTROOM), note.purposes)
+        val asked = rig.voice.asked.size
+        rig.run(60_000)
+        assertEquals("고른 곳으로 가는 1분 동안 정차를 또 묻는다: ${rig.voice.asked.drop(asked)}", asked, rig.voice.asked.size)
+        assertEquals("1분 뒤에도 고른 곳이 추천이다", second.id, rig.state.next?.stop?.id)
+        assertEquals("한 번만 알린다", 1, rig.accepted.notes.size)
+    }
+
+    @Test
     fun closingTheUrgentScreenWhileTheNaviStillConfirmsKeepsTheChosenStop() = runTest {
         // 예전에는 고른 곳을 엔진 후보에 남기는 고정이 들르기 결과가 올 때 급해 요청이 살아 있어야 걸렸다. 내비 확인(2026-11-12
         // 에뮬레이터: 경유지 추가 19.5초)을 기다리다 [닫기]를 누르면 고정이 걸리지 않아, 길안내는 시작됐는데 엔진은 1분 뒤 그곳을 잊고

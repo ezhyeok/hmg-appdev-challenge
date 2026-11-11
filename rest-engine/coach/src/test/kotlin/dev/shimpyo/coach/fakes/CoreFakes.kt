@@ -7,6 +7,7 @@ import dev.shimpyo.coach.CoachCore
 import dev.shimpyo.coach.CoachDeps
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.ElapsedClock
+import dev.shimpyo.coach.EngineAccepted
 import dev.shimpyo.coach.Fix
 import dev.shimpyo.coach.IntentInterpreter
 import dev.shimpyo.coach.LoopInputs
@@ -25,7 +26,9 @@ import dev.shimpyo.coach.UiSink
 import dev.shimpyo.coach.VoicePort
 import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.Occupant
+import dev.shimpyo.engine.CoachEngine
 import dev.shimpyo.engine.PersonalMemory
+import dev.shimpyo.engine.Purpose
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 import dev.shimpyo.engine.VoiceIntent
@@ -166,6 +169,17 @@ class FakeInterpreter(var intent: VoiceIntent? = null, var people: List<Occupant
     override suspend fun occupants(text: String): List<Occupant>? = people
 }
 
+/** 엔진에 알린 '들르기로 한 곳'을 남긴다 (CoachEngine.noteAccepted가 들어오기 전의 가짜. 엔진에는 아무것도 하지 않는다) */
+class RecordingAccepted : EngineAccepted {
+    data class Note(val stopId: String, val purposes: Set<Purpose>, val now: Long, val engine: CoachEngine)
+
+    val notes = mutableListOf<Note>()
+
+    override fun note(engine: CoachEngine, stop: StopCandidate, purposes: Set<Purpose>, now: Long) {
+        notes += Note(stop.id, purposes, now, engine)
+    }
+}
+
 /** 경부선 남행 부산방향 시설 (앱 데이터와 같은 좌표, DemoRun의 시연 경로가 이 점들을 잇는다) */
 object Gyeongbu {
     private fun s(id: String, name: String, lat: Double, lon: Double, kind: StopKind = StopKind.HIGHWAY_REST_AREA) =
@@ -199,6 +213,7 @@ class CoreRig(
     val interpreter: IntentInterpreter? = null,
     wallBase: Long = 1_762_909_200_000L,
 ) {
+    val accepted = RecordingAccepted()
     val clock = RigClock(test.testScheduler, wallBase)
     val log = RecordingLog()
     val hub = SignalHub()
@@ -219,7 +234,7 @@ class CoreRig(
             wall = clock, elapsed = clock, hub = hub, odometer = odometer, positions = positions, navi = navi, tracker = tracker,
             candidates = candidates, oracle = oracle, stops = stops, voice = voice, interpreter = interpreter, cabin = cabin,
             history = history, memory = timedMemory, settings = settings, trips = trips, engines = seededEngines(), ui = ui, loopInputs = loopInputs,
-            io = StandardTestDispatcher(test.testScheduler), log = log,
+            io = StandardTestDispatcher(test.testScheduler), log = log, accepted = accepted,
         ),
     )
 

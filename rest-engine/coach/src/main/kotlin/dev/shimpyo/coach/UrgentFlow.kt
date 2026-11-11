@@ -74,6 +74,9 @@ class UrgentFlow(seedMs: Long = 0L) {
     /** 들르기로 한 곳 (내비에 넣은 뒤, 테스트·로그용) */
     val pinned: StopCandidate? get() = pin?.stop
 
+    /** 지금 요청이 목록에 올린 곳인지 (화면의 들르기가 급해 목록에서 고른 것인지 가린다) */
+    fun lists(stopId: String): Boolean = session?.listed?.contains(stopId) == true
+
     // ------------------------------------------------------------ 요청
 
     /** 화면이 연 요청 (UiCommand.Urgent). 앞 요청이 있으면 바꾼다. 들르기로 한 곳은 새로 고를 때까지 그대로 둔다 */
@@ -166,7 +169,7 @@ class UrgentFlow(seedMs: Long = 0L) {
     /** 들르기를 시작했다 (PromptEffect.StartGoTo). 이 요청의 목록에서 고른 곳이면 true: 그곳을 고정하고 결과를 기다린다 */
     fun onGoToStarted(stop: StopCandidate): Boolean {
         val s = session ?: return false
-        if (stop.id !in s.listed) return false
+        if (!lists(stop.id)) return false
         s.pickedId = stop.id
         picking = Pin(stop)
         return true

@@ -81,6 +81,13 @@ class CoachCore(private val d: CoachDeps) {
     /** 시연을 처음 켠 실제 시각. 끌 때 실제 정차를 그 시각에 끝내는 데 쓴다 (StopDetector.restore의 lastSeenMs) */
     private var demoSinceWall: Long? = null
 
+    /** 내비에 넣는 중인 들르기 (한 번에 하나다, PromptMachine). 어느 세계에서 시작했고 급해 목록에서 고른 것인지 */
+    private class GoToStart(val generation: Int, val urgentPick: Boolean)
+    private var goToStart: GoToStart? = null
+    /** 이번 기계 호출에서 끝난 들르기 (결과와 그 시작 정보). 효과가 모두 끝난 뒤 처리한다 */
+    private var goToDone: Pair<GoToResult, GoToStart?>? = null
+    private var lastPlan: PitStopPlan? = null
+
     // ------------------------------------------------------------ 바깥 API
 
     /** 어느 스레드에서나. 기다리지 않는다 */
@@ -198,7 +205,7 @@ class CoachCore(private val d: CoachDeps) {
                 refreshPlan(force = true)
             }
             is UiCommand.Answer -> onPromptEvent(PromptEvent.Tapped(c.promptId, c.accept))
-            is UiCommand.GoTo -> onPromptEvent(PromptEvent.GoTo(c.stop))
+            is UiCommand.GoTo -> onPromptEvent(PromptEvent.GoTo(c.stop, urgentPick = urgent.lists(c.stop.id)))
             UiCommand.DismissGoToResult -> onPromptEvent(PromptEvent.DismissGoToResult)
             is UiCommand.SetOccupants -> setOccupants(c.occupants)
             UiCommand.DescribeOccupants -> describeOccupants()
@@ -345,9 +352,11 @@ class CoachCore(private val d: CoachDeps) {
 
     /** 질문 기계에 사건을 넣고 효과를 실행한다. 들르기 결과가 나왔으면 그 뒷일은 효과(엔진 보고 포함)가 모두 끝난 뒤에 한다 */
     private fun toMachine(e: PromptEvent) {
-        val effects = machine.on(e, promptContext())
-        runEffects(effects)
-        for (x in effects) if (x is PromptEffect.PublishGoToResult) x.result?.let(::onGoToResult)
+        runEffects(machine.on(e, promptContext()))
+        goToDone?.let { (result, start) ->
+            goToDone = null
+            onGoToResult(result, start)
+        }
     }
 
     private fun runEffects(list: List<PromptEffect>) {
@@ -374,7 +383,15 @@ class CoachCore(private val d: CoachDeps) {
                 is PromptEffect.StartGoTo -> startGoTo(e)
                 is PromptEffect.FreshAir -> startFreshAir(e.announce)
                 is PromptEffect.Forward -> dispatchIntent(e.intent)
-                is PromptEffect.PublishGoToResult -> ui.update { copy(goToResult = e.result) }
+                is PromptEffect.PublishGoToResult -> {
+                    val r = e.result
+                    if (r == null) ui.update { copy(goToResult = null) } else {
+                        // 결과가 나왔다: 넣는 중 표시를 내린다. 같은 효과 묶음에서 대기하던 들르기가 시작되면 그것이 다시 올린다
+                        ui.update { copy(goToResult = r, goToPending = null) }
+                        goToDone = r to goToStart
+                        goToStart = null
+                    }
+                }
             }
         }
     }
@@ -391,7 +408,8 @@ class CoachCore(private val d: CoachDeps) {
         // 지금 위치 기준 후보(같은 id)로 실행한다: 결과 안내의 거리가 지금 거리다 (prompt.md 6.4)
         val live = liveStop(e.stop.id) ?: e.stop
         log.i("goTo ${live.name} (request ${e.requestId}, parked=${e.parked})")
-        urgent.onGoToStarted(live)
+        goToStart = GoToStart(worlds.active.generation, urgentPick = urgent.onGoToStarted(live))
+        ui.update { copy(goToPending = live) }
         effect("goTo") {
             val outcome = try {
                 goTo.run(live, e.parked)
@@ -406,13 +424,24 @@ class CoachCore(private val d: CoachDeps) {
         }
     }
 
-    /** 들르기 하나가 끝났다 (기계가 결과를 올렸다: 내비의 답, 또는 감시가 끝낸 실패) */
-    private fun onGoToResult(r: GoToResult) {
+    /**
+     * 들르기 하나가 끝났다 (기계가 결과를 올렸다: 내비의 답, 또는 감시가 끝낸 실패). 기계의 엔진 보고(질문 수락)가 끝난 뒤에 불린다.
+     * [start]: 그 들르기를 시작할 때의 세계와 급해 목록 선택 여부
+     */
+    private fun onGoToResult(r: GoToResult, start: GoToStart?) {
         val ok = r.outcome != GoToOutcome.FAILED
         log.i("goTo result: ${r.outcome} ${r.stop.name}")
         // 경로를 바꿨으면 내비를 곧바로 다시 읽는다 (경로 위 안내·검색 열기는 경로를 바꾸지 않았다)
         if (r.outcome == GoToOutcome.WAYPOINT_ADDED || r.outcome == GoToOutcome.ROUTE_STARTED) d.tracker.requestRefresh(routeChanged = true)
         if (urgent.onGoToFinished(r.stop, ok, d.elapsed.elapsedMs())) publishUrgentClosed()
+        // 성공한 들르기는 모두 엔진의 '들르기로 한 곳'이다. 세계가 바뀌기 전에 보낸 것은 지금 엔진의 일이 아니다
+        val a = worlds.active
+        if (!ok || start == null || start.generation != a.generation || lastInput == null) return
+        try {
+            d.accepted.note(a.engine, r.stop, CoreRules.acceptedPurposes(r.stop, start.urgentPick, lastOutput?.next, lastPlan), a.clock.now())
+        } catch (x: Exception) {
+            log.w("noteAccepted failed: ${x.message}")
+        }
     }
 
     // ------------------------------------------------------------ 음성
@@ -587,6 +616,7 @@ class CoachCore(private val d: CoachDeps) {
                 plans.worldChanged()
                 lastInput = null
                 lastOutput = null
+                lastPlan = null
                 enterWorld(a)
                 d.candidates.reset()
                 val shown = shownHistory(now)
@@ -674,6 +704,7 @@ class CoachCore(private val d: CoachDeps) {
             return
         }
         val gen = plans.built()
+        lastPlan = plan
         ui.update { copy(plan = plan, planGeneration = gen) }
     }
 

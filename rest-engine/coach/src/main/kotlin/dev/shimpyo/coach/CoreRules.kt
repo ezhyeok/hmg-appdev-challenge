@@ -4,6 +4,9 @@ import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.PersonalMemory
+import dev.shimpyo.engine.PitStopPlan
+import dev.shimpyo.engine.Purpose
+import dev.shimpyo.engine.Recommendation
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 
@@ -146,6 +149,17 @@ object CoreRules {
         if (pos !== real) return pos
         val slow = gear == Gear.PARK || (speedKph != null && speedKph < SLOW_KPH)
         return if (slow && pos.heading != null) pos.copy(heading = null) else pos
+    }
+
+    /**
+     * 운전자가 고른 정차에 들르는 목적 (EngineAccepted.note에 넘긴다). 아는 만큼만 쓴다: 급해 목록에서 골랐으면 화장실,
+     * 엔진이 지금 그곳을 추천하고 있으면 그 목적, 계획에 있는 정차면 계획의 목적. 모르면 화장실이 있는 곳은 화장실, 없으면 휴식
+     */
+    fun acceptedPurposes(stop: StopCandidate, urgentPick: Boolean, next: Recommendation?, plan: PitStopPlan?): Set<Purpose> {
+        if (urgentPick) return setOf(Purpose.RESTROOM)
+        next?.takeIf { it.stop.id == stop.id && it.purposes.isNotEmpty() }?.let { return it.purposes }
+        plan?.stops?.firstOrNull { it.stop.id == stop.id && it.purposes.isNotEmpty() }?.let { return it.purposes }
+        return setOf(if (stop.facilities.restroom) Purpose.RESTROOM else Purpose.REST)
     }
 
     /** 엔진 후보에 급해 결과·고정한 정차를 더한다. 같은 id는 경로 후보(거리를 더 잘 안다)를 남긴다. 직선거리는 지금 위치로 다시 잰다 */

@@ -177,6 +177,14 @@ class PromptMachineTest {
             PromptState.Idle::class, listOf(CancelVoice, Show(null), PublishGoToResult(null), StartGoTo(1, gasStation, parked = false))),
         Row("급해 결과 × 거절 → 거절 보고", askingUrgent, Tapped(key(urgent), false),
             PromptState.Idle::class, listOf(CancelVoice, Show(null), Report(urgent.id, false))),
+        Row("급해 결과 × 목록에서 같은 곳을 고름 → 그 선택이 수락이다 (카드를 내리고 들르기)", askingUrgent, GoTo(gasStation, urgentPick = true),
+            PromptState.Idle::class, listOf(CancelVoice, Show(null), PublishGoToResult(null), StartGoTo(1, gasStation, parked = false))),
+        Row("급해 결과 × 목록에서 다른 곳을 고름 → 질문은 끝났다 (거절 보고 없이 들르기)", askingUrgent, GoTo(mangHyang, urgentPick = true),
+            PromptState.Idle::class, listOf(CancelVoice, Show(null), PublishGoToResult(null), StartGoTo(1, mangHyang, parked = false))),
+        Row("급해 결과 × 목록이 아닌 곳의 들르기 → 카드는 그대로", askingUrgent, GoTo(mangHyang),
+            PromptState.Asking::class, listOf(PublishGoToResult(null), StartGoTo(1, mangHyang, parked = false))),
+        Row("마지막 기회 × 급해 목록에서 고름 → 급해 질문이 아니니 카드는 그대로", askingP1, GoTo(gasStation, urgentPick = true),
+            PromptState.Asking::class, listOf(PublishGoToResult(null), StartGoTo(1, gasStation, parked = false))),
 
         // ----- 질문 종류별 수락
         Row("환기 × 수락 → 공조 효과 + 바로 보고", askingFreshAir, Tapped(key(freshAir), true),
@@ -378,7 +386,7 @@ class PromptMachineTest {
     }
 
     @Test
-    fun theRetryLinkIsShortLivedAndDismissable() {
+    fun theRetryLinkIsShortLived() {
         val r = Rig()
         r.tick(p1)
         r.on(Tapped(key(p1), true))
@@ -387,14 +395,54 @@ class PromptMachineTest {
         r.elapsed = PromptMachine.RETRY_LINK_MS + 1
         r.on(GoTo(oksan))
         assertTrue(r.on(GoToFinished(2, GoToOutcome.WAYPOINT_ADDED)).none { it is Report })
+    }
 
-        val r2 = Rig()
-        r2.tick(p1)
-        r2.on(Tapped(key(p1), true))
-        r2.on(GoToFinished(1, GoToOutcome.FAILED))
-        assertEquals(listOf(PublishGoToResult(null)), r2.on(PromptEvent.DismissGoToResult))
-        r2.on(GoTo(oksan))
-        assertTrue("실패 카드를 닫았으면 다시 시도가 아니다", r2.on(GoToFinished(2, GoToOutcome.WAYPOINT_ADDED)).none { it is Report })
+    @Test
+    fun aRetryRightAfterClosingTheFailedCardStillReportsTheAccept() {
+        // 화면의 [다시 시도]는 DismissGoToResult 다음에 GoTo를 보낸다 (ShimpyoContent.retryGoTo). 예전에는 닫기가 다시 시도 연결을
+        // 끊어서, 경유지는 들어가는데 엔진은 그 질문을 무시당한 것으로 세고 들르기로 한 곳을 몰랐다 (서비스 닫힘 검증 D9)
+        val r = Rig()
+        r.tick(p1)
+        r.on(Tapped(key(p1), true))
+        r.on(GoToFinished(1, GoToOutcome.FAILED))
+        assertEquals(listOf(PublishGoToResult(null)), r.on(PromptEvent.DismissGoToResult))
+        r.on(GoTo(oksan))
+        assertEquals("닫은 뒤의 다시 시도도 그 질문의 수락이다", Report("p1", true), r.on(GoToFinished(2, GoToOutcome.WAYPOINT_ADDED)).last())
+
+        // 닫은 뒤에도 연결의 수명은 실패한 때부터 2분이다
+        val late = Rig()
+        late.tick(p1)
+        late.on(Tapped(key(p1), true))
+        late.on(GoToFinished(1, GoToOutcome.FAILED))
+        late.on(PromptEvent.DismissGoToResult)
+        late.elapsed = PromptMachine.RETRY_LINK_MS + 1
+        late.on(GoTo(oksan))
+        assertTrue(late.on(GoToFinished(2, GoToOutcome.WAYPOINT_ADDED)).none { it is Report })
+    }
+
+    @Test
+    fun aPickFromTheUrgentListAnswersTheUrgentCard() {
+        // 화면은 목록에서 고르면 GoTo(고른 곳)를 보내고, 엔진 질문이 다른 곳이면 그 질문의 거절도 보낸다 (ContentActions.pick).
+        // 예전에는 그 거절이 엔진에 갔다: 운전자는 화장실을 골랐는데 엔진은 '급해 질문을 거절했다'만 알았다 (UI 닫힘 검증 9a)
+        val other = Rig()
+        other.tick(urgent)
+        other.on(GoTo(mangHyang, urgentPick = true))
+        assertNull(other.m.current)
+        assertEquals("뒤이은 거절은 닿을 카드가 없다", emptyList<PromptEffect>(), other.on(Tapped(key(urgent), false)))
+        assertEquals("엔진이 그 질문을 계속 내도 다시 띄우지 않는다", emptyList<PromptEffect>(), other.tick(urgent))
+        assertTrue("고른 곳이 성공해도 그 질문의 수락·거절로 알리지 않는다", other.on(GoToFinished(1, GoToOutcome.ROUTE_STARTED)).none { it is Report })
+
+        // 같은 곳을 골랐으면 수락이다: 성공하면 그 질문으로 알린다. 실패하면 다시 시도에 이어진다
+        val same = Rig()
+        same.tick(urgent)
+        same.on(GoTo(gasStation, urgentPick = true))
+        assertEquals(Report(urgent.id, true), same.on(GoToFinished(1, GoToOutcome.ROUTE_STARTED)).last())
+        val failed = Rig()
+        failed.tick(urgent)
+        failed.on(GoTo(gasStation, urgentPick = true))
+        failed.on(GoToFinished(1, GoToOutcome.FAILED))
+        failed.on(GoTo(gasStation, urgentPick = true))
+        assertEquals(Report(urgent.id, true), failed.on(GoToFinished(2, GoToOutcome.ROUTE_STARTED)).last())
     }
 
     @Test
