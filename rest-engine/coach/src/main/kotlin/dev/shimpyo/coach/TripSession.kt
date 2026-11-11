@@ -241,7 +241,8 @@ class TripSession private constructor(
          * - 맥박이 없거나 믿을 수 없음 → 새 여정
          * - 맥박 뒤로 흐른 시간 < 15분 → 그대로 이어 감. 달리던 중이었으면 그 시간도 주행으로 센다 (재시작 동안 차는 달렸다)
          * - 15분 이상 → 그 사이 차가 꺼져 서 있었다(헤드유닛은 시동과 함께 꺼진다). 저장된 정차가 없으면 마지막 맥박부터 정차로 본다
-         * - 그 정차가 4시간 이상 → 새 여정. 아니면 같은 여정을 정차부터 이어 간다 (휴식은 정차 길이로, 화장실은 모름 규칙으로)
+         * - 그 정차가 4시간 이상 → 새 여정. 아니면 같은 여정을 정차부터 이어 간다 (꺼져 있던 시간은 휴식으로, 화장실은 모름 규칙으로)
+         * - 저장된 정차의 화장실·휴식은 마지막 맥박이 본 만큼만 센다. 차가 지금도 P인지는 첫 틱이 안다 ([restoredPark]를 감지기에 되돌린다)
          */
         fun open(
             saved: TripHeartbeat?,
@@ -260,14 +261,19 @@ class TripSession private constructor(
             if (park != null && now - park.since >= rules.newTripParkMs) {
                 return TripSession(freshAnchor(now, maxOrNull(fromHistory, hb.restroomFallbackAt), rules), null, TripOrigin.NEW, now, elapsed, store, rules)
             }
+            // 저장된 정차는 마지막 맥박이 본 만큼만 선 것으로 센다. 차가 지금도 P면 첫 틱(onTick)이 그 사이를 이어 세고, 떠나 있으면
+            // 정차는 마지막 맥박 때 끝난 것이다: 정차 감지기·엔진과 같은 규칙이다 (서비스 닫힘 검증 N3). 예전에는 여기서 '지금까지
+            // 서 있었다'로 세서, 맥박 2분 뒤 떠난 12분 전 정차가 화장실 정차로 게이지를 채웠는데 기록에는 없었다
+            val seenParkedMs = hb.park?.let { (hb.savedAt - it.since).coerceAtLeast(0L) } ?: 0L
             val continuous = when {
                 park == null -> hb.continuousDrivingMin + gap / 60_000.0
-                now - park.since >= rules.restMs -> 0.0
+                // 15분 넘게 꺼져 있었다(헤드유닛은 시동과 함께 꺼진다) 또는 마지막 맥박 때 이미 15분을 서 있었다: 휴식
+                offline || seenParkedMs >= rules.restMs -> 0.0
                 else -> hb.continuousDrivingMin
             }
             var anchor = TripAnchor(hb.tripStart, hb.lastRestroomAt, hb.restroomFallbackAt, continuous)
             fromHistory?.let { anchor = anchor.withRestroomAt(it) }
-            if (park != null && park.doorSeen && now - park.since >= rules.restroomStopMs) anchor = anchor.withRestroomAt(park.since + rules.restroomStopMs)
+            if (hb.park != null && hb.park.doorSeen && seenParkedMs >= rules.restroomStopMs) anchor = anchor.withRestroomAt(hb.park.since + rules.restroomStopMs)
             if (offline) anchor = anchor.withRestroomAt(now - rules.unknownRestroomMs)
             return TripSession(anchor, park, if (offline) TripOrigin.RESUMED_AFTER_BREAK else TripOrigin.RESUMED, now, elapsed, store, rules)
         }

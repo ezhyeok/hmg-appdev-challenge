@@ -32,6 +32,12 @@ class StopRecorder(
     /** 지금 정차 (TripSession.onTick과 맥박에 넘긴다) */
     val parkState: ParkState? get() = detector.parkState
 
+    /** 되돌린 정차의 판정을 기다리는 중 (StopDetector.restorePending): 코어는 그동안 여정과 엔진을 돌리지 않는다 */
+    val restorePending: Boolean get() = detector.restorePending
+
+    /** 되돌린 정차가 떠난 것으로 판정됐으면 그 끝 시각 (한 번) */
+    fun takeRestoredEnd(): Long? = detector.takeRestoredEnd()
+
     /** 시작할 때 읽은 저장 기록 (읽기는 코어가 IO에서 한다. 미래 시각 정리는 TripSession이 먼저 한다) */
     fun load(list: List<StopLog>) {
         saved = list

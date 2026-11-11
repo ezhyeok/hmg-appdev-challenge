@@ -91,6 +91,8 @@ class CoachCore(private val d: CoachDeps) {
     private var noticeUntilMs: Long? = null
     /** 마지막으로 본 건강 정보 동의 (처음에는 모름). 꺼진 것을 보면 건강 유형 탑승자를 뺀다 */
     private var healthConsentSeen: Boolean? = null
+    /** 되돌린 정차의 판정을 기다리는 동안 열린 문. 판정 뒤 첫 엔진 입력에 싣는다 (엔진도 그 문을 본다) */
+    private var doorWhileWaiting = false
 
     /** 내비에 넣는 중인 들르기 (한 번에 하나다, PromptMachine). 어느 세계에서 시작했고 급해 목록에서 고른 것인지 */
     private class GoToStart(val generation: Int, val urgentPick: Boolean)
@@ -142,7 +144,8 @@ class CoachCore(private val d: CoachDeps) {
      */
     fun shutdown() {
         if (!started) return
-        runCatching { worlds.flush() }.onFailure { log.w("trip flush failed: ${it.message}") }
+        // 되돌린 정차를 아직 판정하지 못했으면 맥박을 새로 쓰지 않는다 (확인하지 못한 정차를 '지금까지 서 있었다'로 남기지 않는다)
+        if (!recorder.restorePending) runCatching { worlds.flush() }.onFailure { log.w("trip flush failed: ${it.message}") }
         memorySaver.atShutdown(worlds.memoryToSave())?.let { m ->
             runCatching { d.memory.save(m.memory, m.generation) }.onFailure { log.w("memory save failed: ${it.message}") }
         }
@@ -256,10 +259,20 @@ class CoachCore(private val d: CoachDeps) {
             ui.update { copy(history = shown, lastStop = r.log) }
             log.i("stop recorded: ${(r.log.end - r.log.start) / 60_000} min restroom=${r.log.restroom} persisted=${r.persisted}")
         }
-        worlds.onTick(t, recorder.parkState)?.let { change ->
-            log.i("new trip")
-            applyChange(change)
-            a = worlds.active
+        // 되돌린 정차(재시작, 시연 끄기)가 아직 서 있는지 떠났는지는 기어를 알아야 정한다. 그때까지 여정과 엔진은 기다린다:
+        // 감지기·여정·엔진이 같은 판정을 쓴다 (서비스 닫힘 검증 N2·N3). 보통 1~2초, 길어도 StopDetector.RESTORE_WAIT_MS
+        val waiting = recorder.restorePending
+        if (waiting) doorWhileWaiting = doorWhileWaiting || door
+        if (!waiting) {
+            recorder.takeRestoredEnd()?.let { endedAt ->
+                log.i("restored park ended ${(t - endedAt) / 1000}s ago")
+                worlds.restoredParkEnded(endedAt)
+            }
+            worlds.onTick(t, recorder.parkState)?.let { change ->
+                log.i("new trip")
+                applyChange(change)
+                a = worlds.active
+            }
         }
 
         val navi = d.tracker.snapshot.value
@@ -271,22 +284,27 @@ class CoachCore(private val d: CoachDeps) {
                 gear = gear,
                 speedKph = speed,
                 samples = samples,
-                doorOpened = door,
+                doorOpened = door || (!waiting && doorWhileWaiting),
                 cabin = CabinState(hvacOn = d.hub.hvacOn, recirculation = d.hub.recirculation, setTempC = d.hub.setTempC),
                 route = d.candidates.withHorizon(navi.liveRoute(odo), navi, odo),
                 candidates = CoreRules.withExtras(ahead, urgent.extras(), pos),
-                intent = if (urgent.takeEngineIntent()) VoiceIntent.UrgentRestroom else pendingIntents.removeFirstOrNull(),
+                // 엔진에 넣을 때만 꺼낸다 (기다리는 틱에 꺼내면 그 말이 사라진다)
+                intent = if (waiting) null else if (urgent.takeEngineIntent()) VoiceIntent.UrgentRestroom else pendingIntents.removeFirstOrNull(),
                 cabinAutoAllowed = d.settings.autoFreshAir,
             ),
         )
         d.loopInputs.request = CandidateRequest(CoreRules.searchFix(pos, real, heading), navi, a.world.candidatePolicy)
-        val out = try {
+        val out = if (waiting) null else try {
             a.engine.update(input)
         } catch (e: Exception) {
             log.w("engine.update failed: ${e.message ?: e.javaClass.simpleName}")
             null
         }
-        lastInput = input
+        // 엔진이 본 입력만 남긴다: 기다리는 동안에는 급해·계획도 엔진을 부르지 않는다 (엔진 시계가 되돌린 정차보다 앞서면 안 된다)
+        if (!waiting) {
+            lastInput = input
+            doorWhileWaiting = false
+        }
         if (out != null) {
             logNext(out)
             lastOutput = out
@@ -296,7 +314,7 @@ class CoachCore(private val d: CoachDeps) {
         }
         if (freshAir.takeRevert(el, d.hub.recirculation)) revertFreshAir()
         noticeUntilMs?.takeIf { el >= it }?.let { clearNotice() }
-        advanceUrgent(el, a, pos, input)
+        if (!waiting) advanceUrgent(el, a, pos, input)
         refreshPlan(force = false)
         publish(out, input, navi, a.world, ahead)
         memorySaver.due(el) { worlds.memoryToSave() }?.let(::saveMemory)

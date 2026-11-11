@@ -205,6 +205,15 @@ class WorldSwitch(
         return WorldChange(next, WorldChange.Kind.ENGINE)
     }
 
+    /**
+     * 되돌린 정차(재시작, 시연 끄기)가 [endedAt]에 끝난 것으로 판정됐다: 차는 지금 P가 아니다. 지금 세계의 엔진도 그때 떠난 것으로
+     * 맞춘다. 여정은 이어지는 [onTick](정차 없음)이 맞춘다. 판정 뒤 첫 엔진 update 전에 부른다
+     */
+    fun restoredParkEnded(endedAt: Long) {
+        val a = active
+        a.world.endPark(a.engine, endedAt)
+    }
+
     /** 정차 기록 (StopRecorder). 기록 파일에 덧붙일지는 코어가 world.persistsHistory로 정한다 */
     fun onStop(log: StopLog, now: Long) = active.session.onStop(log, now)
 

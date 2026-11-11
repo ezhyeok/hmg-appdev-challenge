@@ -279,6 +279,95 @@ class StopDetectorTest {
         assertEquals(ParkedStop(t0, t0 + 5 * min, doorOpened = true), d.onTick(t0 + 40 * min, Gear.DRIVE, SLOW, false))
     }
 
+    // ---------------------------------------------------------------- 되돌린 정차의 판정은 기어를 알 때 (서비스 닫힘 검증 N2)
+
+    @Test
+    fun aRestoredStopWaitsForAKnownGearAndThenEndsAtTheLastSeenTimeIfTheCarHasLeft() {
+        // 서비스가 켜지면 첫 틱(1초)이 Car 연결(기어 구독)보다 먼저 올 수 있다. 예전에는 그 틱의 UNKNOWN을 '아직 서 있다'로 읽고
+        // 꺼져 있던 시간을 정차에 더했다: 같은 상황이 신호 도착 순서에 따라 10분 정차 / 40분 정차로 갈렸다
+        val d = StopDetector()
+        d.restore(ParkState(t0, doorSeen = true), now = t0 + 40 * min, lastSeenMs = t0 + 10 * min)
+        assertTrue(d.restorePending)
+        for (s in 1..3) {
+            assertNull("기어를 모르는 틱은 판정을 미룬다", d.onTick(t0 + 40 * min + s * 1_000, Gear.UNKNOWN, null, false))
+            assertTrue(d.restorePending)
+            assertEquals("그동안 정차는 되돌린 그대로다", ParkState(t0, doorSeen = true), d.parkState)
+            assertNull(d.takeRestoredEnd())
+        }
+        assertEquals(
+            "기어를 첫 틱에 알았을 때와 같다: 마지막으로 본 때 끝났다",
+            ParkedStop(t0, t0 + 10 * min, doorOpened = true),
+            d.onTick(t0 + 40 * min + 4_000, Gear.DRIVE, 60f, false),
+        )
+        assertFalse(d.restorePending)
+        assertNull(d.parkState)
+        assertEquals("엔진도 같은 시각에 떠난 것으로 맞춘다", t0 + 10 * min, d.takeRestoredEnd())
+        assertNull("한 번만", d.takeRestoredEnd())
+    }
+
+    @Test
+    fun aRestoredStopSeenStillInParkCountsTheUnseenTimeToo() {
+        val d = StopDetector()
+        d.restore(ParkState(t0, doorSeen = false), now = t0 + 40 * min, lastSeenMs = t0 + 10 * min)
+        assertNull(d.onTick(t0 + 40 * min + 1_000, Gear.UNKNOWN, null, false))
+        assertNull(d.onTick(t0 + 40 * min + 2_000, Gear.PARK, 0f, false))
+        assertFalse(d.restorePending)
+        assertNull("서 있으면 끝난 시각이 없다", d.takeRestoredEnd())
+        assertEquals(
+            "못 본 30분도 서 있던 것이다",
+            ParkedStop(t0, t0 + 45 * min, doorOpened = false),
+            d.onTick(t0 + 45 * min, Gear.DRIVE, FAST, false),
+        )
+    }
+
+    @Test
+    fun aDoorOpenedWhileUndecidedBelongsToTheRestoredStop() {
+        val left = StopDetector()
+        left.restore(ParkState(t0, doorSeen = false), now = t0 + 20 * min, lastSeenMs = t0 + 5 * min)
+        left.onTick(t0 + 20 * min + 1_000, Gear.UNKNOWN, null, doorOpened = true)
+        assertTrue(left.onTick(t0 + 20 * min + 2_000, Gear.DRIVE, FAST, false)!!.doorOpened)
+        val stayed = StopDetector()
+        stayed.restore(ParkState(t0, doorSeen = false), now = t0 + 20 * min, lastSeenMs = t0 + 5 * min)
+        stayed.onTick(t0 + 20 * min + 1_000, Gear.UNKNOWN, null, doorOpened = true)
+        assertEquals(ParkState(t0, doorSeen = true), stayed.parkState)
+        stayed.onTick(t0 + 20 * min + 2_000, Gear.PARK, 0f, false)
+        assertTrue(stayed.onTick(t0 + 25 * min, Gear.DRIVE, FAST, false)!!.doorOpened)
+    }
+
+    @Test
+    fun anUnknownGearWithSpeedMeansTheCarHasLeft() {
+        val d = StopDetector()
+        d.restore(ParkState(t0, doorSeen = true), now = t0 + 40 * min, lastSeenMs = t0 + 10 * min)
+        assertEquals(ParkedStop(t0, t0 + 10 * min, true), d.onTick(t0 + 40 * min + 1_000, Gear.UNKNOWN, 50f, false))
+        assertEquals(t0 + 10 * min, d.takeRestoredEnd())
+    }
+
+    @Test
+    fun withoutAGearForTenSecondsTheRestoredStopEndsAtTheLastSeenTime() {
+        // 기어 신호가 끝내 오지 않는다 (Car 연결 실패): 보지 못한 시간을 선 것으로 세지 않는다. 코치도 더 기다리지 않고 엔진을 돌린다
+        val d = StopDetector()
+        val now = t0 + 40 * min
+        d.restore(ParkState(t0, doorSeen = true), now = now, lastSeenMs = t0 + 10 * min)
+        assertNull(d.onTick(now + StopDetector.RESTORE_WAIT_MS - 1_000, Gear.UNKNOWN, null, false))
+        assertTrue(d.restorePending)
+        assertEquals(ParkedStop(t0, t0 + 10 * min, true), d.onTick(now + StopDetector.RESTORE_WAIT_MS, Gear.UNKNOWN, null, false))
+        assertFalse(d.restorePending)
+        assertEquals(t0 + 10 * min, d.takeRestoredEnd())
+        // 그 뒤 P 신호가 오면 그때부터 새 정차다
+        d.onTick(now + 20_000, Gear.PARK, 0f, false)
+        assertEquals(ParkState(now + 20_000, doorSeen = false), d.parkState)
+    }
+
+    @Test
+    fun restoringAgainStartsANewDecision() {
+        val d = StopDetector()
+        d.restore(ParkState(t0, doorSeen = false), now = t0 + 10 * min, lastSeenMs = t0 + 5 * min)
+        d.onTick(t0 + 10 * min + 1_000, Gear.DRIVE, FAST, false)
+        d.restore(null, now = t0 + 11 * min) // 세계 전환: 지난 판정은 지난 세계의 것이다
+        assertNull(d.takeRestoredEnd())
+        assertFalse(d.restorePending)
+    }
+
     @Test
     fun withoutALastSeenTimeTheStopEndsAtTheRestore() {
         val d = StopDetector()

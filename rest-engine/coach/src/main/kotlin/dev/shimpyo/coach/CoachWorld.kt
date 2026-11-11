@@ -3,6 +3,7 @@ package dev.shimpyo.coach
 import dev.shimpyo.engine.CoachConfig
 import dev.shimpyo.engine.CoachEngine
 import dev.shimpyo.engine.CoachInput
+import dev.shimpyo.engine.DrivingSample
 import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.PersonalMemory
@@ -82,6 +83,20 @@ sealed class CoachWorld {
             if (at <= clock.now()) runCatching { engine.update(CoachInput(now = at, gear = Gear.PARK, doorOpened = park.doorSeen)) }
         }
         return engine
+    }
+
+    /**
+     * 엔진이 서 있다고 아는 정차([newEngine]의 park, 또는 시연 동안 옆에 둔 실제 엔진의 정차)가 [endedAt]에 끝났다고 알린다.
+     * 정차 감지기가 "되돌린 정차는 마지막으로 본 때 끝났다"고 판정했을 때, 그 판정 뒤 첫 엔진 update 전에 부른다: 그러지 않으면 엔진은
+     * 다음 update까지 서 있던 것으로 세어 보지 못한 시간을 화장실 정차·휴식으로 잡는다 (서비스 닫힘 검증 N3: 게이지와 기록이 어긋났다).
+     * 공개 엔진 API(update)만 쓴다: [endedAt] 직전의 P 입력으로 정차를 거기까지 세고, [endedAt]의 D 입력으로 끝낸다.
+     * D 입력에는 제동 표본을 실어 엔진이 이 입력으로 질문을 내지 않게 한다(조용한 때 규칙: 운전자가 보지 못할 질문이다).
+     */
+    fun endPark(engine: CoachEngine, endedAt: Long) {
+        runCatching {
+            engine.update(CoachInput(now = endedAt - 1, gear = Gear.PARK))
+            engine.update(CoachInput(now = endedAt, gear = Gear.DRIVE, samples = listOf(DrivingSample(t = endedAt, brake = true))))
+        }
     }
 
     /** 실제 세계 */
