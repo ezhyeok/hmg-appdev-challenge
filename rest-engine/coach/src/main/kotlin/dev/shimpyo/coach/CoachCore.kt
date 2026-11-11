@@ -76,7 +76,7 @@ class CoachCore(private val d: CoachDeps) {
     private val freshAir = FreshAirGate()
     private val memorySaver = MemorySaver()
     private val travel = TravelHeading()
-    private val asleep = AsleepMarks()
+    private val crew = Crew(worlds, d.settings, d.voice, desk, d.interpreter, d.ui, d.log)
 
     private var started = false
     private var lastInput: CoachInput? = null
@@ -87,8 +87,6 @@ class CoachCore(private val d: CoachDeps) {
 
     /** 시연을 처음 켠 실제 시각. 끌 때 실제 정차를 그 시각에 끝내는 데 쓴다 (StopDetector.restore의 lastSeenMs) */
     private var demoSinceWall: Long? = null
-    /** 마지막으로 본 건강 정보 동의 (처음에는 모름). 꺼진 것을 보면 건강 유형 탑승자를 뺀다 */
-    private var healthConsentSeen: Boolean? = null
     /** 되돌린 정차의 판정을 기다리는 동안 열린 문. 판정 뒤 첫 엔진 입력에 싣는다 (엔진도 그 문을 본다) */
     private var doorWhileWaiting = false
     /**
@@ -174,7 +172,7 @@ class CoachCore(private val d: CoachDeps) {
         recorder.restore(a.session.restoredPark, now, lastSeenMs = loaded.heartbeat?.savedAt ?: now)
         memorySaver.loaded(loaded.memory)
         enterWorld(a)
-        enforceHealthConsent()
+        crew.enforceConsent()
         a.session.restoredAccepted?.let {
             restoredAccept = it.stopId
             restoredAcceptUntilMs = d.elapsed.elapsedMs() + ACCEPT_RESTORE_MS
@@ -200,13 +198,13 @@ class CoachCore(private val d: CoachDeps) {
                 desk.askEnded(m.key)
                 // 카드에 한 말은 대답 하나다 (그 카드가 아직 떠 있으면 그 장소 이름을 넘겨, 장소를 가리킨 말을 새 요청으로 읽지 않게 한다)
                 val card = machine.current?.takeIf { it.key == m.key }
-                val reply = parser.replyTo(m.text, occupants(), card?.prompt?.stop?.name)
+                val reply = parser.replyTo(m.text, crew.occupants, card?.prompt?.stop?.name)
                 onPromptEvent(PromptEvent.Heard(m.key, reply.answer, reply.other))
             }
             is Msg.Listened -> if (current(m.gen)) onListened(m.text)
             is Msg.Interpreted -> if (current(m.gen)) m.intent?.let(::dispatchIntent) ?: notUnderstood()
-            is Msg.OccupantsHeard -> if (current(m.gen)) onOccupantsHeard(m.text)
-            is Msg.OccupantsInterpreted -> if (current(m.gen)) applySpokenOccupants(m.list)
+            is Msg.OccupantsHeard -> if (current(m.gen)) crew.heard(m.text) { list -> send(Msg.OccupantsInterpreted(m.gen, list)) }
+            is Msg.OccupantsInterpreted -> if (current(m.gen)) crew.interpreted(m.list)
             is Msg.FreshAirDone -> {
                 freshAir.finished(d.elapsed.elapsedMs(), switched = m.ok)
                 if (m.ok && m.announce) desk.speak("환기를 위해 외기로 바꿨어요")
@@ -231,15 +229,18 @@ class CoachCore(private val d: CoachDeps) {
             is UiCommand.Answer -> onPromptEvent(PromptEvent.Tapped(c.promptId, c.accept))
             is UiCommand.GoTo -> onPromptEvent(PromptEvent.GoTo(c.stop, urgentPick = urgent.lists(c.stop.id)))
             UiCommand.DismissGoToResult -> onPromptEvent(PromptEvent.DismissGoToResult)
-            is UiCommand.SetOccupants -> setOccupants(c.occupants)
-            UiCommand.DescribeOccupants -> describeOccupants()
+            is UiCommand.SetOccupants -> crew.set(c.occupants)
+            UiCommand.DescribeOccupants -> {
+                val gen = worlds.active.generation
+                crew.describe { text -> send(Msg.OccupantsHeard(gen, text)) }
+            }
             is UiCommand.Demo -> switchDemo(c.scenario)
             UiCommand.ClearRecords -> clearRecords()
             UiCommand.ProfileChanged -> worlds.profileChanged()
             // 신호 수집을 다시 잇는 일은 서비스가 한다 (코어는 신호의 출처를 모른다)
             UiCommand.PermissionsChanged -> Unit
             UiCommand.ClosePlan -> plans.stop()
-            is UiCommand.SetAsleep -> setAsleep(c.occupantId, c.asleep)
+            is UiCommand.SetAsleep -> crew.setAsleep(c.occupantId, c.asleep)
         }
     }
 
@@ -248,7 +249,7 @@ class CoachCore(private val d: CoachDeps) {
     private fun tick() {
         val el = d.elapsed.elapsedMs()
         d.odometer.advance(d.hub.speedKph)
-        enforceHealthConsent()
+        crew.enforceConsent()
         var a = worlds.active
         val t = a.clock.now()
         val real = d.positions.current.value?.fix
@@ -261,7 +262,7 @@ class CoachCore(private val d: CoachDeps) {
         recorder.onTick(t, gear, speed, door, pos, a.world.persistsHistory)?.let { r ->
             worlds.onStop(r.log, t)
             restoredAccept = null
-            if (r.log.restroom) asleepChanged(asleep.onRestroomStop())
+            if (r.log.restroom) crew.onRestroomStop()
             val shown = StopHistory.sanitize(r.history, t)
             ui.update { copy(history = shown, lastStop = r.log) }
             log.i("stop recorded: ${(r.log.end - r.log.start) / 60_000} min restroom=${r.log.restroom} persisted=${r.persisted}")
@@ -271,7 +272,7 @@ class CoachCore(private val d: CoachDeps) {
         val waiting = recorder.restorePending
         if (waiting) doorWhileWaiting = doorWhileWaiting || door
         // 자는 중 표시: 화장실 정차가 되거나 아침이 지나면 푼다 (엔진 입력을 만들기 전에)
-        asleepChanged(asleep.onTick(t, recorder.parkState.takeUnless { waiting }))
+        crew.onTick(t, recorder.parkState.takeUnless { waiting })
         if (!waiting) {
             recorder.takeRestoredEnd()?.let { endedAt ->
                 log.i("restored park ended ${(t - endedAt) / 1000}s ago")
@@ -300,7 +301,7 @@ class CoachCore(private val d: CoachDeps) {
                 // 엔진에 넣을 때만 꺼낸다 (기다리는 틱에 꺼내면 그 말이 사라진다)
                 intent = if (waiting) null else if (urgent.takeEngineIntent()) VoiceIntent.UrgentRestroom else pendingIntents.removeFirstOrNull(),
                 cabinAutoAllowed = d.settings.autoFreshAir,
-                asleepOccupantIds = asleep.ids,
+                asleepOccupantIds = crew.asleepIds,
             ),
         )
         d.loopInputs.request = CandidateRequest(CoreRules.searchFix(pos, real, heading), navi, a.world.candidatePolicy)
@@ -532,13 +533,13 @@ class CoachCore(private val d: CoachDeps) {
     private fun onListened(text: String?) {
         if (text.isNullOrBlank()) return
         // 떠 있는 카드에 대한 대답이면 Accept/Decline(key)로 나온다 (prompt.md 6.2)
-        when (val spoken = parser.parseSpoken(text, occupants(), activePromptId = machine.current?.key)) {
+        when (val spoken = parser.parseSpoken(text, crew.occupants, activePromptId = machine.current?.key)) {
             is Spoken.Intent -> return dispatchIntent(spoken.intent)
-            is Spoken.Asleep -> return desk.answer(AsleepMarks.reply(setAsleep(spoken.occupantId, spoken.asleep)))
+            is Spoken.Asleep -> return desk.answer(AsleepMarks.reply(crew.setAsleep(spoken.occupantId, spoken.asleep)))
             null -> Unit
         }
         val interpreter = d.interpreter ?: return notUnderstood()
-        val people = occupants()
+        val people = crew.occupants
         val key = machine.current?.key
         val gen = worlds.active.generation
         desk.interpret("interpret", failed = null, showThinking = true, done = { send(Msg.Interpreted(gen, it)) }) { interpreter.interpret(text, people, key) }
@@ -575,100 +576,16 @@ class CoachCore(private val d: CoachDeps) {
 
     private fun startFreshAir(announce: Boolean) {
         if (!d.cabin.freshAirSupported || !freshAir.begin(d.elapsed.elapsedMs())) return
-        effect("freshAir") {
-            val ok = try {
-                d.cabin.freshAir()
-            } catch (c: CancellationException) {
-                throw c
-            } catch (x: Exception) {
-                log.w("freshAir failed: ${x.message}")
-                false
-            }
-            send(Msg.FreshAirDone(ok, announce))
-        }
+        effect("freshAir", failed = false, result = { Msg.FreshAirDone(it, announce) }) { d.cabin.freshAir() }
     }
 
     private fun revertFreshAir() {
         log.i("fresh air: back to recirculation")
-        effect("recirculate") {
-            val ok = try {
-                d.cabin.recirculate()
-            } catch (c: CancellationException) {
-                throw c
-            } catch (x: Exception) {
-                false
-            }
+        val checked: (Boolean) -> Msg? = { ok ->
             if (!ok) log.w("recirculate not confirmed")
+            null
         }
-    }
-
-    // ------------------------------------------------------------ 탑승자
-
-    private fun occupants(): List<Occupant> = worlds.active.world.occupants(d.settings)
-
-    private fun setOccupants(list: List<Occupant>) {
-        val a = worlds.setOccupants(HealthConsent.allowed(list, d.settings.healthConsent))
-        val now = a.world.occupants(d.settings)
-        asleep.onOccupants(now)
-        ui.update { copy(occupants = now, asleepOccupantIds = asleep.ids) }
-    }
-
-    /** 탑승자를 자는 중으로 표시하거나 푼다 (화면의 표시, 말 "아이 잠들었어"·"깼어"). 아이만 표시할 수 있다 (AsleepMarks) */
-    private fun setAsleep(occupantId: String?, on: Boolean): AsleepMarks.Result {
-        val result = asleep.set(occupantId, on, occupants(), worlds.active.clock.now())
-        asleepChanged(result == AsleepMarks.Result.MARKED || result == AsleepMarks.Result.CLEARED)
-        return result
-    }
-
-    private fun asleepChanged(changed: Boolean) {
-        if (changed) ui.update { copy(asleepOccupantIds = asleep.ids) }
-    }
-
-
-    /**
-     * 건강 정보 동의가 꺼져 있으면(화면이 설정을 바꾼다: 명령은 오지 않는다) 건강 유형 탑승자를 모든 세계에서 뺀다 (UI 닫힘 검증 N3).
-     * 동의 값이 바뀐 때와 시작할 때만 탑승자를 본다 (동의 읽기는 싸고, 탑승자 읽기는 설정을 다시 푼다)
-     */
-    private fun enforceHealthConsent() {
-        val consent = d.settings.healthConsent
-        if (consent == healthConsentSeen) return
-        healthConsentSeen = consent
-        if (!consent && worlds.dropHealthOccupants()) {
-            log.i("health consent off: health-type occupants removed")
-            val now = occupants()
-            asleep.onOccupants(now)
-            ui.update { copy(occupants = now, asleepOccupantIds = asleep.ids) }
-        }
-    }
-
-    /**
-     * [말로 설정]: 누가 타는지 묻고 듣는다. 음성 안내를 껐으면 묻는 말은 화면 알림으로 내고 듣기만 한다. 음성 인식을 쓸 수 없으면
-     * 왜 안 되는지 알린다 (UI 닫힘 검증 #12: 예전에는 눌러도 조용히 아무 일도 없었다)
-     */
-    private fun describeOccupants() {
-        if (desk.describing) return
-        if (!d.voice.sttReady) return desk.notice("음성 인식을 쓸 수 없어요. 화면에서 골라 주세요")
-        val question = "누가 함께 타나요? 예를 들어 일곱 살 아이 하나랑 강아지처럼 말해 주세요"
-        val speak = desk.canSpeak
-        if (!speak) desk.notice(question)
-        val gen = worlds.active.generation
-        desk.describe(question.takeIf { speak }) { text -> send(Msg.OccupantsHeard(gen, text)) }
-    }
-
-    private fun onOccupantsHeard(text: String?) {
-        if (text.isNullOrBlank()) return
-        val list = OccupantPhrase.parse(text)
-        val interpreter = d.interpreter
-        if (list.isNotEmpty() || interpreter == null) return applySpokenOccupants(list)
-        val gen = worlds.active.generation
-        desk.interpret("interpretOccupants", failed = null, done = { send(Msg.OccupantsInterpreted(gen, it)) }) { interpreter.occupants(text) }
-    }
-
-    private fun applySpokenOccupants(list: List<Occupant>?) {
-        if (list.isNullOrEmpty()) return desk.answer("잘 못 알아들었어요. 화면에서 골라 주세요")
-        val heard = HealthConsent.spoken(list, d.settings.healthConsent)
-        heard.apply?.let(::setOccupants)
-        desk.answer(heard.reply)
+        effect("recirculate", failed = false, result = checked) { d.cabin.recirculate() }
     }
 
     // ------------------------------------------------------------ 세계 (시연·실제)
@@ -719,7 +636,7 @@ class CoachCore(private val d: CoachDeps) {
                 recorder.onWorldChanged(now, change.restorePark, lastSeenMs ?: now)
                 urgent.reset()
                 plans.worldChanged()
-                asleep.clear()
+                crew.worldChanged()
                 restoredAccept = null
                 lastInput = null
                 lastOutput = null
@@ -827,20 +744,28 @@ class CoachCore(private val d: CoachDeps) {
     /** 학습 상태를 IO에서 쓴다 (언제 쓸지는 MemorySaver) */
     private fun saveMemory(m: MemorySave) {
         memorySaver.started(d.elapsed.elapsedMs())
-        effect("saveMemory") {
-            val ok = try {
-                withContext(d.io) { d.memory.save(m.memory, m.generation) }
-            } catch (c: CancellationException) {
-                throw c
-            } catch (x: Exception) {
-                log.w("memory save failed: ${x.message}")
-                false
-            }
-            send(Msg.MemorySaved(m.memory, ok))
+        effect("saveMemory", failed = false, result = { Msg.MemorySaved(m.memory, it) }) {
+            withContext(d.io) { d.memory.save(m.memory, m.generation) }
         }
     }
 
     // ------------------------------------------------------------ 효과 띄우기
+
+    /**
+     * 결과를 메시지 하나로 돌려주는 효과 (외기 전환, 학습 저장). 실패해도 [failed]로 만든 메시지를 보낸다: 효과는 끝나면 정확히 한 번
+     * 알린다 (취소됐을 때만 빼고). 알릴 것이 없으면 [result]가 null을 돌려준다
+     */
+    private fun <T> effect(name: String, failed: T, result: (T) -> Msg?, block: suspend () -> T): Job = effect(name) {
+        val r = try {
+            block()
+        } catch (c: CancellationException) {
+            throw c
+        } catch (x: Exception) {
+            log.w("$name failed: ${x.message ?: x.javaClass.simpleName}")
+            failed
+        }
+        result(r)?.let(::send)
+    }
 
     /** 효과 하나. 실패는 로그만 남긴다 (supervisorScope라 액터는 영향받지 않는다) */
     private fun effect(name: String, block: suspend CoroutineScope.() -> Unit): Job {
