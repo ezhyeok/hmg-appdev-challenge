@@ -241,54 +241,63 @@ E = 엔진 카드, A = 앱 카드. "닫음" = closed에 넣어 다시 띄우지 
 
 ### 4.1 판정 규칙 (엔진 StopTracker와 같게)
 
+출발 차속이 30km/h를 넘으면 그 틱에 정차가 확정된다. 느리게 떠나면 다시 대기 창(3분)이 끝날 때 확정된다(끝 시각은 P에서 나온 때).
+
 | 상황 | 예전 (trackStops) | 지금 | 테스트 (StopDetectorTest) |
 |---|---|---|---|
 | P 3분 이상 + 문 → 출발 | 화장실 정차 | 같음 | `parkedThreeMinutesWithDoorIsARestroomStop` |
 | 정확히 3분 / 2분 59초 | 기록 / 안 함 | 같음 | `exactlyThreeMinutesCountsAndJustUnderDoesNot` |
+| P인데 차속이 들어옴 (잡음) | — | P를 믿는다 (엔진 감사 S8) | `parkTrustsTheGearOverSpeed` |
 | P 중 기어 UNKNOWN (Car 서비스 재연결) | 정차가 사라지고 다시 센 정차에 문 열림이 빠짐 | 차속 3km/h 초과가 아니면 정차 유지 | `unknownGearWhileParkedKeepsTheStop`, `unknownGearWithSpeedMeansMoving`, `unknownGearSlowOrSpeedUnknownKeepsThePreviousState` |
 | P→D 틱에 함께 온 문 열림 | 버림 (엔진은 셈) | 셈 | `doorOnTheDepartureTickCounts` |
+| 휴게소 안에서 옮겨 대기 (3분 안, 30km/h 이하, 후진 포함) | 정차 둘 (14분 + 5분 → 휴식이 안 됨) | 정차 하나, 옮긴 시간도 선 시간 (엔진 감사 S7) | `reparkingWithinThreeMinutesIsTheSameStop`, `reversingIntoAnotherSpotIsTheSameStop`, `aDoorDuringTheGapIsNotAStopDoor` |
+| 천천히 떠남 | 바로 기록 | 3분 창이 끝나거나 30km/h를 넘을 때 기록 | `aSlowDepartureIsRecordedWhenTheReparkWindowCloses`, `speedAboveThirtyEndsTheStopAtOnce`, `parkingAgainAfterTheWindowIsANewStop` |
 | 정차 중 시계가 뒤로 맞춰짐 (NTP) | 끝 - 시작이 짧아져 정차가 사라짐 (엔진은 셈) | 선 시간 = 틱 사이 시간의 합, 거꾸로 간 걸음은 0 (엔진 EngineClock과 같다) | `aClockJumpBackWhileParkedDoesNotLoseTheStop`, `clockGoingBackwardsCountsNoParkedTimeForThatStep` |
-| 실제 10:00에 세운 채 시연(14:00) 켜고 출발 | 10:00→14:00 정차 기록 (서비스 감사 D3) | `rebase`: 새 시계로 다시 셈 | `parkedAcrossADemoStartDoesNotInventAFourHourStop` |
-| 정차 중 앱 재시작 | 정차를 잃음 (D12) | `resume(ParkState)` (첫 틱 전에만) | `restartWhileParkedResumesTheStop`, `resumeOnlyBeforeTheFirstTick`, `resumeFromTheFutureIsIgnored` |
-| 정차 중 꺼졌다가 출발한 뒤 재시작 | — | 정차 끝 = 마지막으로 서 있는 것을 본 때 | `departedWhileTheAppWasDownEndsTheStopAtTheLastSeenTime` |
-| 정차 중 이미 화장실 정차인지 | — | `restroomReachedAt` | `restroomIsKnownWhileStillParked` |
 
 예전 동작은 먼저 그대로 고정한 테스트(`currentBehavior_*`)로 커밋한 뒤 다음 커밋에서 뒤집었다 (git log로 바뀐 점이 보인다).
-기록의 '화장실' 표시와 엔진이 배운 화장실 간격이 같은 규칙에서 나오게 하려는 것이다(구조 리뷰 §2.3e). 나중에 엔진이 정차 사건을
-출력하게 되면(B9) StopDetector를 지우고 그 사건으로 기록한다.
+기록의 '화장실' 표시와 엔진이 배운 화장실 간격이 같은 규칙에서 나오게 하려는 것이다(구조 리뷰 §2.3e). 엔진 규칙이 바뀌면
+(이번에 S7·S8이 들어왔다) 여기도 같이 바꾼다. 나중에 엔진이 정차 사건을 출력하게 되면(B9) StopDetector를 지우고 그 사건으로 기록한다.
 
-### 4.2 ParkState (world 담당과의 약속)
+### 4.2 ParkState와 restore (world 담당과의 약속)
 
 ```kotlin
-// 코치 시각. 정차 중일 때만 있다
-data class ParkState(val sinceMs: Long, val doorAtMs: Long?, val lastSeenMs: Long = sinceMs)
+// TripSession.kt (world 담당). 코치 시각. 정차 중일 때만 있다
+data class ParkState(val since: Long, val doorSeen: Boolean)
 ```
 
-- `StopRecorder.parkState`(= `StopDetector.parkState`)를 TripSession이 trip heartbeat에 함께 저장한다. **실제 세계일 때만** 저장한다
-  (시연 값은 가상 시각이다).
-- 재시작하면 TripSession이 이어 가기로 정했을 때(heartbeat가 충분히 최근일 때) **첫 틱 전에** `StopRecorder.resume(state, now)`를
-  부른다(첫 틱 뒤에는 무시한다: 겹치는 정차를 만들지 않게). 미래 시각은 버린다.
-- 다음 틱이 P면 앱이 꺼진 사이도 서 있던 것으로 센다. P가 아니면 앱이 꺼진 사이 출발한 것이라 정차 끝을 `lastSeenMs`(마지막으로 서
-  있는 것을 본 때 = heartbeat를 쓴 때의 마지막 틱)로 한다. 재시작 시각까지 늘리지 않는다.
-- 엔진에는 재시작 전 정차를 이어 주는 방법이 없다(엔진 StopTracker는 새로 센다). 재시작 전에 이미 화장실 정차였다면 그 시각은
-  아래 `restroomReachedAt`으로 TripSession이 `lastRestroomAt`에 넣는다.
-- `StopRecorder.restroomReachedAt(now)`: 정차 중 이미 화장실 정차가 됐으면 그 시각(엔진과 같은 식 `max(첫 문 열림, 세운 시각 + 3분)`).
-  TripSession이 heartbeat의 마지막 화장실 시각을 출발 전에 갱신하는 데 쓴다(재시작해도 잃지 않게, D12).
-  테스트: `restroomIsKnownWhileStillParked`.
+world 담당이 TripSession.kt에 먼저 정의했고 감지기도 이 타입을 쓴다(같은 이름을 두 번 정의하지 않는다).
+
+| 때 | 코어가 부르는 것 | 뜻 |
+|---|---|---|
+| 매 틱 | `recorder.parkState` → `WorldSwitch.onTick(now, park)` | 맥박 저장, 휴식·화장실·새 여정 판단 (TripSession) |
+| 앱 시작 (첫 틱 전) | `recorder.restore(session.restoredPark, now, lastSeenMs = 맥박 savedAt)` | 정차 중 재시작하면 정차를 이어 간다 (D12) |
+| 세계 전환 (`WorldChange.Kind.WORLD`) | `recorder.onWorldChanged(now, change.restorePark, lastSeenMs)` | 시연 켜기: null → 시연 시계로 새로 센다. 끄기: 실제 여정의 정차, lastSeenMs = 시연을 켠 실제 시각 |
+
+`restore`는 합치기가 아니라 바꾸기다. 다음 틱이 P면 그 사이도 서 있던 것으로 세고, P가 아니면 그 사이 떠난 것이라 `lastSeenMs`에
+정차가 끝난다. 그래서
+- 정차 중 꺼졌다가 출발한 뒤 다시 켜져도 정차 끝이 재시작 시각까지 늘지 않는다(`departedWhileTheAppWasDownEndsTheStopAtTheLastSeenTime`).
+- 시연 중 Virtual Console로 D를 넣고 시연을 꺼도, 시연 시간만큼의 가짜 실제 정차가 실제 기록에 들어가지 않는다
+  (`demoOffWithTheCarNoLongerParkedEndsTheRealStopWhenTheDemoStarted`). 코어가 시연을 켠 실제 시각을 들고 있다가 넘긴다.
+- 시연을 켜도 실제 10:00→시연 14:00 같은 두 시계 차이로 만든 정차가 없다(`parkedAcrossADemoStartDoesNotInventAFourHourStop`).
+- 문 열림 시각은 저장하지 않으므로 doorSeen이면 세운 때로 본다(TripSession과 같은 식: 화장실 = 세운 때 + 3분).
+- 다시 대기를 기다리던 정차는 세계를 바꾸면 버린다(옛 세계의 것). 세계 전환 직전 3분 안에 천천히 떠난 실제 정차는 잃는다(받아들인 손실).
+
+테스트: `demoOffRestoresTheRealStopWhileStillParked`, `restoringNothingWhileDrivingChangesNothing`, `restoreDropsAStopWaitingForRepark`,
+`restartWhileParkedResumesTheStop`, `withoutALastSeenTimeTheStopEndsAtTheRestore`, `restoreReplacesTheCurrentPark`, `restoreFromTheFutureClearsThePark`.
 
 ### 4.3 기록 규칙 (StopRecorder)
 
 - 좌표는 남기지 않는다(`lat = lon = null`). 서 있던 곳 300m 안의 정차 가능한 시설(휴게소·졸음쉼터·공중화장실·주유소·공영주차장)
-  이름만 남긴다. 출발 틱 위치보다 정차 중 마지막 위치를 쓴다.
+  이름만 남긴다. 출발 틱 위치보다 정차 중 마지막 위치를 쓴다. 다시 대기 창이 끝나 확정될 때 차가 이미 떠났어도 서 있던 곳 이름이다.
 - `persist`(= `CoachWorld.persistsHistory`)가 true일 때만 HistoryPort에 쓴다. 아니면 화면 목록에만 넣고, 세계가 바뀌면
   (`onWorldChanged`) 버린다. 시연 정차가 실제 기록에 미래 시각으로 들어가던 것(D3, UI #15)을 막는다.
 - 저장이 실패해도 화면에는 보인다(`persisted = false`). 화면 목록은 시간 순이다.
 - 세계가 바뀌면 정차 중 마지막 위치도 잊는다(시연 위치의 휴게소 이름이 실제 정차에 붙지 않게).
 - 기록 지우기는 HistoryPort.clear로 한다(파일 이름을 서비스가 알지 않게, D14). 지금 서 있는 정차는 차의 상태라 지우지 않는다.
-- 미래 시각 기록 정리(로드 때 `end > now` 버리기)와 `lastRestroomAt` 갱신은 TripSession(world 담당)이 한다. `Recorded.log`의
-  `restroom`, `end`를 쓰면 된다.
+- 미래 시각 기록 정리(`StopHistory.sanitize`)와 `lastRestroomAt` 갱신(`TripSession.onStop(log)`)은 world 담당이 한다.
+  코어는 `Recorded.log`를 `TripSession.onStop`에 넘긴다.
 
-테스트: `StopRecorderTest` 12개.
+테스트: `StopRecorderTest` 13개.
 
 ## 5. 스레드
 
@@ -311,13 +320,17 @@ data class ParkState(val sinceMs: Long, val doorAtMs: Long?, val lastSeenMs: Lon
    실행 중인 GoToRunner는 취소하지 않는다(결과는 보고 없이 알린다). 서비스 종료로 취소되면 결과를 안 보내도 된다(기계의 감시가 끝낸다).
    GoToRunner를 launch할 때 `finally`에서 결과를 못 보냈으면 `GoToFinished(FAILED)`를 보내면 더 좋다(Error 등).
 9. `UiCommand.DismissGoToResult`는 `PromptEvent.DismissGoToResult`로 넣는다(다시 시도 연결을 끊는다).
+10. 정차: 매 틱 `recorder.onTick(t, gear, speed, door, world.position(real), world.persistsHistory)` → `Recorded`가 오면 화면 기록 갱신과
+    `TripSession.onStop(log)`. `recorder.parkState`를 `WorldSwitch.onTick`에 넘긴다. 시작 때 첫 틱 전에 `recorder.restore(restoredPark, now,
+    맥박 savedAt)`, `WorldChange.Kind.WORLD`면 `recorder.onWorldChanged(now, restorePark, 시연을 켠 실제 시각(끌 때))`와 `machine.on(Reset)`.
 7. 급해 결과는 `AppPrompt`로, id는 요청마다 달라야 한다(예: `urgent-<requestId>`).
 8. `Speak`는 지금 음성 뒤에 이어 말해도 된다(VoiceAgent의 Mutex). `CancelVoice`는 지금 말·듣기를 멈춘다.
 
 ## 7. 열린 문제와 다른 담당에게
 
-- **CoachWorld (world)**: 시연 엔진은 `CoachConfig.promptTtlS`를 배속만큼 늘려 만든다(2.5). 그러지 않으면 시연 질문이 6초 만에 사라진다.
-  `ParkState`는 실제 세계에서만 heartbeat에 저장한다(4.2).
+- **CoachWorld (world)**: 시연 엔진은 `CoachConfig.promptTtlS`를 배속만큼 늘려 만든다(2.5). 그러지 않으면 시연 질문이 6초 만에 사라진다
+  (`PromptEngineScenarioTest.aDemoEngineWithTheDefaultTtlDropsTheCardInSecondsOfRealTime`). 지금 `CoachWorld.newEngine`은 기본 수명이다.
+  `ParkState`는 world의 타입을 그대로 쓴다(4.2). 감지기의 `restore`가 요청한 `restore(ParkState?)`다.
 - **엔진 (engine)**: INFO를 Report(true)로 알리면 `PromptPolicy.onResult`가 `noteInteraction`을 다시 불러 30초 조용한 때가 그 시각부터
   다시 시작된다(INFO를 낼 때 이미 한 번 시작했으므로 실제로는 몇 초 늘어날 뿐이다). 사용자와 대화했으니 맞는 동작이다.
 - 앱 질문(급해 결과) 수락은 엔진에 알리지 않는다(엔진이 모르는 질문). 엔진이 급해를 알게 하는 것은 코어의 급해 처리(서비스 감사 D7) 몫이다.
