@@ -251,6 +251,67 @@ class AuditDecisionsTest {
     }
 
     @Test
+    fun stopAndGoInParkIsNotARestOrARestroomStop() {
+        // 회귀(감사 S7 결정의 부작용, 닫힘 검증 2026-11-12): '3분 안에 30km/h를 넘지 않고 다시 P면 같은 정차'는 휴게소 안에서 옮겨 대는
+        // 경우를 위한 규칙인데, 꽉 막힌 정체에서 P로 섰다가 기어가기를 되풀이하는 것(P 2분 → 시속 15km로 2분 → P 2분 …)도 한 정차로
+        // 이어졌다. 첫 P 뒤 15분이면 '15분 휴식'으로 피로 게이지가 가득 찼고(20 → 118분), 그 사이 문이 한 번 열렸으면 화장실 시계도
+        // 0으로 돌아갔다(25 → 80분). 정한 규칙: 그 정차를 시작한 뒤 움직인 거리가 300m를 넘으면 새 정차다
+        val occ = listOf(adult("driver"), child("kid", 7))
+        val e = CoachEngine(
+            profile = TripProfile(occ, tripStart = t0 - 100 * MIN, lastRestroomAt = occ.associate { it.id to t0 - 80 * MIN }, continuousDrivingMin = 100.0),
+            random = Random(7),
+        )
+        var t = t0
+        var out = e.update(CoachInput(now = t, gear = Gear.DRIVE, speedKph = 15f))
+        val fatigueBefore = assertNotNull(out.fatigue.minutes)
+        val restroomBefore = assertNotNull(out.restroom.minutes)
+        assertTrue(fatigueBefore <= 20 && restroomBefore <= 25, "전제: 피로 ${fatigueBefore}분, 화장실 ${restroomBefore}분")
+        repeat(5) { cycle -> // 20분: P 2분, 기어가기 2분(500m)
+            repeat(120) { k -> t += SEC; out = e.update(CoachInput(now = t, gear = Gear.PARK, speedKph = 0f, doorOpened = cycle == 0 && k == 30)) }
+            repeat(120) { t += SEC; out = e.update(CoachInput(now = t, gear = Gear.DRIVE, speedKph = 15f)) }
+        }
+        assertTrue(
+            out.fatigue.minutes!! <= fatigueBefore && out.restroom.minutes!! <= restroomBefore,
+            "정체 속 가다 서다 20분 뒤: 피로 게이지 ${fatigueBefore}분 → ${out.fatigue.minutes}분 (15분 휴식으로 셌다), " +
+                "화장실 게이지 ${restroomBefore}분 → ${out.restroom.minutes}분 (화장실 정차로 셌다)",
+        )
+        assertTrue(e.memory().restroomIntervalsMin.isEmpty() && e.memory().restroomCensoredMin.isEmpty(), "화장실 정차로 배우지도 않는다")
+    }
+
+    /** P [parkS]초 → [gear]·[kph]로 [moveS]초 → P. 1초마다 update. 돌려주는 값: 다시 선 뒤에도 같은 정차인지 (정차 시작 시각이 그대로인지) */
+    private fun continuesAfterMoving(st: StopTracker, from: Long, parkS: Int, moveS: Int, kph: Float?, gear: Gear = Gear.DRIVE): Pair<Boolean, Long> {
+        var t = from
+        repeat(parkS) { st.update(t, Gear.PARK, 0f, false); t += SEC }
+        val session = st.sessionStart
+        repeat(moveS) { st.update(t, gear, kph, false); t += SEC }
+        st.update(t, Gear.PARK, 0f, false)
+        return (st.sessionStart == session) to t + SEC
+    }
+
+    @Test
+    fun reParkingContinuesOnlyWithin300MetresOfTheStop() {
+        // 시속 10km로 100초 = 278m: 같은 정차. 시속 12km로 100초 = 333m: 새 정차 (시간·속도 조건은 둘 다 맞는다)
+        assertTrue(continuesAfterMoving(StopTracker(cfg), 0L, parkS = 600, moveS = 100, kph = 10f).first)
+        assertTrue(!continuesAfterMoving(StopTracker(cfg), 0L, parkS = 600, moveS = 100, kph = 12f).first)
+        // 거리는 그 정차를 시작한 뒤의 합이다: 180m씩 두 번 옮기면 두 번째는 새 정차 (정체 속에서 조금씩 기어가는 경우)
+        val st = StopTracker(cfg)
+        val (first, t1) = continuesAfterMoving(st, 0L, parkS = 300, moveS = 65, kph = 10f)
+        assertTrue(first, "180m")
+        val (second, t2) = continuesAfterMoving(st, t1, parkS = 300, moveS = 65, kph = 10f)
+        assertTrue(!second, "합쳐 360m")
+        // 새 정차에서는 거리를 처음부터 다시 센다
+        assertTrue(continuesAfterMoving(st, t2, parkS = 300, moveS = 65, kph = 10f).first)
+    }
+
+    @Test
+    fun withoutASpeedSignalAReParkContinuesOnlyWhenTheDistanceBoundIsSmall() {
+        // 차속을 모르면 다시 대기로 볼 수 있는 가장 빠른 속도(30km/h)로 움직였다고 본다: 30초(250m)는 같은 정차, 60초(500m)는 새 정차.
+        // 같은 정차라고 확인할 수 없으면 이어 세지 않는다 (게이지를 틀리게 채우는 쪽이 더 나쁘다)
+        assertTrue(continuesAfterMoving(StopTracker(cfg), 0L, parkS = 600, moveS = 30, kph = null).first)
+        assertTrue(!continuesAfterMoving(StopTracker(cfg), 0L, parkS = 600, moveS = 60, kph = null).first)
+    }
+
+    @Test
     fun leavingTheRestAreaStartsANewStop() {
         val st = StopTracker(cfg)
         st.update(0, Gear.PARK, 0f, false)
