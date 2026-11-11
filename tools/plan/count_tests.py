@@ -8,7 +8,7 @@ never built from a red or missing run.
 Run after the tests:
   ./gradlew -p rest-engine test                      (engine + coach, on the server)
   laptop: tools/laptop/gradle.ps1 :app:testDebugUnitTest
-  python3 -I tools/plan/count_tests.py --fetch-app   (copies the app XML from the laptop)
+  python3 -I tools/plan/count_tests.py --fetch-app [repo-folder]   (copies the app and pleos-kit XML from the laptop)
 """
 import glob
 import json
@@ -18,20 +18,25 @@ import sys
 import xml.etree.ElementTree as ET
 
 ROOT = os.path.abspath(os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..'))
-APP_LOCAL = os.path.join(ROOT, 'build', 'laptop-test-results', 'app')
+LAPTOP_LOCAL = os.path.join(ROOT, 'build', 'laptop-test-results')
 MODULES = {
     'engine': os.path.join(ROOT, 'rest-engine', 'build', 'test-results', 'test'),
     'coach': os.path.join(ROOT, 'rest-engine', 'coach', 'build', 'test-results', 'test'),
-    'app': APP_LOCAL,
+    # Android modules run on the laptop (tools/laptop/gradle.ps1 :app:testDebugUnitTest :pleos-kit:testDebugUnitTest)
+    'app': os.path.join(LAPTOP_LOCAL, 'app'),
+    'kit': os.path.join(LAPTOP_LOCAL, 'pleos-kit'),
 }
 
 
 def fetch_app(repo='repo'):
-    os.makedirs(APP_LOCAL, exist_ok=True)
-    for f in glob.glob(os.path.join(APP_LOCAL, '*.xml')):
-        os.remove(f)
-    remote = f'hmg-laptop:hmg-appdev-challenge/{repo}/app/build/test-results/testDebugUnitTest/*.xml'
-    subprocess.run(['scp', '-q', remote, APP_LOCAL], check=True)
+    """Copy the Android modules' JUnit XML from the laptop folder that ran them (default repo\)."""
+    for module in ('app', 'pleos-kit'):
+        local = os.path.join(LAPTOP_LOCAL, module)
+        os.makedirs(local, exist_ok=True)
+        for f in glob.glob(os.path.join(local, '*.xml')):
+            os.remove(f)
+        remote = f'hmg-laptop:hmg-appdev-challenge/{repo}/{module}/build/test-results/testDebugUnitTest/*.xml'
+        subprocess.run(['scp', '-q', remote, local], check=True)
 
 
 def count(directory):
@@ -49,7 +54,8 @@ def count(directory):
 
 def main():
     if '--fetch-app' in sys.argv:
-        fetch_app()
+        i = sys.argv.index('--fetch-app')
+        fetch_app(sys.argv[i + 1] if len(sys.argv) > i + 1 and not sys.argv[i + 1].startswith('-') else 'repo')
     out = {name: count(d) for name, d in MODULES.items()}
     bad = {k: v for k, v in out.items() if v['failures']}
     if bad:
