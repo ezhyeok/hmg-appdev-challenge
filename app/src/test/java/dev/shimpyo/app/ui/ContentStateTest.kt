@@ -82,8 +82,10 @@ class ContentStateTest {
         // 보낸 직후: 코치가 받았다고 알리기 전에도 같은 요청을 또 보내지 않는다
         assertEquals(GoToBusy("a", null), goToBusy(on, sentId = "a"))
         assertNull(goToBusy(on, sentId = null))
-        // 멈춘 코치에 남은 값은 믿지 않는다
+        // 멈춘 코치에 남은 값은 믿지 않는다 (끝낼 코치가 없어 버튼이 끝없이 막힌다)
         assertNull(goToBusy(on.copy(serviceRunning = false, goToPending = anseong), sentId = null))
+        assertNull(coachGoToPending(on.copy(serviceRunning = false, goToPending = anseong)))
+        assertEquals(anseong, coachGoToPending(on.copy(goToPending = anseong)))
         assertEquals("안성휴게소를 내비에 넣는 중…", goToProgressText(GoToBusy("a", "안성휴게소(부산방향)")))
         assertEquals("내비에 넣는 중…", goToProgressText(GoToBusy("a", null)))
     }

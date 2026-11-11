@@ -11,6 +11,7 @@ import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.GoToOutcome
 import dev.shimpyo.coach.GoToResult
 import dev.shimpyo.coach.voice.Hangul
+import dev.shimpyo.engine.StopCandidate
 
 /**
  * 화면이 들고 있는 진행 중 상태. 창 분할·크기 변경·야간 모드로 액티비티가 다시 만들어져도 남는다([Saver]).
@@ -111,7 +112,10 @@ data class GoToBusy(val stopId: String, val name: String?)
  * [sentId]는 화면이 방금 보낸 곳이다: 코치가 받았다고 알리기 전의 짧은 틈에도 바쁜 것으로 본다. 멈춘 코치에 남은 값은 믿지 않는다.
  */
 fun goToBusy(state: CoachUiState, sentId: String?): GoToBusy? =
-    state.goToPending?.takeIf { state.serviceRunning }?.let { GoToBusy(it.id, it.name) } ?: sentId?.let { GoToBusy(it, null) }
+    coachGoToPending(state)?.let { GoToBusy(it.id, it.name) } ?: sentId?.let { GoToBusy(it, null) }
+
+/** 코치가 지금 내비에 넣는 중이라고 알린 곳. 멈춘 코치에 남은 값은 없는 것으로 본다 (끝낼 코치가 없다) */
+fun coachGoToPending(state: CoachUiState): StopCandidate? = state.goToPending?.takeIf { state.serviceRunning }
 
 /** 진행 표시 문구: "안성휴게소를 내비에 넣는 중…" */
 fun goToProgressText(busy: GoToBusy): String =

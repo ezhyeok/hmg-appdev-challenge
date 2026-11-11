@@ -196,8 +196,8 @@ fun ShimpyoContent(
     // 화면은 결과를 기다리는 시간을 재지 않는다 (닫힘 검증 UI-N2: 12초 제한이 19.5초 걸린 성공보다 먼저 '결과 없음'을 띄웠다).
     val busy = goToBusy(state, ui.goToSentId)
     // 화면이 보낸 것을 코치가 받지 않았을 때만(지난 질문에 한 대답처럼 들르기가 시작되지 않았다) 잠시 뒤 버튼을 다시 연다.
-    // 코치가 넣는 중이면 이 기다림은 돌지 않는다
-    val coachPendingId = state.goToPending?.id
+    // 코치가 넣는 중이면 이 기다림은 돌지 않는다 (멈춘 코치에 남은 값은 넣는 중으로 보지 않는다)
+    val coachPendingId = coachGoToPending(state)?.id
     LaunchedEffect(ui.goToSentId, coachPendingId) {
         val sent = ui.goToSentId ?: return@LaunchedEffect
         if (coachPendingId != null) return@LaunchedEffect
