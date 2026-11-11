@@ -1,0 +1,18 @@
+{
+ "schema": 1,
+ "built": "2026-11-11T01:22:12Z",
+ "downloaded": "2026-11-11",
+ "counts": {
+  "rest_areas.json": 244,
+  "drowsy_shelters.json": 288,
+  "restrooms.json": 41667,
+  "parkables.json": 29610,
+  "restrooms_nocoord.json": 13578
+ },
+ "attribution": [
+  "공중화장실·안전비상벨·CCTV·무료와이파이·민방위대피시설·석유판매업·약국·휴게음식점·일반음식점 정보: 행정안전부 지방행정 인허가·생활편의 데이터(LOCALDATA, file.localdata.go.kr), 이용허락범위 제한 없음",
+  "휴게소·졸음쉼터 정보: 한국도로공사, 전국휴게소정보표준데이터·전국졸음쉼터표준데이터·졸음쉼터 설치현황 (공공데이터포털 data.go.kr), 이용허락범위 제한 없음",
+  "주차장 정보: 전국주차장정보표준데이터, 각 지방자치단체 (공공데이터포털 data.go.kr), 이용허락범위 제한 없음",
+  "© OpenStreetMap contributors, ODbL 1.0 (openstreetmap.org/copyright): 고속도로 선형, 민자고속도로 휴게소·졸음쉼터, 주유소·LPG충전소, 공중화장실 일부"
+ ]
+}
