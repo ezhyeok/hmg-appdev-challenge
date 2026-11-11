@@ -215,15 +215,41 @@ class NaviKit(context: Context) {
      * 길안내 중인 경로에 경유지를 추가한다. 경유지 목록에 반영되면 true.
      * 좌표와 이름은 앱이 직접 구해야 한다(NaviHelper에는 POI 검색이 없다).
      *
-     * 확인: 보내기 전 목록을 읽었으면 개수가 늘었는지, 못 읽었으면 요청한 좌표(약 [WAYPOINT_MATCH_M] 안)의 경유지가 목록에 있는지 본다.
+     * Pleos 내비의 동작 (2026-11-12 에뮬레이터, SdkProbe `wp-add`)
+     * - 경유지는 둘까지다. 둘이 차 있으면 요청을 조용히 버린다 (이벤트도 오류도 없다): 보내지 않고 곧바로 false.
+     * - `waypointIndex`와 상관없이 **이미 있는 경유지 뒤에 붙는다**. 더 가까운 곳을 나중에 넣으면 먼 경유지에 먼저 갔다가
+     *   되돌아오는 경로가 된다 (옥산 101km 뒤에 안성을 넣으니 안성이 177km가 됐다). 순서를 지키려면 [setWaypoints]를 쓴다.
+     * - 경유지 목록(`WaypointInfo`)의 좌표는 0.0이다. 같은 곳인지는 보낸 이름(`poiName`이 `name`으로 돌아온다)으로 본다.
+     * - 넣는 동안 길안내가 취소됐다가 다시 시작된다 (RouteCancelled → WaypointChanged(ADD)). 그 사이 목록은 잠깐 비어 있다.
+     *
+     * 확인: 목록에 요청한 곳이 있거나(이름, 좌표가 있으면 약 [WAYPOINT_MATCH_M] 안), 보내기 전 목록을 읽었고 개수가 늘었으면 들어간 것이다.
      * 예전에는 보내기 전 조회가 실패하면 0개로 보고 '1개 이상'이면 성공이라 해서, 원래 있던 경유지만으로도 거짓 성공을 냈다 (서비스 감사 P11).
      */
     suspend fun addWaypoint(waypoint: RequestWaypointInfo, confirmTimeoutMs: Long = 30_000): Boolean = mutex.withLock {
         val before = runCatching { waypointsLocked() }.getOrNull()
-        // 이미 경유지면 다시 넣지 않는다: 같은 곳을 또 보내면 목록이 늘지 않아 '확인 실패'가 됐다 (2026-11-12 에뮬레이터)
-        if (before != null && isWaypoint(before, waypoint.latitude, waypoint.longitude)) return@withLock true
+        if (before != null) {
+            // 이미 경유지면 다시 넣지 않는다: 같은 곳을 또 보내면 목록이 늘지 않아 '확인 실패'가 됐다 (2026-11-12 에뮬레이터)
+            if (isWaypoint(before, waypoint.latitude, waypoint.longitude, waypoint.poiName)) return@withLock true
+            if (before.size >= MAX_WAYPOINTS) {
+                KitLog.w("addWaypoint ${waypoint.poiName}: the navi already has $MAX_WAYPOINTS waypoints and ignores another")
+                return@withLock false
+            }
+        }
         command("addWaypoint") { raw.addWaypoint(waypoint) }
-        pollUntil(confirmTimeoutMs) { waypointAdded(before, waypointsLocked(), waypoint.latitude, waypoint.longitude) }
+        pollUntil(confirmTimeoutMs) { waypointAdded(before, waypointsLocked(), waypoint.latitude, waypoint.longitude, waypoint.poiName) }
+    }
+
+    /**
+     * 목적지는 그대로 두고 경유지를 [waypoints] 순서로 다시 정한다 (최대 [MAX_WAYPOINTS]개). 길안내가 새로 시작된다.
+     * 경유지 목록이 그 이름들로, 그 순서로 바뀌면 true. [addWaypoint]는 늘 뒤에 붙이므로, 이미 있는 경유지보다 가까운 곳을
+     * 넣을 때 쓴다. 이미 있는 경유지를 지키려면 그 좌표를 알아야 한다 (내비는 경유지 좌표를 돌려주지 않는다).
+     */
+    suspend fun setWaypoints(destination: RouteInfo, waypoints: List<RequestWaypointInfo>, confirmTimeoutMs: Long = 45_000): Boolean = mutex.withLock {
+        require(waypoints.size <= MAX_WAYPOINTS) { "at most $MAX_WAYPOINTS waypoints" }
+        val indexed = waypoints.mapIndexed { i, w -> w.copy(waypointIndex = if (i == 0) WaypointIndex.FIRST else WaypointIndex.SECOND) }
+        command("requestRouteWithWaypoints") { raw.requestRouteWithWaypoints(RouteWithWaypointsRequest(destination, indexed)) }
+        val names = waypoints.map { it.poiName }
+        pollUntil(confirmTimeoutMs) { hasRoute(routeStateLocked().naviMode) && waypointsLocked().map { it.name } == names }
     }
 
     /** 경유지를 지운다. */
@@ -311,16 +337,26 @@ class NaviKit(context: Context) {
         /** 경로가 있는 길안내 모드. 길안내 여부는 이것 하나로만 판단한다 (모의 주행도 경로가 있다) */
         fun hasRoute(mode: NaviMode): Boolean = mode == NaviMode.ROUTE_GUIDING || mode == NaviMode.SIMULATION_GUIDING
 
-        /**
-         * 경유지가 들어갔는지. [before]를 읽었으면 개수가 늘었는지, 못 읽었으면(null) 요청 좌표의 경유지가 있는지로 본다.
-         * 순수 함수라 JVM 테스트(NaviKitRulesTest)로 지킨다.
-         */
-        fun waypointAdded(before: List<WaypointInfo>?, after: List<WaypointInfo>, lat: Double, lon: Double): Boolean =
-            if (before != null) after.size > before.size else isWaypoint(after, lat, lon)
+        /** Pleos 내비가 받는 경유지 수 (NaviHelper 가이드: FIRST, SECOND) */
+        const val MAX_WAYPOINTS = 2
 
-        /** 요청한 좌표(약 [WAYPOINT_MATCH_M] 안)가 경유지 목록에 있는지 */
-        fun isWaypoint(list: List<WaypointInfo>, lat: Double, lon: Double): Boolean =
-            list.any { distanceM(it.latitude, it.longitude, lat, lon) <= WAYPOINT_MATCH_M }
+        /**
+         * 경유지가 들어갔는지: 요청한 곳이 [after]에 있거나, 보내기 전 목록([before])을 읽었고 개수가 늘었다.
+         * 못 읽었으면(null) 개수로는 알 수 없다: 원래 있던 다른 경유지만으로 성공이라 하지 않는다 (서비스 감사 P11).
+         * 순수 함수라 JVM 테스트(NaviRulesTest)로 지킨다.
+         */
+        fun waypointAdded(before: List<WaypointInfo>?, after: List<WaypointInfo>, lat: Double, lon: Double, name: String? = null): Boolean =
+            isWaypoint(after, lat, lon, name) || (before != null && after.size > before.size)
+
+        /**
+         * 요청한 곳이 경유지 목록에 있는지. 내비는 경유지 좌표를 0.0으로 돌려주므로(2026-11-12 에뮬레이터) 보낸 이름으로 본다.
+         * 좌표가 있는 항목은 약 [WAYPOINT_MATCH_M] 안이면 같은 곳이다 (내비가 도로 위로 옮겨 붙일 수 있다).
+         * 예전에는 좌표만 봐서 기기에서는 한 번도 맞지 않았다: 같은 곳을 다시 넣지 않는 장치가 죽어 있었다.
+         */
+        fun isWaypoint(list: List<WaypointInfo>, lat: Double, lon: Double, name: String? = null): Boolean = list.any { w ->
+            (!name.isNullOrBlank() && w.name == name) ||
+                ((w.latitude != 0.0 || w.longitude != 0.0) && distanceM(w.latitude, w.longitude, lat, lon) <= WAYPOINT_MATCH_M)
+        }
 
         private fun distanceM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
             val r = 6_371_000.0

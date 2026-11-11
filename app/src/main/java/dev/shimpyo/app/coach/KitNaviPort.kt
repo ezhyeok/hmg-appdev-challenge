@@ -22,6 +22,7 @@ import dev.shimpyo.coach.TripEstimate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.mapNotNull
+import java.util.concurrent.ConcurrentHashMap
 
 /**
  * 코치 계층의 [NaviPort]를 pleos-kit [NaviKit]으로 구현한다. SDK 데이터 클래스를 코치 도메인 타입(NaviModel.kt)으로
@@ -82,8 +83,51 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
         return TripEstimate(t.distance.toDouble(), t.eta.toDouble())
     }
 
-    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): Boolean =
-        navi.addWaypoint(RequestWaypointInfo(latitude = lat, longitude = lon, poiName = name, waypointIndex = WaypointIndex.FIRST, poiId = "", address = "", poiSubId = ""))
+    /**
+     * 이 앱이 넣은 경유지 (이름 → 요청). 내비는 경유지의 좌표를 돌려주지 않아서(0.0), 순서를 다시 정할 때 좌표를 여기서 찾는다.
+     * 프로세스가 사는 동안만 안다: 재시작 뒤에는 그 전에 넣은 경유지도 '밖에서 넣은 것'이다.
+     */
+    private val sent = ConcurrentHashMap<String, RequestWaypointInfo>()
+
+    /**
+     * 경유지 추가. Pleos 내비는 새 경유지를 늘 이미 있는 경유지 뒤에 붙인다 (waypointIndex와 상관없다, 2026-11-12 에뮬레이터).
+     * 그래서 경유지가 하나 있는데 더 가까운 곳을 넣으면 먼 곳에 먼저 갔다가 되돌아오는 경로가 된다: 예전에 길안내 중
+     * 급해 결과(판교의 주유소)를 넣었더니 47km 앞 휴게소 다음(99km)으로 들어갔고 앱은 '경유지로 넣었어요'라고 했다.
+     * 경유지가 하나 있으면 새 곳까지의 거리를 재서 ([WaypointOrder])
+     * - 그 경유지보다 뒤면 그대로 붙인다.
+     * - 앞이고 그 경유지를 이 앱이 넣었으면(좌표를 안다) 목적지는 그대로 두고 경유지를 순서대로 다시 정한다 (NaviKit.setWaypoints).
+     * - 앞인데 밖에서 넣은 경유지면(좌표를 모른다) 넣지 않는다(false): 지키지도 못하고, 붙이면 지나쳐 갔다 돌아온다.
+     * 경유지가 없거나, 이미 둘이거나(내비가 버린다 → false), 같은 곳이 이미 있으면(true) kit이 처리한다.
+     */
+    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): Boolean {
+        val request = RequestWaypointInfo(latitude = lat, longitude = lon, poiName = name, waypointIndex = WaypointIndex.FIRST, poiId = "", address = "", poiSubId = "")
+        val only = runCatching { navi.waypoints() }.getOrNull()?.singleOrNull()
+        if (only == null || only.name == name) return remember(request, navi.addWaypoint(request))
+        val newDistanceM = try {
+            navi.tripEstimate(TripRequest(lat, lon, "", name, ""), timeoutMs = ORDER_TRIP_TIMEOUT_MS).distance.toDouble()
+        } catch (e: CancellationException) {
+            throw e
+        } catch (e: Exception) {
+            null
+        }
+        val existing = sent[only.name]
+        val plan = WaypointOrder.plan(only.remainDistance.toDouble(), newDistanceM, existingKnown = existing != null)
+        Log.i("Shimpyo", "waypoint $name: ${newDistanceM?.toLong()}m, existing ${only.name} ${only.remainDistance}m -> $plan")
+        return when (plan) {
+            WaypointOrder.Plan.APPEND -> remember(request, navi.addWaypoint(request))
+            WaypointOrder.Plan.INSERT_BEFORE -> {
+                val d = navi.destination()
+                val destination = RouteInfo(latitude = d.latitude, longitude = d.longitude, poiName = d.name, poiId = "", address = d.address, poiSubId = "")
+                remember(request, navi.setWaypoints(destination, listOf(request, existing!!)))
+            }
+            WaypointOrder.Plan.REFUSE -> false
+        }
+    }
+
+    private fun remember(request: RequestWaypointInfo, added: Boolean): Boolean {
+        if (added) request.poiName?.let { sent[it] = request }
+        return added
+    }
 
     override suspend fun startRoute(lat: Double, lon: Double, name: String): Boolean =
         navi.startRoute(RouteInfo(latitude = lat, longitude = lon, poiName = name, poiId = "", address = "", poiSubId = ""))
@@ -122,6 +166,11 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
         }
     }
 
+    private companion object {
+        /** 순서를 정하려고 새 경유지까지 거리를 잴 때 기다리는 시간 */
+        const val ORDER_TRIP_TIMEOUT_MS = 15_000L
+    }
+
     private fun crossS(distanceM: Double, avrKph: Double): String =
         NaviCongestion.crossingS(distanceM, avrKph, null)?.let { "%.0fs".format(it) } ?: "?"
 
@@ -137,5 +186,34 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
             is NaviEvent.DestinationArrived -> NaviChange.DESTINATION_ARRIVED
             else -> null
         }
+    }
+}
+
+/**
+ * 경유지가 하나 있을 때 새 경유지를 어떻게 넣을지 (순수 규칙, KitRulesTest). Pleos 내비는 새 경유지를 늘 뒤에 붙인다.
+ */
+object WaypointOrder {
+    enum class Plan {
+        /** 이미 있는 경유지 뒤다: 그대로 붙인다 */
+        APPEND,
+        /** 이미 있는 경유지보다 앞이고 그 좌표를 안다: 새 곳을 먼저, 있던 곳을 다음으로 다시 정한다 */
+        INSERT_BEFORE,
+        /** 앞인데 있던 경유지의 좌표를 모른다 (운전자가 내비에서 넣었다): 넣지 않는다 */
+        REFUSE,
+    }
+
+    /** 이만큼은 앞이어야 '앞'으로 본다 (경로 거리와 직접 잰 거리의 차이, 휴게소 진입로) */
+    const val BEFORE_MARGIN_M = 1_000.0
+
+    /**
+     * @param existingRemainM 있던 경유지까지 남은 경로 거리
+     * @param newDistanceM 새 곳까지 잰 거리. 재지 못했으면 null: 순서를 알 수 없으니 예전처럼 붙인다
+     * @param existingKnown 있던 경유지의 좌표를 아는지 (이 앱이 넣었는지)
+     */
+    fun plan(existingRemainM: Double, newDistanceM: Double?, existingKnown: Boolean): Plan = when {
+        newDistanceM == null || newDistanceM.isNaN() -> Plan.APPEND
+        newDistanceM >= existingRemainM - BEFORE_MARGIN_M -> Plan.APPEND
+        existingKnown -> Plan.INSERT_BEFORE
+        else -> Plan.REFUSE
     }
 }

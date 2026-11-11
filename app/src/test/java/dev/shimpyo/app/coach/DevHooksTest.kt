@@ -104,11 +104,13 @@ class DevHooksTest {
     }
 
     @Test
-    fun onlyTheServiceReadsIntentExtrasAndOnlyThroughDevHooks() {
+    fun intentExtrasAreReadOnlyByTheLauncherAndTheServiceThroughTheirFilters() {
+        // 화면(MainActivity)은 LaunchExtras.pick이 고른 값만 넘기고(ReleaseSurfaceTest), 서비스는 DevHooks의 이름만 읽는다.
+        // 그 밖에 extras를 읽는 곳이 생기면 빌드 종류를 가리지 않는 새 입구가 된다
         val readers = Regex("\\.get(?:Boolean|String|Int|Long|Float|Double|Parcelable|Serializable|Bundle)?Extra\\(([^,)]*)")
         val found = kotlinFiles("src/main/java").flatMap { f -> readers.findAll(f.readText()).map { f.name to it.groupValues[1].trim() }.toList() }
-        assertTrue("extras를 읽는 곳을 하나도 못 찾았다 (시험이 낡았다)", found.isNotEmpty())
-        val outside = found.filter { (file, key) -> file != "CoachService.kt" || !key.startsWith("DevHooks.EXTRA_") }
+        assertTrue("extras를 읽는 곳을 하나도 못 찾았다 (시험이 낡았다)", found.any { it.first == "CoachService.kt" })
+        val outside = found.filter { (file, key) -> file != "MainActivity.kt" && (file != "CoachService.kt" || !key.startsWith("DevHooks.EXTRA_")) }
         assertTrue("DevHooks를 거치지 않고 extras를 읽는다: $outside", outside.isEmpty())
         val service = File("src/main/java/dev/shimpyo/app/coach/CoachService.kt").readText()
         assertTrue("서비스는 빌드 종류를 DevHooks에 넘긴다", "debugBuild = BuildConfig.DEBUG" in service)

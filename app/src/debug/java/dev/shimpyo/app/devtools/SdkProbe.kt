@@ -31,6 +31,7 @@ import ai.pleos.playground.tts.constant.ErrorType as TtsErrorType
  * - `wp`: 경유지 목록
  * - `wp-add:<FIRST|SECOND>:<위도>,<경도>:<이름>`: 그 자리에 경유지를 넣고 20초 동안 목록과 이벤트를 본다
  * - `wp-rm:<FIRST|SECOND|ALL>`: 경유지를 뺀다
+ * - `wp-set:<위도>,<경도>,<이름>;<위도>,<경도>,<이름>`: 목적지는 그대로 두고 경유지를 이 순서로 다시 정한다 (NaviKit.setWaypoints)
  * - `route:<위도>,<경도>:<이름>` / `route-cancel`: 길안내 시작 / 끝
  * - `tts:<stop-mid|stop-idle|stop-then-speak|stop-early>`: 말하기를 끊어 보고 이벤트 순서를 본다
  * - `stt:<stop-then-request>`: 듣기를 끊고 곧바로 다시 듣는다
@@ -54,6 +55,7 @@ class SdkProbe(
                 "wp" -> waypoints(name)
                 "wp-add" -> addWaypoint(name, WaypointIndex.valueOf(parts[1]), parts[2])
                 "wp-rm" -> removeWaypoint(name, WaypointIndex.valueOf(parts[1]))
+                "wp-set" -> setWaypoints(name, command.substringAfter(":"))
                 "route" -> route(name, parts[1], parts.getOrElse(2) { "목적지" })
                 "route-cancel" -> log(name, "cancelled=${connectedNavi().cancelRoute()}")
                 "tts" -> ttsProbe(name, parts.getOrElse(1) { "stop-mid" })
@@ -120,6 +122,19 @@ class SdkProbe(
         }
         log(name, "after=${describe(last)} mode=${n.routeState().naviMode}")
         events.cancel()
+    }
+
+    private suspend fun setWaypoints(name: String, spec: String) {
+        val n = connectedNavi()
+        val list = spec.split(";").map { one ->
+            val f = one.split(",", limit = 3)
+            RequestWaypointInfo(latitude = f[0].toDouble(), longitude = f[1].toDouble(), poiName = f[2], waypointIndex = WaypointIndex.FIRST, poiId = "", address = "", poiSubId = "")
+        }
+        val d = n.destination()
+        log(name, "before=${describe(n.waypoints())} destination=${d.name}@${d.latitude},${d.longitude} ${d.remainDistance}m")
+        val ok = n.setWaypoints(RouteInfo(latitude = d.latitude, longitude = d.longitude, poiName = d.name, poiId = "", address = d.address, poiSubId = ""), list)
+        val after = n.destination()
+        log(name, "confirmed=$ok after=${describe(n.waypoints())} destination=${after.name} ${after.remainDistance}m mode=${n.routeState().naviMode}")
     }
 
     private suspend fun removeWaypoint(name: String, index: WaypointIndex) {

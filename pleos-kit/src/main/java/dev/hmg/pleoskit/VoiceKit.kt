@@ -183,7 +183,9 @@ class SttKit(
         val completed = CompletableDeferred<Unit>()
     }
 
-    private val turns = TurnRunner<End>("STT", SdkThreads.voice) { raw.stop() }
+    // 멈춘 듣기의 끝남 이벤트는 짧게만 기다린다: 에뮬레이터의 STT는 request 뒤 약 8초에 Ready를 주고, 그 전에 stop 하면
+    // onEndedRecognition이 오지 않았다 (2026-11-12 SdkProbe `stt`). 길게 기다리면 다음 듣기의 마이크가 그만큼 늦게 열린다
+    private val turns = TurnRunner<End>("STT", SdkThreads.voice, confirmMs = STOP_CONFIRM_MS) { raw.stop() }
     private val connectMutex = Mutex()
 
     @Volatile
@@ -299,5 +301,6 @@ class SttKit(
     companion object {
         const val CONNECT_TIMEOUT_MS = 30_000L
         const val LISTEN_TIMEOUT_MS = 10_000L
+        const val STOP_CONFIRM_MS = 400L
     }
 }
