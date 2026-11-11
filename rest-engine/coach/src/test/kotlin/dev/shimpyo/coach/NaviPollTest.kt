@@ -27,6 +27,19 @@ class NaviPollTest {
     }
 
     @Test
+    fun aFrozenNaviIsAskedForTbtOnlyAsOftenAsForTheRoute() {
+        // 2026-11-12 에뮬레이터: 내비는 판교에 서 있어(남은 거리 그대로) TBT도 바뀌지 않는데 5초마다 물어 1분에 20번 요청했다.
+        // 내비 위치에서 잰 TBT는 내비가 움직여야 바뀐다: 경로 조회(15초)보다 자주 물을 까닭이 없다
+        assertEquals(NaviPoll.ROUTE_MS, NaviPoll.tbtIntervalMs(30_000.0, 80.0, speedKnown = true, trusted = false, afterReset = false, naviFrozen = true))
+        assertEquals("경로가 막 바뀌었으면 그래도 5초", NaviPoll.NEAR_MS, NaviPoll.tbtIntervalMs(30_000.0, 80.0, true, false, afterReset = true, naviFrozen = true))
+        assertEquals("내비가 움직이면 예전 규칙", NaviPoll.NEAR_MS, NaviPoll.tbtIntervalMs(30_000.0, 80.0, true, false, afterReset = false, naviFrozen = false))
+        org.junit.Assert.assertTrue("남은 거리 그대로 + 차는 416m", NaviPoll.naviFrozen(200_000.0, 0.0, 200_000.0, 416.0, wasFrozen = false))
+        org.junit.Assert.assertFalse("내비가 나아갔다", NaviPoll.naviFrozen(200_000.0, 0.0, 199_600.0, 416.0, wasFrozen = true))
+        org.junit.Assert.assertTrue("거의 서 있으면 판단을 바꾸지 않는다", NaviPoll.naviFrozen(200_000.0, 0.0, 200_000.0, 100.0, wasFrozen = true))
+        org.junit.Assert.assertFalse("남은 거리를 모르면 판단을 바꾸지 않는다", NaviPoll.naviFrozen(null, 0.0, 200_000.0, 416.0, wasFrozen = false))
+    }
+
+    @Test
     fun odometerIsTrustedOnlyWhenTheNaviConfirmsProgress() {
         // 15초 동안 400m 달렸고 내비 남은 거리도 380m 줄었다 → 믿는다
         assertEquals(NaviPoll.Progress(trusted = true, rerouted = false), NaviPoll.checkProgress(100_000.0, 0.0, 99_620.0, 400.0, wasTrusted = false))

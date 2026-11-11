@@ -1,5 +1,6 @@
 package dev.shimpyo.coach
 
+import dev.shimpyo.engine.CoachConfig
 import dev.shimpyo.engine.CoachEngine
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.PersonalMemory
@@ -17,7 +18,7 @@ import kotlinx.coroutines.flow.Flow
 // ------------------------------------------------------------ 시간
 
 /**
- * 엔진과 모드별 상태가 쓰는 시각(epoch ms). 시연에서는 가상 시각이다(DemoDirector).
+ * 엔진과 모드별 상태가 쓰는 시각(epoch ms). 시연에서는 가상 시각이다(DemoRun).
  * 정차 기록·질문 만료처럼 '엔진이 보는 시각'에 쓴다.
  */
 fun interface CoachClock {
@@ -150,9 +151,12 @@ fun interface UiSink {
     fun update(transform: CoachUiState.() -> CoachUiState)
 }
 
-/** 엔진 만들기. 테스트는 고정 Random으로 재현 가능한 엔진을 넘긴다 */
+/**
+ * 엔진 만들기. 테스트는 고정 Random으로 재현 가능한 엔진을 넘긴다.
+ * [config]는 세계가 정한다(CoachWorld.engineConfig): 시연은 시각이 배속으로 흘러 질문 수명을 배속만큼 늘린다.
+ */
 fun interface EngineFactory {
-    fun create(profile: TripProfile, memory: PersonalMemory): CoachEngine
+    fun create(profile: TripProfile, memory: PersonalMemory, config: CoachConfig): CoachEngine
 }
 
 interface CoachLog {

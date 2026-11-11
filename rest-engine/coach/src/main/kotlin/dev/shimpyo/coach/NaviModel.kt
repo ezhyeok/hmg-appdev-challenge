@@ -20,17 +20,67 @@ enum class NaviMode {
     val hasRoute: Boolean get() = this == ROUTE_GUIDING || this == SIMULATION_GUIDING
 }
 
-/** TrafficCongestionInfo. offset의 기준(출발지/현재 위치)은 미확인이라 CongestionBasis가 주행 중에 판정한다 */
+/**
+ * TrafficCongestionInfo. offset의 기준(출발지/현재 위치)은 미확인이라 CongestionBasis가 주행 중에 판정한다.
+ *
+ * [durationS]는 **이 구간을 지나는 시간**(엔진 CongestionSegment.durationS와 같은 뜻)이다. SDK의 trafficCongestionTime은 그것이 아니라
+ * 분 단위로 반올림한 늘어난 시간이다(최소 1분): 2026-11-12 에뮬레이터에서 30~100m 항목이 모두 60초였고(평균 속도로는 1~16초),
+ * 요약 5,900m·35km/h가 300초였다(평균 속도로는 약 600초). 그래서 지나는 시간은 거리 ÷ 평균 속도(avrSpeed, km/h)로 구한다
+ * ([crossingS]). 원래 값은 [delayS]·[avrSpeedKph]로 남긴다(로그·화면 설명용). CLAUDE.md 'API 사용 시 주의'.
+ */
 data class NaviCongestion(
     val offsetM: Double,
     val lengthM: Double,
-    /** trafficCongestionTime (초) */
+    /** 구간을 지나는 시간 (초). [fromNavi]가 평균 속도로 구한다 */
     val durationS: Double,
     val type: String,
     val roadName: String,
     val startName: String,
     val endName: String,
-)
+    /** 내비가 준 trafficCongestionTime (초, 분 단위 반올림한 늘어난 시간). 모르면 null */
+    val delayS: Double? = null,
+    /** 내비가 준 구간 평균 속도 (km/h). 모르면 null */
+    val avrSpeedKph: Double? = null,
+) {
+    companion object {
+        /**
+         * 평균 속도를 쓸 수 없을 때의 자유 흐름 속도 (km/h). 실측 요약에서 '늘어난 시간 = 지나는 시간 × (1 - 평균/자유)'로 거꾸로 구하면
+         * 70~86km/h(분 반올림 오차 안)였고, 엔진이 고속도로 평균 속도로 쓰는 값(CoachConfig.highwayAvgSpeedKph)도 80이라 80으로 둔다.
+         */
+        const val FREE_FLOW_KPH = 80.0
+        /** 이보다 느린 평균 속도는 믿지 않는다 (0이나 소수점 잡음이면 지나는 시간이 끝없이 길어진다) */
+        const val MIN_SPEED_KPH = 1.0
+        /** 지나는 시간의 상한 (6시간). 명절 귀성길 정체도 이 안이다. 깨진 값이 엔진의 도착 시간을 하루 뒤로 밀지 않게 */
+        const val MAX_CROSSING_S = 6 * 3_600.0
+
+        /**
+         * 구간을 지나는 시간 (초). 평균 속도를 쓸 수 있으면 거리 ÷ 평균 속도, 아니면 자유 흐름 시간 + 늘어난 시간(자유 흐름보다 짧지 않다).
+         * 길이가 깨졌으면(NaN·무한·0 이하) null (항목을 버린다)
+         */
+        fun crossingS(lengthM: Double, avrSpeedKph: Double?, delayS: Double?, freeSpeedKph: Double = FREE_FLOW_KPH): Double? {
+            if (!lengthM.isFinite() || lengthM <= 0.0) return null
+            val s = if (avrSpeedKph != null && avrSpeedKph.isFinite() && avrSpeedKph >= MIN_SPEED_KPH) {
+                lengthM / (avrSpeedKph / 3.6)
+            } else {
+                lengthM / (freeSpeedKph / 3.6) + (delayS?.takeIf { it.isFinite() && it > 0.0 } ?: 0.0)
+            }
+            return s.coerceAtMost(MAX_CROSSING_S)
+        }
+
+        /** SDK 항목 하나 (KitNaviPort). 길이·위치가 깨졌으면 null */
+        fun fromNavi(
+            offsetM: Double, lengthM: Double, delayS: Double?, avrSpeedKph: Double?,
+            type: String, roadName: String, startName: String, endName: String,
+        ): NaviCongestion? {
+            if (!offsetM.isFinite()) return null
+            val crossing = crossingS(lengthM, avrSpeedKph, delayS) ?: return null
+            return NaviCongestion(
+                offsetM, lengthM, crossing, type, roadName, startName, endName,
+                delayS = delayS?.takeIf { it.isFinite() }, avrSpeedKph = avrSpeedKph?.takeIf { it.isFinite() },
+            )
+        }
+    }
+}
 
 /** RouteStateInfo 중 코치가 쓰는 것 */
 data class NaviRouteStatus(

@@ -99,4 +99,6 @@ dependencies {
     testImplementation("junit:junit:4.13.2")
     // 가상 시간으로 코치 루프·내비 조회 간격을 시험한다 (runTest, TestCoroutineScheduler)
     testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
+    // 저장소의 JSON 변환을 JVM에서 시험한다 (안드로이드 스텁의 org.json은 빈 값만 돌려준다)
+    testImplementation("org.json:json:20240303")
 }

@@ -42,7 +42,7 @@ class TbtDigestTest {
                 item(TbtType.REST_AREA, 1_000.0, "망향졸음쉼터"),
                 item(TbtType.REST_AREA, 1_000.0, "죽암휴게소"),
                 item(TbtType.SERVICE_AREA, 1_000.0, "안성하이패스센터"), // 화장실 없는 서비스 시설: 뺀다
-                item(TbtType.REST_AREA, 1_000.0, "간이휴게시설"), // 이름이 애매하면 TBT 종류
+                item(TbtType.REST_AREA, 1_000.0, "간이휴게시설"), // '휴게시설' = 휴게소 (StopNames.facilityKind)
                 item(TbtType.OTHER, 1_000.0, "신탄진졸음쉼터 방면"), // 회전 안내는 시설이 아니다
             ),
         ).map { it.name to it.kind }
@@ -52,7 +52,7 @@ class TbtDigestTest {
                 "옥산휴게소(부산방향)" to StopKind.HIGHWAY_REST_AREA,
                 "망향졸음쉼터" to StopKind.DROWSY_SHELTER,
                 "죽암휴게소" to StopKind.HIGHWAY_REST_AREA,
-                "간이휴게시설" to StopKind.DROWSY_SHELTER,
+                "간이휴게시설" to StopKind.HIGHWAY_REST_AREA,
             ),
             kinds,
         )

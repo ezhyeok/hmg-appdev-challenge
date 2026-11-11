@@ -34,8 +34,15 @@ object NaviPoll {
      * 5초로 받는 경우: 차속을 모르거나 주행 거리 보정을 아직 못 믿을 때, TBT가 비어 있을 때(길안내 중 경로에는 목적지라도 있다),
      * 경로가 막 바뀌었을 때, 다음 화장실·회전이 [NEAR_M] 안일 때.
      */
-    fun tbtIntervalMs(nextOpportunityM: Double?, nextManeuverM: Double?, speedKnown: Boolean, trusted: Boolean, afterReset: Boolean): Long {
-        if (!speedKnown || !trusted || afterReset) return NEAR_MS
+    fun tbtIntervalMs(
+        nextOpportunityM: Double?, nextManeuverM: Double?, speedKnown: Boolean, trusted: Boolean, afterReset: Boolean,
+        naviFrozen: Boolean = false,
+    ): Long {
+        if (afterReset) return NEAR_MS
+        // 내비가 서 있다(남은 거리가 그대로인데 차는 달린다: 에뮬레이터, 위치를 잃은 내비). 내비 위치에서 잰 TBT도 그대로라
+        // 경로 조회보다 자주 물을 까닭이 없다. 다시 움직이면 다음 경로 조회(15초 안)에서 알고 5초로 돌아간다 (2026-11-12)
+        if (naviFrozen) return ROUTE_MS
+        if (!speedKnown || !trusted) return NEAR_MS
         val nearest = listOfNotNull(nextOpportunityM, nextManeuverM).minOrNull() ?: return NEAR_MS
         return if (nearest < NEAR_M) NEAR_MS else FAR_MS
     }
@@ -57,6 +64,16 @@ object NaviPoll {
         if (rerouted) return Progress(trusted = false, rerouted = true)
         if (odo < 300.0) return Progress(wasTrusted, rerouted = false)
         return Progress(trusted = navi >= 0.5 * odo, rerouted = false)
+    }
+
+    /**
+     * 내비가 서 있는지: 직전 경로 조회 뒤 차가 300m 넘게 달렸는데 내비 남은 거리가 그대로(1m 안)면 그렇다. 남은 거리를 모르거나
+     * 거의 서 있으면(300m 미만) 판단을 바꾸지 않는다 ([wasFrozen])
+     */
+    fun naviFrozen(prevRemainM: Double?, prevOdometerM: Double, remainM: Double?, odometerM: Double, wasFrozen: Boolean): Boolean {
+        if (prevRemainM == null || remainM == null) return wasFrozen
+        if (odometerM - prevOdometerM < 300.0) return wasFrozen
+        return kotlin.math.abs(remainM - prevRemainM) < 1.0
     }
 
     /** TBT를 받은 뒤 [movedM]만큼 달렸으면 경로 위 기회의 거리를 줄인다. 지나친 곳(0 미만)은 뺀다 */

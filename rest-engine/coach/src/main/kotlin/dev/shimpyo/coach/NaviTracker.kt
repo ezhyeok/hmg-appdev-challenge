@@ -64,6 +64,8 @@ class NaviTracker(
     private var fastUntil = Long.MIN_VALUE
     private var prevRemainM: Double? = null
     private var prevRemainOdometerM = 0.0
+    /** 내비가 서 있다 (NaviPoll.naviFrozen): TBT를 경로 조회만큼만 묻는다 */
+    private var naviFrozen = false
     private var lastRequestAt: Long? = null
     private val failures = HashMap<String, Int>()
 
@@ -150,7 +152,9 @@ class NaviTracker(
         }
         val odoAt = odometer.meters // 내비는 요청 시점의 위치에서 잰다
         val dest = call("destination") { navi.destination() }
-        val remain = dest?.remainDistanceM?.takeIf { it.isFinite() && it >= 0.0 }
+        // 길안내 모드인데 남은 거리 0은 도착이 아니라 깨진 응답이다(도착하면 모드가 바뀐다). 2026-11-12 에뮬레이터에서 응답 하나만
+        // 0으로 왔다가 돌아와 재탐색이 두 번 잡혔다. 못 읽은 것으로 본다 (같은 경로면 지난 값을 둔다)
+        val remain = dest?.remainDistanceM?.takeIf { it.isFinite() && it > 0.0 }
         val usable = remain != null
         nextRouteAt = startedAt + if (usable) NaviPoll.ROUTE_MS else NaviPoll.NEAR_MS
 
@@ -171,6 +175,9 @@ class NaviTracker(
             newEpoch(prev, status, dest, remain, odoAt, "rerouted (remain ${prevRemainM?.toInt()} -> ${remain!!.toInt()} m)")
             return
         }
+        val frozen = NaviPoll.naviFrozen(prevRemainM, prevRemainOdometerM, remain, odoAt, naviFrozen)
+        if (frozen != naviFrozen) log.i(if (frozen) "navi frozen: tbt at the route pace" else "navi moving again: tbt every 5 s")
+        naviFrozen = frozen
         prevRemainM = remain
         prevRemainOdometerM = odoAt
         publish(
@@ -189,6 +196,7 @@ class NaviTracker(
         val epoch = prev.epoch + 1
         log.i("navi epoch $epoch: $why")
         routeChangePending = false
+        naviFrozen = false
         // 경로 시작을 봤는지: 처음 조회부터 길안내 중이면(앱이 길안내 중간에 켜짐) 출발지를 모른다
         congestion.start(remain, originKnown = prev.route != null)
         prevRemainM = remain
@@ -218,6 +226,7 @@ class NaviTracker(
         routeChangePending = false
         congestion.clear()
         prevRemainM = null
+        naviFrozen = false
         tbtForced = false
         lastTbtAt = null
         tbtRetryAt = null
@@ -255,6 +264,7 @@ class NaviTracker(
             speedKnown = speedKnown(),
             trusted = s.odometerTrusted,
             afterReset = now < fastUntil,
+            naviFrozen = naviFrozen,
         )
         return last + interval
     }

@@ -166,7 +166,8 @@ class NaviKit(context: Context) {
     /** 현재 경유지 목록. */
     suspend fun waypoints(): List<WaypointInfo> = mutex.withLock { waypointsLocked() }
 
-    suspend fun isGuiding(): Boolean = routeState().naviMode == NaviMode.ROUTE_GUIDING
+    /** 경로가 있는 길안내인지 (내비 모의 주행 포함) */
+    suspend fun isGuiding(): Boolean = hasRoute(routeState().naviMode)
 
     /**
      * 길안내를 시작하지 않고 목적지까지의 거리(m), 소요 시간(초), 도착 시 예상 SOC(%)를 받는다.
@@ -187,7 +188,8 @@ class NaviKit(context: Context) {
 
     /**
      * 목적지로 길안내를 시작한다. 내비 앱이 화면 앞으로 온다.
-     * [confirmTimeoutMs] 안에 `naviMode`가 `ROUTE_GUIDING`이 되면 true.
+     * [confirmTimeoutMs] 안에 경로가 있는 모드(`ROUTE_GUIDING`, 모의 주행 `SIMULATION_GUIDING`)가 되면 true.
+     * 예전에는 `ROUTE_GUIDING`만 봐서 모의 주행 중에는 길안내가 시작돼도 실패로 알렸다 (구조 리뷰 D12, B8).
      */
     suspend fun startRoute(destination: RouteInfo, confirmTimeoutMs: Long = 45_000): Boolean = mutex.withLock {
         command("requestRoute") { raw.requestRoute(destination) }
@@ -204,11 +206,16 @@ class NaviKit(context: Context) {
     /**
      * 길안내 중인 경로에 경유지를 추가한다. 경유지 목록에 반영되면 true.
      * 좌표와 이름은 앱이 직접 구해야 한다(NaviHelper에는 POI 검색이 없다).
+     *
+     * 확인: 보내기 전 목록을 읽었으면 개수가 늘었는지, 못 읽었으면 요청한 좌표(약 [WAYPOINT_MATCH_M] 안)의 경유지가 목록에 있는지 본다.
+     * 예전에는 보내기 전 조회가 실패하면 0개로 보고 '1개 이상'이면 성공이라 해서, 원래 있던 경유지만으로도 거짓 성공을 냈다 (서비스 감사 P11).
      */
     suspend fun addWaypoint(waypoint: RequestWaypointInfo, confirmTimeoutMs: Long = 30_000): Boolean = mutex.withLock {
-        val before = runCatching { waypointsLocked().size }.getOrDefault(0)
+        val before = runCatching { waypointsLocked() }.getOrNull()
+        // 이미 경유지면 다시 넣지 않는다: 같은 곳을 또 보내면 목록이 늘지 않아 '확인 실패'가 됐다 (2026-11-12 에뮬레이터)
+        if (before != null && isWaypoint(before, waypoint.latitude, waypoint.longitude)) return@withLock true
         command("addWaypoint") { raw.addWaypoint(waypoint) }
-        pollUntil(confirmTimeoutMs) { waypointsLocked().size > before }
+        pollUntil(confirmTimeoutMs) { waypointAdded(before, waypointsLocked(), waypoint.latitude, waypoint.longitude) }
     }
 
     /** 경유지를 지운다. */
@@ -236,7 +243,7 @@ class NaviKit(context: Context) {
         query<NaviEvent.Waypoints>("getWaypointInfo") { raw.getWaypointInfo() }.list
 
     private suspend fun awaitGuiding(guiding: Boolean, timeoutMs: Long): Boolean =
-        pollUntil(timeoutMs) { (routeStateLocked().naviMode == NaviMode.ROUTE_GUIDING) == guiding }
+        pollUntil(timeoutMs) { hasRoute(routeStateLocked().naviMode) == guiding }
 
     /** [check]가 true를 줄 때까지 2초 간격으로 다시 확인한다. 조회 실패는 다음 시도로 넘긴다. */
     private suspend fun pollUntil(timeoutMs: Long, check: suspend () -> Boolean): Boolean {
@@ -290,5 +297,29 @@ class NaviKit(context: Context) {
         /** 경로 변경 명령 사이의 최소 간격. */
         const val COMMAND_GAP_MS = 3000L
         const val QUERY_TIMEOUT_MS = 15_000L
+        /** 경유지 좌표가 요청과 같은 곳으로 볼 거리 (내비가 도로 위로 옮겨 붙일 수 있다) */
+        const val WAYPOINT_MATCH_M = 300.0
+
+        /** 경로가 있는 길안내 모드. 길안내 여부는 이것 하나로만 판단한다 (모의 주행도 경로가 있다) */
+        fun hasRoute(mode: NaviMode): Boolean = mode == NaviMode.ROUTE_GUIDING || mode == NaviMode.SIMULATION_GUIDING
+
+        /**
+         * 경유지가 들어갔는지. [before]를 읽었으면 개수가 늘었는지, 못 읽었으면(null) 요청 좌표의 경유지가 있는지로 본다.
+         * 순수 함수라 JVM 테스트(NaviKitRulesTest)로 지킨다.
+         */
+        fun waypointAdded(before: List<WaypointInfo>?, after: List<WaypointInfo>, lat: Double, lon: Double): Boolean =
+            if (before != null) after.size > before.size else isWaypoint(after, lat, lon)
+
+        /** 요청한 좌표(약 [WAYPOINT_MATCH_M] 안)가 경유지 목록에 있는지 */
+        fun isWaypoint(list: List<WaypointInfo>, lat: Double, lon: Double): Boolean =
+            list.any { distanceM(it.latitude, it.longitude, lat, lon) <= WAYPOINT_MATCH_M }
+
+        private fun distanceM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
+            val r = 6_371_000.0
+            val dLat = Math.toRadians(lat2 - lat1)
+            val dLon = Math.toRadians(lon2 - lon1)
+            val a = Math.sin(dLat / 2).let { it * it } + Math.cos(Math.toRadians(lat1)) * Math.cos(Math.toRadians(lat2)) * Math.sin(dLon / 2).let { it * it }
+            return 2 * r * Math.asin(Math.sqrt(a))
+        }
     }
 }

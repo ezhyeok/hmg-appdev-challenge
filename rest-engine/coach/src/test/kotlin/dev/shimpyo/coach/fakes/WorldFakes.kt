@@ -40,9 +40,9 @@ val KID = Occupant("kid", OccupantType.CHILD, ageYears = 7, label = "아이")
 class FakeSettings(
     occupants: List<Occupant> = listOf(DRIVER),
     var sleepHours: Float? = null,
-    override val autoFreshAir: Boolean = false,
-    override val voiceEnabled: Boolean = true,
-    override val healthConsent: Boolean = false,
+    override var autoFreshAir: Boolean = false,
+    override var voiceEnabled: Boolean = true,
+    override var healthConsent: Boolean = false,
 ) : SettingsPort {
     var occupantWrites = 0
         private set
@@ -91,4 +91,4 @@ class InMemoryTripStore(var stored: TripHeartbeat? = null) : TripStorePort {
 }
 
 /** 재현 가능한 엔진 (톰프슨 샘플링 난수 고정) */
-fun seededEngines(seed: Int = 42) = EngineFactory { profile, memory -> CoachEngine(profile = profile, memory = memory, random = Random(seed)) }
+fun seededEngines(seed: Int = 42) = EngineFactory { profile, memory, config -> CoachEngine(config = config, profile = profile, memory = memory, random = Random(seed)) }

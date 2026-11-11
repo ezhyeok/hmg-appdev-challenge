@@ -84,7 +84,7 @@ class CongestionBasis {
 | 무엇 | 언제 |
 |---|---|
 | 경로 상태 + 목적지 | 15초. 실패하거나 남은 거리를 못 읽으면 5초 뒤 |
-| TBT | 경로가 있는 길안내(ROUTE_GUIDING, SIMULATION_GUIDING) 중에만. 기본 5초, 다음 화장실·회전이 8km 넘게 멀고 보정을 믿으면 20초. 새 epoch·`requestRefresh` 뒤 30초는 5초. 실패하면 5초 뒤 |
+| TBT | 경로가 있는 길안내(ROUTE_GUIDING, SIMULATION_GUIDING) 중에만. 기본 5초, 다음 화장실·회전이 8km 넘게 멀고 보정을 믿으면 20초. 내비가 서 있으면(차는 300m 넘게 달렸는데 남은 거리가 그대로: 에뮬레이터, 위치를 잃은 내비) 경로 조회와 같은 15초(TBT도 내비 위치에서 재므로 바뀌지 않는다, 2026-11-12 추가). 새 epoch·`requestRefresh` 뒤 30초는 5초. 실패하면 5초 뒤 |
 | 이벤트·`requestRefresh` | 곧바로 경로 + TBT. 단 내비 요청은 1초에 한 번까지 (몰려도 합친다) |
 | 위치 대체 | `LocationFallback.wanted()`가 참일 때 (루프마다 확인, 5초 이하) |
 | 연결 | 실패하면 2초, 4초, 8초 … 최대 1분 간격으로 계속 (서비스 감사 D13) |
@@ -127,6 +127,10 @@ class CongestionBasis {
 
 ## 7. 정체 offset 기준 판정 (`CongestionBasis`)
 
+먼저 시간: NaviHelper의 `trafficCongestionTime`은 구간을 지나는 시간이 아니라 분 단위로 반올림한 늘어난 시간이다(최소 1분, 2026-11-12 실측,
+CLAUDE.md). 엔진은 `durationS`를 지나는 시간으로 쓰므로 포트 경계(`KitNaviPort` → `NaviCongestion.fromNavi`)에서 거리 ÷ 평균 속도로 바꾼다
+(`NaviCongestion.crossingS`, 평균 속도가 없으면 자유 흐름 80km/h + 늘어난 시간, 상한 6시간, 깨진 길이는 버림). 테스트 `NaviCongestionTest`.
+
 NaviHelper의 정체 `offset`이 출발지 기준인지 현재 위치 기준인지 문서에 없고, 에뮬레이터 내비는 움직이지 않아 확인하지 못했다. 그래서 주행 중에 판정한다.
 
 - 같은 구간(도로명 + 시작 교차로)을 처음 본 뒤 내비 남은 거리가 1km 이상 줄면 한 표: offset도 그만큼(±30%) 줄었으면 FROM_CAR, 거의 그대로(이동의 20% 안)면 FROM_ORIGIN, 아니면 표 없음(정체가 자라거나 줄었다).
@@ -163,7 +167,8 @@ NaviHelper의 정체 `offset`이 출발지 기준인지 현재 위치 기준인�
 |---|---|
 | 길안내 아님 → 경로 15초, TBT·목적지 조회 없음 | `NaviTrackerTest.notGuidingPollsTheRouteEvery15sAndNeverAsksTbtOrDestination` |
 | SAFE_GUIDING = 경로 없음 | `safeGuidingHasNoRouteSoItIsIdle`, `NaviPollTest.safeGuidingWithoutARouteIsNotGuiding` |
-| 길안내 + 보정 못 믿음(내비가 서 있음) → TBT 5초 | `guidingWithAnUntrustedOdometerPollsTbtEvery5s` |
+| 길안내 + 내비가 서 있음 → 30초 뒤부터 TBT 15초 (예전 5초, 2026-11-12 기기 측정 뒤 바꿈) | `aFrozenNaviIsAskedForTbtAtTheRoutePaceAfterTheFastWindow`, `NaviPollTest.aFrozenNaviIsAskedForTbtOnlyAsOftenAsForTheRoute` |
+| 보정 못 믿음이지만 내비는 움직임 → 5초 / 서 있다가 다시 움직임 → 5초로 | `aNaviThatMovesAtAnotherPaceIsStillAskedEvery5s`, `aFrozenNaviThatStartsMovingIsAskedEvery5sAgain` |
 | 믿음 + 멂 → 30초 뒤부터 20초 | `trustedAndFarPollsTbtEvery20sAfterTheFastWindow` |
 | 화장실 8km 안 → 5초 | `aNearOpportunityKeepsTbtAt5sEvenWhenTrusted` |
 | `requestRefresh(false)` → 즉시, 30초 동안 5초, epoch 그대로 | `requestRefreshPollsAtOnceThenTbtEvery5sFor30s` |

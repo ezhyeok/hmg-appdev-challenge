@@ -97,17 +97,44 @@ class NaviTrackerTest {
     }
 
     @Test
-    fun guidingWithAnUntrustedOdometerPollsTbtEvery5s() = runTest {
-        // 에뮬레이터: 내비는 판교에 서 있고(남은 거리 그대로) 차는 Virtual Console 차속으로 달린다 → 보정을 믿지 않는다
+    fun aFrozenNaviIsAskedForTbtAtTheRoutePaceAfterTheFastWindow() = runTest {
+        // 에뮬레이터: 내비는 판교에 서 있고(남은 거리 그대로) 차는 Virtual Console 차속으로 달린다 → 보정을 믿지 않는다.
+        // 예전에는 이때 TBT를 5초마다 물었다(1분 20번). 내비가 서 있으면 TBT도 바뀌지 않으니 경로 조회만큼만 묻는다 (2026-11-12)
         val r = Rig(this)
         r.navi.mode = { NaviMode.ROUTE_GUIDING }
         r.navi.destination = { dest(200_000.0) }
         r.navi.tbt = { listOf(TbtItem(TbtType.OTHER, 30_000.0, "분기"), TbtItem(TbtType.SERVICE_AREA, 20_000.0, "죽암휴게소")) }
         r.start()
         advanceTimeBy(60_001)
-        assertEquals(every(5_000, 0, 60_000), r.navi.times("tbt"))
+        assertEquals("시작 30초는 5초, 내비가 서 있다고 안 뒤로는 15초", every(5_000, 0, 25_000) + listOf(40_000L, 55_000L), r.navi.times("tbt"))
         assertEquals(every(15_000, 0, 60_000), r.navi.times("routeStatus"))
         assertFalse(r.snap.odometerTrusted)
+    }
+
+    @Test
+    fun aNaviThatMovesAtAnotherPaceIsStillAskedEvery5s() = runTest {
+        // 보정을 못 믿지만 내비는 움직인다(차속이 틀림): TBT가 바뀌므로 예전처럼 5초
+        val r = Rig(this)
+        r.navi.mode = { NaviMode.ROUTE_GUIDING }
+        r.navi.destination = { dest(200_000.0 - r.odo.meters * 0.3) }
+        r.navi.tbt = { listOf(TbtItem(TbtType.OTHER, 30_000.0, "분기"), TbtItem(TbtType.SERVICE_AREA, 20_000.0, "죽암휴게소")) }
+        r.start()
+        advanceTimeBy(60_001)
+        assertFalse(r.snap.odometerTrusted)
+        assertEquals(every(5_000, 0, 60_000), r.navi.times("tbt"))
+    }
+
+    @Test
+    fun aFrozenNaviThatStartsMovingIsAskedEvery5sAgain() = runTest {
+        val r = Rig(this)
+        r.navi.mode = { NaviMode.ROUTE_GUIDING }
+        // 45초까지 서 있다가 움직인다 (터널을 나와 위치를 다시 잡음)
+        r.navi.destination = { dest(if (r.scope.testScheduler.currentTime < 45_000) 200_000.0 else 200_000.0 - (r.odo.meters - 1_250.0) * 0.4) }
+        r.start()
+        advanceTimeBy(120_001)
+        val t = r.navi.times("tbt")
+        assertTrue("서 있는 동안 15초 ($t)", t.any { it == 40_000L } && t.none { it in 41_000..54_000 })
+        assertTrue("다시 움직인 것을 안 뒤(60초 경로 조회)로는 5초 ($t)", t.filter { it > 60_000 }.zipWithNext().all { (a, b) -> b - a == 5_000L })
     }
 
     @Test
@@ -229,6 +256,23 @@ class NaviTrackerTest {
         assertTrue(r.snap.guiding)
         assertNull(r.snap.route!!.remainDistanceM)
         assertEquals("남은 거리를 못 읽었으면 5초 뒤 다시", 5_000L, run { advanceTimeBy(5_001); r.navi.times("routeStatus")[1] })
+    }
+
+    @Test
+    fun aZeroRemainingDistanceWhileStillGuidingIsAGlitchNotTwoReroutes() = runTest {
+        // 2026-11-12 에뮬레이터: 길안내 중인 내비가 목적지 응답 하나에서 남은 거리 0을 주고 다음 응답에서 383km로 돌아왔다.
+        // 0을 값으로 믿으면 '3km 넘게 줄었다'(재탐색)와 '1km 넘게 늘었다'(재탐색)로 epoch가 두 번 올라 후보 범위가 0이 되고 TBT를 다시 받았다.
+        // 길안내 모드인데 남은 거리가 0이면 도착이 아니다(도착하면 모드가 바뀐다): 못 읽은 것으로 본다
+        val r = Rig(this)
+        r.guide(totalM = 383_000.0, extra = {
+            val t = r.scope.testScheduler.currentTime
+            if (t in 25_000..35_000) -(383_000.0 - r.odo.meters) else 0.0
+        })
+        r.start()
+        advanceTimeBy(60_001)
+        assertEquals("epoch는 길안내 시작 한 번", 1, r.snap.epoch)
+        assertTrue("남은 거리는 0이 아니다", r.snap.route!!.remainDistanceM!! > 300_000.0)
+        assertTrue(r.published.none { it.route?.remainDistanceM == 0.0 })
     }
 
     @Test

@@ -1,5 +1,6 @@
 package dev.shimpyo.coach
 
+import dev.shimpyo.engine.CoachConfig
 import dev.shimpyo.engine.CoachEngine
 import dev.shimpyo.engine.CoachInput
 import dev.shimpyo.engine.Gear
@@ -7,6 +8,7 @@ import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.PersonalMemory
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.TripProfile
+import kotlin.math.roundToInt
 
 /**
  * 코치가 돌아가는 세계: 실제 또는 시연. 시연과 실제가 다른 것은 모두 여기서 정한다 (구조 리뷰 3.8, concern N).
@@ -49,6 +51,16 @@ sealed class CoachWorld {
     protected abstract fun engineMemory(loaded: PersonalMemory): PersonalMemory
 
     /**
+     * 이 세계의 엔진 설정. 엔진의 시간 값은 코치 시각으로 흐른다. 질문 수명(promptTtlS)만은 사람이 듣고 누르는 실제 시간이라
+     * 시연은 배속만큼 늘린다: 그러지 않으면 7.2배속 귀성길에서 45초 수명이 실제 6초가 되어 엔진이 카드를 먼저 거뒀다
+     * (prompt.md 2.5, PromptEngineScenarioTest). 쉼·조용한 때 같은 다른 값은 시연이 빨리 흐르도록 그대로 둔다.
+     */
+    open val engineConfig: CoachConfig get() = BASE_CONFIG
+
+    /** 화면에 보일 목적지 이름. [navi]는 실제 내비의 목적지 */
+    open fun destinationName(navi: String?): String? = navi
+
+    /**
      * 엔진 프로필을 만드는 단 한 곳. 탑승자는 이 세계의 것, 수면 시간 등은 설정, 여정 값은 [anchor]에서 온다.
      * 탑승자·설정이 바뀌어도 같은 기준점이면 tripStart가 같아 엔진이 여정을 이어 간다 (서비스 감사 D4, 구조 리뷰 D5).
      */
@@ -64,7 +76,7 @@ sealed class CoachWorld {
      * P에서는 엔진이 질문을 내지 않으므로 이 입력의 출력은 버려도 된다.
      */
     fun newEngine(factory: EngineFactory, settings: SettingsPort, memory: PersonalMemory, anchor: TripAnchor, park: ParkState? = null): CoachEngine {
-        val engine = factory.create(profile(settings, anchor), engineMemory(memory))
+        val engine = factory.create(profile(settings, anchor), engineMemory(memory), engineConfig)
         if (park != null) {
             val at = maxOf(park.since, anchor.tripStart)
             if (at <= clock.now()) runCatching { engine.update(CoachInput(now = at, gear = Gear.PARK, doorOpened = park.doorSeen)) }
@@ -104,8 +116,16 @@ sealed class CoachWorld {
         override fun apply(input: CoachInput): CoachInput = run.apply(input)
         override fun candidates(live: List<StopCandidate>): List<StopCandidate> = run.candidates(live)
         override fun engineMemory(loaded: PersonalMemory): PersonalMemory = PersonalMemory()
+        override val engineConfig: CoachConfig
+            get() = BASE_CONFIG.copy(promptTtlS = (BASE_CONFIG.promptTtlS * run.scenario.timeScale).roundToInt())
+        /** 시연 경로는 가상이라 실제 내비의 목적지를 보이지 않는다 */
+        override fun destinationName(navi: String?): String? = null
 
         /** 이 시연의 탑승자만 바꾼 세계 (같은 시연, 같은 시각) */
         fun withOccupants(list: List<Occupant>): Demo = Demo(run, list)
+    }
+
+    private companion object {
+        val BASE_CONFIG = CoachConfig()
     }
 }

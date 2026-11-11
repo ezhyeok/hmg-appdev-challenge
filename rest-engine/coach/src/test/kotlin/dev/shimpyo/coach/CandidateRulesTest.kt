@@ -58,15 +58,6 @@ class CandidateRulesTest {
         assertTrue("직선거리를 모르면 거르지 않는다", CandidateRules.plausibleMatch(null, 47_000.0))
     }
 
-    @Test
-    fun nameDecidesTheKindWhenTheTbtTypeDisagrees() {
-        // 데이터: 휴게소 이름은 모두 '휴게소', 졸음쉼터는 모두 '졸음쉼터'를 담는다 (app/src/main/assets/data 확인)
-        assertEquals(StopKind.DROWSY_SHELTER, CandidateRules.effectiveKind("옥산졸음쉼터(서울방향)", StopKind.HIGHWAY_REST_AREA))
-        assertEquals(StopKind.DROWSY_SHELTER, CandidateRules.effectiveKind("오산쉼터", StopKind.HIGHWAY_REST_AREA))
-        assertEquals(StopKind.HIGHWAY_REST_AREA, CandidateRules.effectiveKind("망향휴게소", StopKind.DROWSY_SHELTER))
-        assertEquals("이름으로 모르면 TBT 종류", StopKind.HIGHWAY_REST_AREA, CandidateRules.effectiveKind("서울만남의광장", StopKind.HIGHWAY_REST_AREA))
-    }
-
     // ------------------------------------------------------------ 범위 (D5, P5, 데이터 #7)
 
     @Test

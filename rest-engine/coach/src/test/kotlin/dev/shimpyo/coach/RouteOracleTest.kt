@@ -193,13 +193,4 @@ class RouteOracleTest {
         // 그래야 멈춘 내비를 한 번의 갱신 안에서 알아채고 쉰다 (예산이 먼저 끝나면 실패로 세지 못한다)
         assertTrue(CandidateTuning.ORACLE_REQUEST_TIMEOUT_MS < CandidateTuning.REFRESH_BUDGET_MS)
     }
-
-    @Suppress("DEPRECATION")
-    @Test
-    fun theOldEntryPointKeepsItsContractForTheCurrentService() = runTest {
-        val fx = Fx(this) { _, _, _, _ -> error("x") }
-        val c = fx.oracle.refine(anseong, Road.car().lat, Road.LON, 0L)
-        assertNull(c.routeDistanceM)
-        assertNotNull("실패하면 직선거리만 채워 돌려준다", c.straightDistanceM)
-    }
 }

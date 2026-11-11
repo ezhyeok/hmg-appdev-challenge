@@ -172,13 +172,16 @@ class CandidateProviderTest {
 
     @Test
     fun serviceAreaLabelledShelterMatchesTheShelterNotTheRestAreaWithTheSameBaseName() = runTest {
-        // TBT가 졸음쉼터를 SERVICEAREA로 보내면 extract는 휴게소 종류로 둔다. 같은 기본 이름의 반대편 휴게소와 맞으면 안 된다 (데이터 감사 #5)
+        // TBT가 졸음쉼터를 SERVICEAREA로 보내도 같은 기본 이름의 반대편 휴게소와 맞으면 안 된다 (데이터 감사 #5).
+        // 종류는 extract가 이름의 시설어로 정한다 (StopNames.kindFor, 이름 규칙은 한 곳): TBT 응답에서 시작해 그 길을 그대로 탄다
         val rows = listOf(
             stop("oksan-rest", "옥산휴게소(서울방향)", 20.3, laneHeading = 0f, lonOffset = 0.003),
             stop("oksan-shelter", "옥산졸음쉼터(부산방향)", 20.0, kind = StopKind.DROWSY_SHELTER, laneHeading = 180f),
         )
         val fx = Fx(this, rows)
-        fx.provider.refresh(Road.car(heading = null), guiding(listOf(opp("옥산졸음쉼터(부산방향)", 21.0, StopKind.HIGHWAY_REST_AREA))), CandidatePolicy.REAL)
+        val fromTbt = RouteOpportunities.extract(listOf(TbtItem(TbtType.SERVICE_AREA, 21_000.0, "옥산졸음쉼터(부산방향)")))
+        assertEquals(StopKind.DROWSY_SHELTER, fromTbt.single().kind)
+        fx.provider.refresh(Road.car(heading = null), guiding(fromTbt), CandidatePolicy.REAL)
         val c = fx.snap.list.single()
         assertEquals("oksan-shelter", c.id)
         assertEquals(StopKind.DROWSY_SHELTER, c.kind)
