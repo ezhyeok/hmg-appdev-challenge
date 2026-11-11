@@ -33,6 +33,7 @@ sealed interface Spoken {
  * 원칙
  * - 띄어쓰기와 문장부호를 지운 글자열에서 찾는다 (STT는 띄어쓰기를 제멋대로 준다).
  * - 낱말이 있어도 부정했거나("안 급해", "급하지 않아", "화장실은 괜찮아") 이미 끝난 일이면("밥 먹었어") 요청이 아니다.
+ *   뒤에 오는 "~은 괜찮아", "~ 안 해도 돼", 끝난 일은 일·장소 이름(화장실, 산책, 식사)에만 본다: "급해, 안 가면 안 돼"는 급하다는 말이다.
  * - 필요를 말했으면 필요다. 묻기만 했으면("화장실까지 얼마나 남았어?") 되묻기다: 화장실·휴게소라는 낱말만으로는 필요가 아니다.
  * - 수락은 분명할 때만이다. 틀린 수락은 내비에 경유지를 넣고, 틀린 '모름'은 버튼을 기다릴 뿐이다.
  */
@@ -151,7 +152,7 @@ class IntentParser {
 
         // 영아: 수유·기저귀. 아기가 배고프면 식당이 아니라 수유실이다
         val babyTalk = who.type == OccupantType.INFANT && (who.occupant == null || who.occupant.type == OccupantType.INFANT)
-        if (said(s, FEEDING, done = true) || (babyTalk && hungry(s))) {
+        if (said(s, FEEDING, topic = true) || (babyTalk && hungry(s))) {
             val baby = who.occupant?.takeIf { it.type == OccupantType.INFANT || it.type == OccupantType.CHILD }
                 ?: occupants.firstOrNull { it.type == OccupantType.INFANT }
             return Request(Kind.FEEDING, VoiceIntent.OccupantNeed(baby?.id, Purpose.FEEDING))
@@ -159,13 +160,13 @@ class IntentParser {
 
         // 반려견: 사람 화장실을 찾는 급해 모드가 아니다
         val urgent = urgent(s)
-        if (OccupantWords.has(t, OccupantWords.DOG) && (urgent || said(s, PET_RELIEF, done = true))) {
+        if (OccupantWords.has(t, OccupantWords.DOG) && (urgent || said(s, PET_RELIEF, topic = true))) {
             return Request(Kind.PET, VoiceIntent.OccupantNeed(occupants.firstOrNull { it.type == OccupantType.DOG }?.id, Purpose.PET))
         }
         if (urgent) return Request(Kind.URGENT, VoiceIntent.UrgentRestroom)
 
         // 화장실: "마려워"처럼 그 자체가 필요인 말이거나, 화장실을 말하고 가겠다는 말이 있을 때
-        val toilet = said(s, TOILET, done = true) || PEE.containsMatchIn(s)
+        val toilet = said(s, TOILET, topic = true) || PEE.containsMatchIn(s)
         if (said(s, HOLD) || SEEK_TOILET.containsMatchIn(s) || (toilet && said(s, GO))) {
             return Request(Kind.RESTROOM, VoiceIntent.OccupantNeed(who.occupant?.id, Purpose.RESTROOM))
         }
@@ -180,7 +181,7 @@ class IntentParser {
         }
 
         // 주유·충전 (휴대폰 충전이 아니다)
-        val fuelPlace = said(s, FUEL_PLACE)
+        val fuelPlace = said(s, FUEL_PLACE, topic = true)
         val fuelTalk = fuelPlace || FUEL_WORD.any { it in s }
         if (fuelTalk && PHONE.none { it in s } && ((fuelPlace && said(s, GO_PLACE)) || said(s, FUEL_NEED) || FUEL_LOW.containsMatchIn(t))) {
             return Request(Kind.FUEL, VoiceIntent.OccupantNeed(null, Purpose.FUEL))
@@ -189,8 +190,8 @@ class IntentParser {
         if (hungry(s)) return Request(Kind.MEAL, VoiceIntent.Hungry)
 
         // 휴식: 쉬자는 말, 또는 휴게소·쉼터에 가자는 말
-        if (said(s, REST)) return Request(Kind.REST, VoiceIntent.WantRest)
-        if (said(s, REST_PLACE) && said(s, GO_PLACE) && !refused(t)) {
+        if (said(s, REST) || said(s, REST_NOUN, topic = true)) return Request(Kind.REST, VoiceIntent.WantRest)
+        if (said(s, REST_PLACE, topic = true) && said(s, GO_PLACE) && !refused(t)) {
             return Request(Kind.REST, VoiceIntent.WantRest, byPlaceWord = true)
         }
 
@@ -208,11 +209,11 @@ class IntentParser {
     }
 
     private fun bare(t: String, words: List<String>): Boolean {
-        val word = words.firstOrNull { affirmedAt(t, it, done = true) >= 0 } ?: return false
+        val word = words.firstOrNull { affirmedAt(t, it, topic = true) >= 0 } ?: return false
         return FILLER.replace(PERSON.replace(t.replace(word, ""), ""), "").isEmpty()
     }
 
-    private fun hungry(t: String): Boolean = said(t, HUNGRY) || said(t, EAT, done = true)
+    private fun hungry(t: String): Boolean = said(t, HUNGRY) || said(t, EAT, topic = true)
 
     /** 화장실이 급하다는 말인지. "급하게 가지 마", "시간이 급해"는 서두른다는 말이다 */
     private fun urgent(t: String): Boolean = URGENT.findAll(t).any { m ->
@@ -232,26 +233,28 @@ class IntentParser {
     // ------------------------------------------------------------ 부정
 
     /**
-     * [words] 가운데 부정하지 않고 말한 것이 있는지. [done]: 이미 끝난 일("밥 먹었어", "산책했어")도 요청이 아닌 낱말들에 켠다.
-     * 졸림에는 켜지 않는다: "깜빡 졸았어", "졸 뻔했어"는 지금 위험하다는 말이다.
+     * [words] 가운데 부정하지 않고 말한 것이 있는지.
+     * [topic]: 낱말이 일·장소의 이름(화장실, 산책, 식사, 휴게소)이다. 이름은 뒤에 오는 말로도 부정된다: "화장실은 괜찮아", "휴게소 말고",
+     * "산책 안 해도 돼", 그리고 이미 끝난 일("밥 먹었어", "산책했어"). 상태를 말하는 낱말(급해, 졸려, 배고파)에는 쓰지 않는다:
+     * "급해, 안 가면 안 돼"는 급하다는 말이고 "깜빡 졸았어"는 지금 위험하다는 말이다.
      */
-    private fun said(t: String, words: List<String>, done: Boolean = false): Boolean = words.any { affirmedAt(t, it, done) >= 0 }
+    private fun said(t: String, words: List<String>, topic: Boolean = false): Boolean = words.any { affirmedAt(t, it, topic) >= 0 }
 
     /** [word]가 부정되지 않고 나온 자리. 없으면 -1 */
-    private fun affirmedAt(t: String, word: String, done: Boolean = false): Int {
+    private fun affirmedAt(t: String, word: String, topic: Boolean = false): Int {
         var i = t.indexOf(word)
         while (i >= 0) {
-            if (!denied(t, i, i + word.length, done)) return i
+            if (!denied(t, i, i + word.length, topic)) return i
             i = t.indexOf(word, i + 1)
         }
         return -1
     }
 
-    /** [from, to)의 낱말을 부정했는지("안 급해", "급하지 않아", "화장실은 괜찮아"). [done]이면 이미 끝난 일("밥 먹었어")도 본다 */
-    private fun denied(t: String, from: Int, to: Int, done: Boolean = false): Boolean {
+    /** [from, to)의 낱말을 부정했는지: 앞의 '안'("안 급해"), 뒤의 '-지 않아'·'~건 아니야', [topic]이면 [TOPIC_OFF]도 본다 */
+    private fun denied(t: String, from: Int, to: Int, topic: Boolean = false): Boolean {
         if (from > 0 && t[from - 1] == '안' && !endsAnotherWord(t, from - 1)) return true
         val after = t.substring(to, minOf(t.length, to + LOOK_AHEAD))
-        return NEGATED.containsMatchIn(after) || (done && DONE.containsMatchIn(after))
+        return NEGATED.containsMatchIn(after) || (topic && TOPIC_OFF.containsMatchIn(after))
     }
 
     /** t[i]의 '안'이 "미안"처럼 다른 낱말의 끝인지. "미안 급해"는 급하다는 말이다 */
@@ -353,16 +356,17 @@ class IntentParser {
         // ---- 부정
         /** '안'으로 끝나는 낱말. 그 뒤에 온 말은 부정이 아니다 */
         val ENDS_IN_AN = listOf("미안", "천안", "불안", "편안", "동안")
-        /** 낱말 바로 뒤의 부정 */
+        /** 낱말 바로 뒤의 부정 (모든 낱말) */
         val NEGATED = Regex(
             "^(하|이)?(지|진|지는|지도)(않|못|말|마)" +                                         // 급하지 않아, 가고 싶지 않아, 들르지 말자
-                "|^.{0,5}?(아니야|아닌데|아니고|아니라|아니에요|아닙니다|아니거든|아니지만)" +    // 급한 건 아니야
-                "|^(은|는|이|가|을|를|도)?(말고|괜찮|됐어|됐고|필요없)" +                        // 화장실은 괜찮아, 휴게소 말고
-                "|^(은|는|이|가|을|를|도|에)?안(가|갈|들|해|할|쉬|먹|갈아|넣|시켜)",             // 화장실 안 가도 돼, 산책 안 해도 돼
+                "|^.{0,5}?(아니야|아닌데|아니고|아니라|아니에요|아닙니다|아니거든|아니지만)",     // 급한 건 아니야
         )
-        /** 낱말 바로 뒤의 '이미 했다' */
-        val DONE = Regex(
-            "^(은|는|이|가|을|를|도|에)?(아까|방금|이미|벌써)?" +
+        /** 일·장소 이름 바로 뒤에서 그 일을 하지 않겠다거나 이미 했다는 말 */
+        val TOPIC_OFF = Regex(
+            "^(은|는|이|가|을|를|도)?(말고|괜찮|됐어|됐고|필요없)" +                             // 화장실은 괜찮아, 휴게소 말고
+                // 화장실 안 가도 돼, 산책 안 해도 돼, 점심 안 먹어도 돼. "점심 안 먹었어"는 배고프다는 말이라 넣지 않는다
+                "|^(은|는|이|가|을|를|도|에)?안(가|갈|들|해|할|쉬|갈아|넣|시켜|먹어도|먹을|먹어$|먹는다|먹고싶)" +
+                "|^(은|는|이|가|을|를|도|에)?(아까|방금|이미|벌써)?" +
                 "(갔다왔|다녀왔|갔어|갔었|갔는데|했어|했는데|했다|했습니다|시켰|갈았|먹였|먹었|넣었|끝났|들렀어|들렀는데)" + // 화장실 갔다 왔어, 산책했어
                 "|^(었|였)(어|다|는데|지|고|습니다|네|거든)",                                    // 밥 먹'었어'
         )
@@ -377,7 +381,8 @@ class IntentParser {
         // ---- 화장실
         /** 낱말 자체가 화장실이 급하다는 말. '급하게', '급한 일'은 서두른다는 말이고 '비쌀 것 같아'는 값 이야기다 */
         val URGENT = Regex("급해|급하(?!게)|급한(?!일|약속|전화|용무|게)|급함|급합|급똥|못참|참을수없|참기힘|(?<!비)쌀(것|거)같|지릴|지리겠|화장실빨리|빨리화장실")
-        val HURRY_BEFORE = listOf("시간이", "시간", "마음이", "마음", "갈길이", "길이", "일이")
+        /** 이 말 뒤의 '급해'는 화장실이 아니다. "볼일이 급해"는 화장실이라 '일이'는 넣지 않는다 */
+        val HURRY_BEFORE = listOf("시간이", "시간", "마음이", "마음", "갈길이")
         val TOILET = listOf("화장실", "소변", "오줌", "응가", "똥", "대변", "볼일", "쉬야")
         /** 소변을 뜻하는 '쉬'. 쉬다(쉬자, 쉬고 싶어)와 다음 글자로 가른다 */
         val PEE = Regex("쉬(?=하|할|한|해|마려|마렵|싸|좀하|좀싸)")
@@ -407,10 +412,12 @@ class IntentParser {
         val SELF = listOf("나도", "나는", "내가", "저도", "저는", "제가")
         val REST = listOf(
             "쉬고싶", "쉬자", "쉬어가", "쉬었다가", "쉬었다갈", "쉴래", "쉬어야", "좀쉬자", "좀쉬고", "좀쉬어", "좀쉬었으면", "좀쉴",
-            "쉬고가", "쉬다가", "휴식", "한숨자", "눈좀붙", "눈붙이", "자고가",
+            "쉬고가", "쉬다가", "한숨자", "눈좀붙", "눈붙이", "자고가",
             // 쉬자고 하지는 않았지만 차에서 내리고 싶다는 말
             "스트레칭", "바람쐬", "바람좀쐬", "허리아파", "허리가아파", "다리저려", "다리가저려", "엉덩이아파", "뻐근", "커피한잔", "커피마시고싶", "커피사",
         )
+        /** 이름으로 말한 휴식 ("휴식이 필요해". "휴식 필요 없어"는 아니다) */
+        val REST_NOUN = listOf("휴식")
         val REST_PLACE = listOf("휴게소", "쉼터")
         /** 장소 낱말과 함께면 거기 가자는 말 */
         val GO_PLACE = listOf("가자", "가줘", "가주", "가고싶", "가야", "갈래", "들르", "들러", "들를", "들렀다", "들어가", "세워", "찾아", "어디")

@@ -70,6 +70,8 @@ class IntentParserTest {
         "화장실 빨리" to urgent,
         "빨리 화장실 좀" to urgent,
         "급똥이야" to urgent,
+        "볼일이 급해" to urgent,
+        "급해 안 가면 안 돼" to urgent, // 뒤의 '안 가면'은 급하다는 말을 부정하지 않는다
         "아이가 화장실 급하대" to urgent,
         "화장실 급한데 얼마나 남았어" to urgent, // 필요를 말했으면 되묻기보다 필요가 먼저다
         "화장실급해" to urgent, // 띄어쓰기 없는 STT
@@ -284,6 +286,7 @@ class IntentParserTest {
     fun notWantingRest() = parsing(
         "쉬자는 말이 아니다", family,
         "안 쉬어도 돼" to null,
+        "휴식 필요 없어" to null,
         "쉬고 싶지 않아" to null,
         "안 쉬고 싶어" to null,
         "잘 쉬었어" to null,
@@ -315,6 +318,10 @@ class IntentParserTest {
         "배고픈데 휴게소 얼마나 남았어" to VoiceIntent.Hungry,
         "점심 먹었는데 또 배고파" to VoiceIntent.Hungry,
         "밥도 먹자" to VoiceIntent.Hungry,
+        "점심 안 먹었어" to VoiceIntent.Hungry, // 안 먹었다 = 배고프다
+        "배고파 안 먹었거든" to VoiceIntent.Hungry,
+        "점심 안 먹어도 돼" to null,
+        "식사 안 해도 돼" to null,
         "안 배고파" to null,
         "배 안 고파" to null,
         "배고프지 않아" to null,
