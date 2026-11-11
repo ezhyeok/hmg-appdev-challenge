@@ -26,6 +26,8 @@ class LabelsTest {
         Reason("RESTROOM_PERSONAL", t.reasonRestroomPersonal("운전자", 3)),
         Reason("RESTROOM_CAP", t.reasonRestroomCap(Occupant("e", OccupantType.ELDERLY), 90)),
         Reason("RESTROOM_CAP", t.reasonRestroomCap(Occupant("b", OccupantType.INFANT), 90)),
+        Reason("RESTROOM_AFTER_MEAL", t.reasonRestroomAfterMeal()),
+        Reason("RESTROOM_ASLEEP", t.reasonRestroomAsleep("7살 아이")),
         Reason("FATIGUE_VOICED", t.reasonFatigueVoiced()),
         Reason("FATIGUE_STRONG", t.reasonFatigueStrong()),
         Reason("FATIGUE_DRIVING", t.reasonFatigueDriving(108)),
@@ -127,10 +129,10 @@ class LabelsTest {
 
     @Test
     fun contextFactorsAndRequestedStopsHaveLabels() {
-        // 엔진 맥락 요인(식사 뒤, 잠든 아이)과 요청에 답한 곳의 코드 (FIXLIST U5, UI-N5). 엔진 main에 들어오기 전이라
-        // ReasonCoverageTest는 아직 이 코드를 보지 못한다: 문구는 여기서 지킨다. 문장은 엔진 CoachTexts의 것
-        assertEquals("식사 뒤", Labels.shortReason(Reason("RESTROOM_AFTER_MEAL", "식사 뒤라 평소보다 조금 일찍 잡았어요")))
-        val asleep = Reason("RESTROOM_ASLEEP", "7살 아이가 자는 동안은 여유를 조금 더 뒀어요")
+        // 엔진 맥락 요인(식사 뒤, 잠든 아이)과 요청에 답한 곳의 코드 (FIXLIST U5, UI-N5). 요청에 답한 곳의 코드
+        // (NEXT_REQUESTED_*)는 엔진 수정 브랜치와 함께 들어온다: 그 전에는 ReasonCoverageTest가 보지 못하므로 문구를 여기서 지킨다
+        assertEquals("식사 뒤", Labels.shortReason(Reason("RESTROOM_AFTER_MEAL", t.reasonRestroomAfterMeal())))
+        val asleep = Reason("RESTROOM_ASLEEP", t.reasonRestroomAsleep("7살 아이"))
         assertEquals("자는 중", Labels.shortReason(asleep))
         assertEquals("7살 아이 자는 중", Labels.shortReason(asleep, "7살 아이"))
         // 이름이 길면 이름 없이 (칩 12자)

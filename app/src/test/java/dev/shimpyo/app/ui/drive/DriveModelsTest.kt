@@ -357,13 +357,26 @@ class DriveModelsTest {
         assertEquals("코치가 멈췄어요", stopCard(s.copy(serviceRunning = false, restroom = Gauge(40, Level.WATCH)), driving = true).title)
     }
 
+    @Test
+    fun aResultThatArrivesBeforeThePendingMarkClearsIsNotAnnouncedTwice() {
+        // 코치가 결과를 올린 순간 '넣는 중' 표시가 아직 남아 있어도, 곧 카드가 그 결과를 보인다: 토스트로 한 번 더 알리지 않는다
+        val a = stop("a", "안성휴게소", 4.0)
+        val added = GoToResult(a, GoToOutcome.WAYPOINT_ADDED, 2L)
+        val s = running.copy(next = rec(a, Reason("NEXT_ACCEPTED", "…")), goToPending = a, goToResult = added)
+        assertTrue(cardShowsGoTo(s, driving = true, r = added))
+        // 다른 곳을 넣는 중이면 카드는 그 진행을 보인다: 이 결과는 토스트로 알린다
+        val other = stop("b", "천안휴게소", 30.0)
+        assertFalse(cardShowsGoTo(s.copy(goToPending = other), driving = true, r = added))
+    }
+
     // ---------------------------------------------------------------- 맥락 요인 (FIXLIST U4·U5)
 
     @Test
     fun aSleepingChildAndAMealExplainTheRestroomGauge() {
         val elapsed = Reason("RESTROOM_ELAPSED", "7살 아이 기준, 마지막 화장실 후 1시간 지났어요")
-        val meal = Reason("RESTROOM_AFTER_MEAL", "식사 뒤라 평소보다 조금 일찍 잡았어요")
-        val asleep = Reason("RESTROOM_ASLEEP", "7살 아이가 자는 동안은 여유를 조금 더 뒀어요")
+        val texts = dev.shimpyo.engine.CoachTexts()
+        val meal = Reason("RESTROOM_AFTER_MEAL", texts.reasonRestroomAfterMeal())
+        val asleep = Reason("RESTROOM_ASLEEP", texts.reasonRestroomAsleep("7살 아이"))
         // 늘 붙는 '누구 기준'보다 숫자가 평소와 다른 이유가 먼저다
         assertEquals("식사 뒤", restroomReason(listOf(elapsed, meal), "7살 아이"))
         assertEquals("7살 아이 자는 중", restroomReason(listOf(elapsed, meal, asleep), "7살 아이"))

@@ -325,9 +325,14 @@ fun failedGoTo(state: CoachUiState): GoToResult? {
     return r.takeIf { stillAhead }
 }
 
-/** 주행 화면 카드가 지금 [r]을 보이고 있는지 (그렇지 않으면 토스트로 알린다, 재검토 #10) */
+/**
+ * 주행 화면 카드가 지금 [r]을 보이고 있는지 (그렇지 않으면 토스트로 알린다, 재검토 #10).
+ * 결과가 온 들르기의 '넣는 중' 표시는 곧 내려간다(코치가 결과와 진행 표시를 한 번에 올리지 않을 수 있다): 그 표시가 내려간 뒤의
+ * 카드로 본다. 그러지 않으면 같은 결과를 토스트와 카드가 잇달아 두 번 알린다
+ */
 fun cardShowsGoTo(state: CoachUiState, driving: Boolean, r: GoToResult): Boolean {
-    val card = stopCard(state, driving)
+    val settled = if (state.goToPending?.id == r.stop.id) state.copy(goToPending = null) else state
+    val card = stopCard(settled, driving)
     return card.title == r.stop.name && card.context == goToContext(r.outcome)
 }
 
