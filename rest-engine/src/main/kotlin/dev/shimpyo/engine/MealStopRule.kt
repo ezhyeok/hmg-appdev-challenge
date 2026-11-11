@@ -9,7 +9,7 @@ import kotlin.math.abs
  * 식사 정차 = 기어 P가 [CoachConfig.mealStopMinMin]분 이상([StopTracker]가 알린다)이고 다음 중 하나:
  * - 선 곳에 음식이 있다: [CoachConfig.mealPlaceRadiusM] 안 가장 가까운 후보의 Facilities.food
  * - 수락한 정차의 목적에 식사가 있었고, 그곳에 섰다
- * - "배고파" 요청이 살아 있을 때 섰다
+ * - 서 있는 동안 "배고파" 요청이 살아 있다 (서기 전 30분 안에 말했거나, 서서 말했다)
  * 먹고 마신 양을 아는 것이 아니다. 정차 길이와 장소로 '식사했을 것'을 추정할 뿐이다 (NC §9-9).
  * 배수는 [CoachConfig.mealIntervalFactor], 정차를 [CoachConfig.mealEveningStartHour]시 이후에 시작했으면
  * [CoachConfig.mealIntervalFactorEvening]. 그 배수를 누구의 어느 구간에 거는지는 [RestroomNeedModel.onMealStop]이 정한다.
