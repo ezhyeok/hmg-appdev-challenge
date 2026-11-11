@@ -5,6 +5,8 @@
 - gyeongbu-NN: 39 positions every ~3.4 km along the 경부고속도로 부산방향 carriageway from 기흥 (37.2351, 127.1046)
   to past 옥천, the same stretch as the 2026-11-11 audit's 39-position replay. The audit placed its positions on a
   13-vertex polyline (up to a few km off the road) with the polyline's bearing; these follow the road and its heading.
+- audit-NN: the audit's own 39 positions (0.1/0.5/0.9 of each segment of its 13-vertex polyline, polyline bearing),
+  kept for comparison; most are hundreds of metres to kilometres off the road, where map matching says "unknown".
 - daesin-*, donggwangju-*: approaches to the shelters whose lane headings were wrong (audit #1).
 Columns: name, lat, lon, heading (degrees). Deterministic.
 """
@@ -32,6 +34,12 @@ def walk(mw, s, dist, forward=True):
     return la, lo, common.bearing_deg(p[0], p[1], q[0], q[1]), walked
 
 
+AUDIT_POLYLINE = [(37.235125, 127.104595), (37.156708, 127.087165), (37.096192, 127.120738), (37.013407, 127.144800),
+                  (36.954311, 127.183007), (36.914432, 127.188465), (36.855650, 127.180929), (36.730226, 127.263879),
+                  (36.657743, 127.369817), (36.486810, 127.429261), (36.425354, 127.416697), (36.328096, 127.540893),
+                  (36.296863, 127.595223), (36.279148, 127.672231)]
+
+
 def main():
     raw, out = sys.argv[1], sys.argv[2]
     mw = motorway.Motorways(os.path.join(raw, "osm", "motorways.json"))
@@ -42,6 +50,11 @@ def main():
         if walked < 1700 + k * 3400 - 1:
             raise SystemExit("chain ended")
         rows.append((f"gyeongbu-{k:02d}", la, lo, h))
+    g = AUDIT_POLYLINE
+    for i in range(len(g) - 1):
+        for j, f in enumerate((0.1, 0.5, 0.9)):
+            la, lo = g[i][0] + (g[i + 1][0] - g[i][0]) * f, g[i][1] + (g[i + 1][1] - g[i][1]) * f
+            rows.append((f"audit-{3 * i + j:02d}", la, lo, common.bearing_deg(*g[i], *g[i + 1])))
     # 대신졸음쉼터 (경부선, 36.1525, 128.1912): 부산방향 차로로 다가가는 1·5·15km 앞, 서울방향 차로로 다가가는 5km 앞
     busan = on_carriageway(mw, 36.152511, 128.191239, 30)
     seoul = on_carriageway(mw, 36.152819, 128.190756, 210)

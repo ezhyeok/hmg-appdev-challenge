@@ -143,11 +143,23 @@ class StopRepositoryTest {
      */
     @Test
     fun gyeongbuReplayKeepsTheTopSixOnTheRoad() {
-        var oldOn = 0; var oldOff = 0; var newOn = 0; var newOff = 0
-        val positions = positions.filter { it.name.startsWith("gyeongbu-") }
+        val (oldOn, oldOff, newOn, newOff) = replayTopSix("gyeongbu-")
+        assertTrue(newOn > oldOn && newOff < oldOff)
+        // 같은 길 시설이 6곳 미만일 때만 다른 길 시설이 들어온다
+        assertTrue(newOff <= 39 * 6 - newOn)
+        // 감사 원래의 39곳(13점 꺾은선 위, 길에서 수백 m~수 km 벗어남): 지도 맞춤이 '모름'인 곳은 예전 순서 그대로다
+        val (aOldOn, aOldOff, aNewOn, aNewOff) = replayTopSix("audit-", requireMatch = false)
+        assertTrue(aNewOn >= aOldOn && aNewOff <= aOldOff)
+    }
+
+    private fun replayTopSix(prefix: String, requireMatch: Boolean = true): List<Int> {
+        var oldOn = 0; var oldOff = 0; var newOn = 0; var newOff = 0; var matched = 0
+        val positions = positions.filter { it.name.startsWith(prefix) }
         assertEquals(39, positions.size)
         for (p in positions) {
-            assertEquals("경부고속도로", real.currentRoad(p.lat, p.lon, p.heading), p.name)
+            val road = real.currentRoad(p.lat, p.lon, p.heading)
+            if (requireMatch) assertEquals("경부고속도로", road, p.name)
+            if (road != null) matched++
             fun onRoute(c: StopCandidate): Boolean {
                 val i = rowOf.getValue(c.id)
                 val lane = realTable.laneHeading(i)
@@ -158,10 +170,8 @@ class StopRepositoryTest {
             oldOn += old.count(::onRoute); oldOff += old.count { !onRoute(it) }
             newOn += new.count(::onRoute); newOff += new.count { !onRoute(it) }
         }
-        println("경부 39곳 앞 6곳: 예전 같은 길 $oldOn / 다른 길 $oldOff → 지금 같은 길 $newOn / 다른 길 $newOff")
-        assertTrue(newOn > oldOn && newOff < oldOff)
-        // 같은 길 시설이 6곳 미만일 때만 다른 길 시설이 들어온다
-        assertTrue(newOff <= 39 * 6 - newOn)
+        println("$prefix 39곳 앞 6곳 (지도 맞춤 $matched 곳): 예전 같은 길 $oldOn / 다른 길 $oldOff → 지금 같은 길 $newOn / 다른 길 $newOff")
+        return listOf(oldOn, oldOff, newOn, newOff)
     }
 
     @Test
