@@ -34,6 +34,29 @@ def _load_sim():
 
 
 _SIM = _load_sim()
+
+
+# ---------------------------------------------------------------- test counts
+# Measured counts (tools/plan/count_tests.py → docs/plan/data/test_counts.json). No count is typed by
+# hand; a missing file stops the build instead of printing a stale number.
+
+def _load_tests():
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'docs', 'plan', 'data',
+                        'test_counts.json')
+    with open(path, encoding='utf-8') as f:
+        return json.load(f)
+
+
+TESTS = _load_tests()
+
+
+def tests_of(module):
+    t = TESTS[module]
+    return f"{t['tests'] - t['skipped']:,}"
+
+
+TESTS_ALL = f"{TESTS['passed']:,}"
+TESTS_SPLIT = f"엔진 {tests_of('engine')}, 코치 계층 {tests_of('coach')}, 앱 {tests_of('app')}"
 MAIN = 'child7_holiday_sigma0.3'
 FREE = 'child7_free_sigma0.3'
 
@@ -161,7 +184,7 @@ S1 = Section(1, "app_summary", "앱 한 줄 소개", [
     P("**쉼표**는 Pleos 내비게이션의 경로·정체와 차량 신호로 탑승자마다 **‘다음 화장실·휴식까지 남은 시간’**을 "
       "계산하고, 그 시간이 바닥나기 전에 **경로 위에서 들를 곳을 먼저 묻는** 차량용 AI 휴식 코치다.", size=11, after=80),
     Figure("hero", "쉼표 한눈에 보기 — Pleos Connect의 두 창 중 하나에 portrait로 떠서 내비 옆에서 동작한다. 쉼표 화면은 "
-           "앱의 UI 코드를 그대로 렌더링한 것(시연 데이터), 내비 화면은 도식", 17.0,
+           "Pleos Connect Emulator에서 캡처한 실제 화면(시연 모드: 귀성길), 내비 쪽은 도식", 17.0,
            alt="Pleos 내비 옆 창의 쉼표 주행 화면과 세 가지 핵심 가치"),
 ])
 
@@ -380,7 +403,8 @@ S5 = Section(5, "pleos_plan", "개발 계획", [
     Callout([
         "Pleos Connect(AAOS, API 34)용으로 Kotlin으로 구현했다. 설계의 핵심 가정, 즉 내비가 "
         "경로 위 휴게소와 정체를 주는지, 경유지가 가는 방향으로 들어가는지는 코드를 쓰기 전에 에뮬레이터에서 먼저 "
-        "확인했다. 판단 엔진은 안드로이드와 분리한 순수 Kotlin 모듈로, 단위·시나리오 테스트 141개로 검증한다.",
+        "확인했다. 판단 엔진과 이를 차에서 돌리는 코치 계층은 안드로이드와 분리한 순수 Kotlin 모듈이고, "
+        f"자동 테스트 {TESTS_ALL}개({TESTS_SPLIT})로 검증한다.",
     ]),
     KeyNumbers([
         ("47.1km", "회전 안내의 휴게소 누적 거리. 내비가 계산한 경유지 남은 거리(47.0km)와 일치 → 경로 위 화장실을 "
@@ -388,7 +412,8 @@ S5 = Section(5, "pleos_plan", "개발 계획", [
         ("26구간", "길안내 중 받은 실시간 정체 목록(판교→부산역). 위치·길이·통과 시간으로 공백을 계산", "에뮬레이터 확인"),
         ("60,084곳", "기기 안 정차 후보(화장실이 있거나 확인된 곳). 급해 모드는 네트워크 없이 이 데이터로 계산",
          "공공데이터 + OSM"),
-        ("141개", "판단 엔진 단위·시나리오 테스트 통과. 장면 A~D를 코드로 재현", "rest-engine"),
+        (f"{TESTS_ALL}개", f"자동 테스트 통과({TESTS_SPLIT}). 장면 A~D와 감사에서 찾은 상황을 코드로 재현",
+         "rest-engine · app"),
     ]),
     H("5-1. 구조와 데이터 흐름"),
     Bullets([
@@ -478,8 +503,8 @@ S5 = Section(5, "pleos_plan", "개발 계획", [
          "규칙 기반 한국어 의도 분류(응/아니, 급해, 탑승자 설정, ‘아이가 화장실 가고 싶대’). 정차 결정은 엔진이 한다",
          "Pleos 운전자 주의 분산 가이드: 텍스트 입력 최소화, 음성·프리셋 우선"],
     ], widths=[15, 52, 33], size=8),
-    Note("엔진은 결정적이며(톰프슨 샘플링만 난수, 테스트는 시드 고정) 기본값마다 출처를 코드 주석에 적었다. 테스트 "
-         "141개: 구성 요소별(신호 없음, 기어 불명, 시계 역행, 14시간 주행, 단위가 다른 조향 등)과 시나리오 6개."),
+    Note("엔진은 결정적이며(톰프슨 샘플링만 난수, 테스트는 시드 고정) 기본값마다 출처를 코드 주석에 적었다. 엔진 테스트 "
+         f"{tests_of('engine')}개: 구성 요소별(신호 없음, 기어 불명, 시계 역행, 14시간 주행, 단위가 다른 조향 등)과 시나리오 6개."),
     Figure("models", "그림 8. 판단 엔진의 실제 출력 (rest-engine 코드로 계산) — ① 탑승자 유형별 화장실 필요 확률, "
            "② 정차 기록이 쌓이며 개인에게 맞춰지는 과정, ③ 장면 A에서 지금 묻는 이유", 17.0,
            alt="화장실 필요 확률 곡선, 개인화 수렴, 장면 A의 판단 마감과 기회"),
@@ -516,7 +541,7 @@ S5 = Section(5, "pleos_plan", "개발 계획", [
         ["SDK 검증 앱과 공통 모듈 pleos-kit(5개 SDK + AAOS Car API), 설계 가정 검증(정체 목록, 회전 안내의 "
          "휴게소·졸음쉼터, 방향 판정, 경유지 추가, 조향각·방향지시등)",
          "로터리 컨트롤러(CCP) 회전 순서 구현"],
-        ["판단 엔진 rest-engine: 8개 구성 요소, 테스트 141개 통과, 효과 시뮬레이션(조건·정책마다 5,000회)",
+        [f"판단 엔진 rest-engine: 8개 구성 요소, 테스트 {tests_of('engine')}개 통과, 효과 시뮬레이션(조건·정책마다 5,000회)",
          "실제 음성 인식 확인(에뮬레이터는 마이크 입력이 없어 STT는 호출만 확인)"],
         ["앱: 포그라운드 서비스와 신호 수집, 회전 안내 → 화장실 기회, 정체 위치 계산(기준점 자동 판별), 방향 판정, "
          "음성, 시연 모드. 통합 빌드 완료",
@@ -622,13 +647,13 @@ S7 = Section(7, "reference_link", "참고자료", [
          GITHUB_PLACEHOLDER],
         ["APK", "실행 가능한 release 빌드. 공모전 규칙에 따라 저장소 `apk/` 폴더", "저장소 `apk/` 폴더"],
         ["시연 영상", "Pleos Connect Emulator + Virtual Console 화면 녹화(4번 항목의 장면)", VIDEO_PLACEHOLDER],
-        ["화면", "앱의 UI 코드(Jetpack Compose)를 그대로 렌더링한 화면(시연 데이터, 1번 항목의 그림, 그림 4·11)", "이 문서"],
+        ["화면", "Pleos Connect Emulator에서 캡처한 실제 앱 화면(시연 모드, 1번 항목의 그림, 그림 4·11)", "이 문서"],
         ["테스트 환경", "Pleos Connect Emulator 2.1.0(API 34, Automotive) + Virtual Console. Vehicle 2.3.2, "
          "NaviHelper 3.0.5, TextToSpeech·SpeechToText 3.3.1, FusedLocation 1.1.3", "README"],
     ], widths=[15, 55, 30]),
-    Figure("screens", "그림 11. 화면 시안 (Pleos Connect 세로 윈도 840×1184dp, 라이트 테마)", 15.0,
+    Figure("screens", "그림 11. 앱 화면 (Pleos Connect 세로 창 840×1184dp, 라이트 테마)", 15.0,
            alt="쉼표 화면",
-           caption_screens="그림 11. 앱 화면 — 앱의 UI 코드를 그대로 렌더링(시연 데이터, Pleos Connect portrait 창 "
+           caption_screens="그림 11. 앱 화면 — Pleos Connect Emulator 실제 화면(시연 모드, portrait 창 "
                            "840×1184dp)", columns=3),
     H("주요 출처"),
     Table(["#", "내용", "출처 (날짜)", "URL"], [

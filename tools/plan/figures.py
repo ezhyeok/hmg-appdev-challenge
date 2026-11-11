@@ -16,6 +16,15 @@ sys.dont_write_bytecode = True   # keep tools/plan free of __pycache__
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))   # icons.py, ooxml.py under `python3 -I`
 from xml.sax.saxutils import escape
 
+
+def _tests_all():
+    """Measured passed-test count (tools/plan/count_tests.py). Missing file → stop, never a stale number"""
+    import json
+    path = os.path.join(os.path.dirname(os.path.abspath(__file__)), '..', '..', 'docs', 'plan', 'data',
+                        'test_counts.json')
+    with open(path, encoding='utf-8') as f:
+        return f"{json.load(f)['passed']:,}"
+
 FONT = "Pretendard, 'Noto Sans CJK KR', NanumGothic, sans-serif"
 INK, INK2, INK3, MUTED = "#131417", "#44464E", "#686A72", "#A4A8AE"
 LINE, LINE2, SURF, SURF2, WHITE = "#E0E1E6", "#C7C9CE", "#F7F8FA", "#EDEEF2", "#FFFFFF"
@@ -789,7 +798,7 @@ def fig_hero(screen=None):
     sy = H - 46
     b.append(R(8, sy, W - 16, 36, 12, SURF2))
     parts = [("Pleos ", 700, INK2), ("NaviHelper · Vehicle · TTS/STT · FusedLocation", 500, INK2),
-             (" + AAOS Car API", 500, INK2), ("  |  ", 400, MUTED), ("판단 엔진 테스트 141개", 700, INK),
+             (" + AAOS Car API", 500, INK2), ("  |  ", 400, MUTED), (f"자동 테스트 {_tests_all()}개", 700, INK),
              ("  |  ", 400, MUTED), ("SDK 동작 에뮬레이터 확인", 700, INK)]
     b.append(TS(W / 2, sy + 23.5, parts, FS, "middle"))
     return svg(W, H, b)
