@@ -2,7 +2,7 @@ package dev.shimpyo.coach
 
 import dev.shimpyo.engine.PromptKind
 
-/** 화면에 떠 있는 질문을 언제 거둘지 (CoachService). 순수 규칙이라 PromptRulesTest로 지킨다 */
+/** 질문 종류별 규칙 (PromptMachine). 순수 규칙이라 PromptRulesTest로 지킨다 */
 object PromptRules {
     /** 달리는 동안에만 뜻이 있는 질문 (앞쪽 정차·휴식·상태 확인) */
     private val DRIVING_KINDS = setOf(PromptKind.LAST_CHANCE, PromptKind.REST_SUGGESTION, PromptKind.CHECK_IN)
@@ -12,4 +12,10 @@ object PromptRules {
      * 동안에도 남아 있었다(2026-11-11 에뮬레이터). 급해 결과·환기·안내는 서 있어도 쓸모가 있어 남긴다.
      */
     fun withdrawWhenParked(kind: PromptKind, parked: Boolean): Boolean = parked && kind in DRIVING_KINDS
+
+    /**
+     * 말로만 알리고 카드·마이크를 쓰지 않는 질문. 안내(INFO, "얼마나 남았어?"의 대답 등)가 마이크를 열고 45초 동안 다른 질문을
+     * 막던 것(서비스 감사 D16)을 막는다.
+     */
+    fun speakOnly(kind: PromptKind): Boolean = kind == PromptKind.INFO
 }
