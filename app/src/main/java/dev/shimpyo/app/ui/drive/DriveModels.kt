@@ -271,18 +271,20 @@ private val CONTEXT_LINE_CODES = setOf("NEXT_ACCEPTED", "NEXT_REQUESTED_RESTROOM
  * 공백 전 마지막, 여유가 거의 없을 때 가까운 곳, "화장실 가고 싶대"의 답, 수유·반려견 요청의 답. 그래서 종류만 보고
  * '마지막 기회'라고 하면 틀린 말이 된다 (닫힘 검증 UI-N5: 이유가 비면 요청의 답에도 '화장실 공백 전 마지막 기회'라고 했다).
  *
- * 1. 띄운 때의 이유에 LAST_CHANCE_*가 있으면 그것으로 (정체가 먼저).
+ * 1. 띄운 때의 이유가 정체(LAST_CHANCE_CONGESTION)인지 공백(LAST_CHANCE_GAP·PREFERENCE)인지 말하면 그것으로.
  * 2. 없으면 엔진의 마지막 기회 문장인지 본다: 게이지가 NOW일 때 엔진은 "정체 전 마지막 화장실이에요"라고 물으면서 이유는
  *    NEXT_NEAREST_RESTROOM 하나만 줬다(UI-6). 말한 문장과 맥락 줄이 어긋나지 않게 문장이 요청·가까운 곳 코드보다 먼저다.
- * 3. 요청에 답한 곳(NEXT_REQUESTED_*), 가까운 곳(NEXT_NEAREST_RESTROOM) 코드.
- * 4. 이유가 없으면 나머지 세 문장으로. 아는 문장이 아니면 '다음 화장실': 마지막 기회라고 하지 않는다.
+ * 3. 그 밖의 LAST_CHANCE_* 이유만 있으면(여럿이 타서 앞당긴 것 등) 마지막 기회.
+ * 4. 요청에 답한 곳(NEXT_REQUESTED_*), 가까운 곳(NEXT_NEAREST_RESTROOM) 코드.
+ * 5. 이유가 없으면 나머지 세 문장으로. 아는 문장이 아니면 '다음 화장실': 마지막 기회라고 하지 않는다.
  */
 internal fun restroomQuestionContext(codes: List<String>, speech: String): String = when {
     "LAST_CHANCE_CONGESTION" in codes -> CONTEXT_JAM
-    codes.any { it.startsWith("LAST_CHANCE_") } -> CONTEXT_GAP
+    "LAST_CHANCE_GAP" in codes || "LAST_CHANCE_PREFERENCE" in codes -> CONTEXT_GAP
     // 장소 이름에 들어갈 수 있는 낱말("신정체육공원")이 아니라 엔진 문장의 구절로 가린다
     speech.contains("정체 전 마지막") || speech.contains("정체가 있어요") -> CONTEXT_JAM
     speech.contains("동안 화장실이 없어요") -> CONTEXT_GAP
+    codes.any { it.startsWith("LAST_CHANCE_") } -> CONTEXT_GAP
     "NEXT_REQUESTED_RESTROOM" in codes -> CONTEXT_REQUESTED_RESTROOM
     "NEXT_REQUESTED_CARE" in codes -> CONTEXT_REQUESTED_CARE
     "NEXT_NEAREST_RESTROOM" in codes -> CONTEXT_NEAR

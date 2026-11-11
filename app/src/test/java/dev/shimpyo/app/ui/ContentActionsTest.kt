@@ -7,6 +7,8 @@ import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.UiCommand
 import dev.shimpyo.coach.VoiceState
 import dev.shimpyo.engine.Facilities
+import dev.shimpyo.engine.Occupant
+import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.PitStopPlan
 import dev.shimpyo.engine.Prompt
 import dev.shimpyo.engine.PromptKind
@@ -224,6 +226,22 @@ class ContentActionsTest {
         rig.actions.describe(describeModel(VoiceState.IDLE, ttsAvailable = true, sttAvailable = false, voiceGuidance = true))
         assertEquals(2, rig.sent.size)
         assertEquals("지금은 음성 인식을 쓸 수 없어요", rig.overlays.toast?.message)
+    }
+
+    @Test
+    fun occupantDemoAndRecordCommandsGoThroughTheSamePlace() {
+        val rig = Rig()
+        val list = listOf(Occupant("driver", OccupantType.ADULT, label = "운전자", intervalOverrideMin = 120.0))
+        rig.actions.setOccupants(list)
+        rig.actions.demo("holiday")
+        assertEquals("시연 시작: 귀성길 정체", rig.overlays.toast?.message)
+        rig.actions.demo(null)
+        assertEquals("시연을 끝냈어요", rig.overlays.toast?.message)
+        assertEquals(listOf(UiCommand.SetOccupants(list), UiCommand.Demo("holiday"), UiCommand.Demo(null)), rig.sent)
+        // 기록 지우기는 호스트가 한다(서비스에 ClearRecords를 보낸다): 화면은 결과만 알린다
+        rig.actions.clearRecords()
+        assertEquals("기록을 지웠어요", rig.overlays.toast?.message)
+        assertEquals(3, rig.sent.size)
     }
 
     @Test

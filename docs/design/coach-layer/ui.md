@@ -26,7 +26,7 @@
 | `PermissionPolicy.kt` | 권한 창을 띄울 때 | `MainActivity` |
 | `components/FitColumn.kt` | 높이가 모자라면 덜 중요한 줄부터 빼는 배치 | 추천 카드, 급해 결과 카드 |
 
-화면 → 서비스 명령은 `AppHost.send` → `CoachStore.send`(Channel)로 간다. `ShimpyoContent`의 `ContentActions`가 명령을 보내는 유일한 곳이고, 무엇을 어떤 순서로 보내는지는 `ContentActionsTest`가 지킨다(예전에는 '무엇을 보이는가'만 시험했다).
+화면 → 서비스 명령은 `AppHost.send` → `CoachStore.send`(Channel)로 간다. `ShimpyoContent`의 `ContentActions`가 화면에서 명령을 보내는 유일한 곳이고, 무엇을 어떤 순서로 보내는지는 `ContentActionsTest`가 지킨다(예전에는 '무엇을 보이는가'만 시험했다). 설정 저장에 딸린 `ProfileChanged`와 기록 지우기의 `ClearRecords`만 호스트(`Platform.kt`)가 보낸다.
 
 ## 2. 주행 제한 (fail closed, 감사 #2·#26)
 
@@ -67,14 +67,15 @@
 | 순서 | 조건 | 맥락 줄 |
 |---|---|---|
 | 1 | `promptReasons`에 `LAST_CHANCE_CONGESTION` | 정체 전 마지막 화장실 |
-| 2 | 그 밖의 `LAST_CHANCE_*` (공백, 기준, 여럿이 타서) | 화장실 공백 전 마지막 기회 |
+| 2 | `LAST_CHANCE_GAP` 또는 `LAST_CHANCE_PREFERENCE` | 화장실 공백 전 마지막 기회 |
 | 3 | 엔진의 마지막 기회 문장 ("정체 전 마지막"·"정체가 있어요" / "동안 화장실이 없어요") | 위 둘과 같다 |
-| 4 | `NEXT_REQUESTED_RESTROOM` / `NEXT_REQUESTED_CARE` | 요청하신 화장실 / 요청하신 곳 |
-| 5 | `NEXT_NEAREST_RESTROOM`, 또는 문장 "여유가 거의 없어요" | 가까운 화장실 |
-| 6 | 문장 "다음 화장실은 …" / "… 쉬어 갈 수 있어요" (이유가 비었을 때) | 요청하신 화장실 / 요청하신 곳 |
-| 7 | 그 밖 | 다음 화장실 (마지막 기회라고 하지 않는다) |
+| 4 | 그 밖의 `LAST_CHANCE_*`만 있음 (여럿이 타서 앞당긴 것 등) | 화장실 공백 전 마지막 기회 |
+| 5 | `NEXT_REQUESTED_RESTROOM` / `NEXT_REQUESTED_CARE` | 요청하신 화장실 / 요청하신 곳 |
+| 6 | `NEXT_NEAREST_RESTROOM`, 또는 문장 "여유가 거의 없어요" | 가까운 화장실 |
+| 7 | 문장 "다음 화장실은 …" / "… 쉬어 갈 수 있어요" (이유가 비었을 때) | 요청하신 화장실 / 요청하신 곳 |
+| 8 | 그 밖 | 다음 화장실 (마지막 기회라고 하지 않는다) |
 
-3이 4·5보다 먼저인 이유: 게이지가 NOW일 때 엔진은 "정체 전 마지막 화장실이에요"라고 물으면서 이유는 `NEXT_NEAREST_RESTROOM` 하나만 줬다. 말한 문장과 맥락 줄이 어긋나면 안 된다. 문장은 장소 이름에 들어갈 수 있는 낱말("신정체육공원")이 아니라 구절로 가린다.
+3이 5·6보다 먼저인 이유: 게이지가 NOW일 때 엔진은 "정체 전 마지막 화장실이에요"라고 물으면서 이유는 `NEXT_NEAREST_RESTROOM` 하나만 줬다. 말한 문장과 맥락 줄이 어긋나면 안 된다. 문장은 장소 이름에 들어갈 수 있는 낱말("신정체육공원")이 아니라 구절로 가린다.
 이유가 비었으면(띄울 때 추천이 다른 곳) 지금 추천(`next`)의 이유로 채우지 않는다: 1초 뒤 추천이 넘어오면 질문 도중에 맥락 줄과 칩이 바뀌었다. 급해 질문만 결과 목록의 이유(영업·방향)를 칩으로 쓴다.
 
 ### 3.2 행동 줄 (`driveActions`, 터치 요소 4개 이하)

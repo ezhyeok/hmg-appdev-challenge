@@ -56,6 +56,7 @@ import dev.shimpyo.app.ui.urgent.urgentView
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.GoToOutcome
 import dev.shimpyo.coach.UiCommand
+import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.Prompt
 import dev.shimpyo.engine.PromptKind
 import dev.shimpyo.engine.RankedStop
@@ -313,7 +314,7 @@ fun ShimpyoContent(
                                             asleepIds = state.asleepOccupantIds,
                                             describe = describe,
                                             prefs = host.prefs,
-                                            onSetOccupants = { host.send(UiCommand.SetOccupants(it)) },
+                                            onSetOccupants = { actions.setOccupants(it) },
                                             onSetAsleep = { id, asleep -> actions.setAsleep(id, asleep) },
                                             onDescribe = { actions.describe(describe) },
                                         )
@@ -324,18 +325,10 @@ fun ShimpyoContent(
                                         occupants = state.occupants,
                                         prefs = host.prefs,
                                         versionName = host.versionName,
-                                        onSetOccupants = { host.send(UiCommand.SetOccupants(it)) },
-                                        onClearRecords = {
-                                            overlays.toast(if (host.clearRecords()) "기록을 지웠어요" else "일부 기록을 지우지 못했어요")
-                                        },
+                                        onSetOccupants = { actions.setOccupants(it) },
+                                        onClearRecords = { actions.clearRecords() },
                                     )
-                                    Screen.DEMO -> DemoPanel(
-                                        state = state,
-                                        onScenario = { key ->
-                                            host.send(UiCommand.Demo(key))
-                                            overlays.toast(if (key == null) "시연을 끝냈어요" else "시연 시작: ${demoTitle(key)}")
-                                        },
-                                    )
+                                    Screen.DEMO -> DemoPanel(state = state, onScenario = { actions.demo(it) })
                                 }
                             }
                         }
@@ -457,6 +450,20 @@ internal class ContentActions(
 
     /** 탑승자 화면의 '자는 중' (아이). 표시는 코치 상태(asleepOccupantIds)가 돌아올 때 바뀐다 */
     fun setAsleep(occupantId: String, asleep: Boolean) = host.send(UiCommand.SetAsleep(occupantId, asleep))
+
+    /** 탑승자 목록 바꾸기 (탑승자 화면, 설정의 동의 철회). 건강 유형은 코치가 동의를 다시 확인한다 */
+    fun setOccupants(list: List<Occupant>) = host.send(UiCommand.SetOccupants(list))
+
+    /** 시연 패널: [scenario]가 null이면 시연을 끝낸다 */
+    fun demo(scenario: String?) {
+        host.send(UiCommand.Demo(scenario))
+        overlays.toast(if (scenario == null) "시연을 끝냈어요" else "시연 시작: ${demoTitle(scenario)}")
+    }
+
+    /** 설정 > 기록 지우기 (확인 팝업 뒤) */
+    fun clearRecords() {
+        overlays.toast(if (host.clearRecords()) "기록을 지웠어요" else "일부 기록을 지우지 못했어요")
+    }
 
     fun makePlan() {
         ui.planRequestedGen = state().planGeneration

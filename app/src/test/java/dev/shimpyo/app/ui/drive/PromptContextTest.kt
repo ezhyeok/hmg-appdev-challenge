@@ -106,6 +106,16 @@ class PromptContextTest {
     }
 
     @Test
+    fun aPlaceNameIsNotMistakenForAJam() {
+        // 문장은 구절로 가린다: "신정체육공원"의 '정체' 때문에 요청의 답이 '정체 전 마지막 화장실'이 되면 안 된다
+        val park = stop("park", "신정체육공원 화장실", 3.0)
+        val p = Prompt("p7#1", PromptKind.LAST_CHANCE, texts.restroomRequested(park.name, 3_000.0), park, Long.MAX_VALUE)
+        assertEquals("요청하신 화장실", stopCard(running.copy(prompt = p, promptStop = park), driving = true).context)
+        val now = Prompt("p8#1", PromptKind.LAST_CHANCE, texts.restroomNowSuggestion(park.name, 3_000.0), park, Long.MAX_VALUE)
+        assertEquals("가까운 화장실", stopCard(running.copy(prompt = now, promptStop = park), driving = true).context)
+    }
+
+    @Test
     fun theNowSuggestionIsANearRestroomNotALastChance() {
         // 게이지가 NOW라 가장 가까운 곳을 권한다("화장실 여유가 거의 없어요. … 들를까요?"): 공백도 정체도 아니다
         val p = Prompt("p4#1", PromptKind.LAST_CHANCE, texts.restroomNowSuggestion(oksan.name, 10_000.0), oksan, Long.MAX_VALUE)
@@ -123,6 +133,9 @@ class PromptContextTest {
         // 여럿이 타서 앞당긴 마지막 기회만 온 경우도 마지막 기회다
         val group = running.copy(prompt = gap, promptReasons = listOf(Reason("LAST_CHANCE_GROUP", texts.reasonLastChanceGroup(4))), promptStop = oksan)
         assertEquals("화장실 공백 전 마지막 기회", stopCard(group, driving = true).context)
+        // 여럿이 타서 앞당긴 이유만 온 정체 질문은 문장을 따라 정체다 (이유가 정체인지 공백인지 말하지 않을 때)
+        val groupJam = running.copy(prompt = jamQuestion, promptReasons = listOf(Reason("LAST_CHANCE_GROUP", texts.reasonLastChanceGroup(4))), promptStop = oksan)
+        assertEquals("정체 전 마지막 화장실", stopCard(groupJam, driving = true).context)
         // 이유도 없고 아는 문장도 아니면 마지막 기회라고 하지 않는다
         val unknown = Prompt("p6#1", PromptKind.LAST_CHANCE, "들를까요?", oksan, Long.MAX_VALUE)
         val context = stopCard(running.copy(prompt = unknown, promptStop = oksan), driving = true).context
