@@ -217,7 +217,7 @@ class CoreRig(
     val accepted = RecordingAccepted()
     val clock = RigClock(test.testScheduler, wallBase)
     val log = RecordingLog()
-    val hub = SignalHub()
+    val hub = SignalHub(clock)
     val odometer = Odometer(clock)
     val positions = PositionTracker(clock) { PositionTracker.isMoving(hub.speedKph, hub.gear == Gear.PARK) }
     val loopInputs = LoopInputs()

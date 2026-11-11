@@ -2,6 +2,7 @@ package dev.shimpyo.app.data
 
 import android.content.Context
 import android.util.Log
+import dev.shimpyo.coach.AcceptedStop
 import dev.shimpyo.coach.HistoryPort
 import dev.shimpyo.coach.MemoryPort
 import dev.shimpyo.coach.ParkState
@@ -254,6 +255,8 @@ object TripJson {
         .put("restroomFallbackAt", h.restroomFallbackAt)
         .put("continuousDrivingMin", h.continuousDrivingMin)
         .put("park", h.park?.let { JSONObject().put("since", it.since).put("doorSeen", it.doorSeen) } ?: JSONObject.NULL)
+        // 들르기로 한 곳: 주행 중 재시작 뒤에도 방금 대답한 질문을 다시 묻지 않게 (서비스 감사 SV-N7)
+        .put("accepted", h.accepted?.let { JSONObject().put("stopId", it.stopId).put("at", it.at) } ?: JSONObject.NULL)
         .toString()
 
     fun decode(text: String): TripHeartbeat? = runCatching {
@@ -267,6 +270,8 @@ object TripJson {
             continuousDrivingMin = o.getDouble("continuousDrivingMin"),
             park = if (o.isNull("park")) null else o.getJSONObject("park").let { ParkState(it.getLong("since"), it.getBoolean("doorSeen")) },
             version = o.getInt("version"),
+            // 예전 판의 맥박에는 없다. 없거나 읽을 수 없으면 '들르기로 한 곳 없음'으로 읽고 여정은 이어 간다
+            accepted = o.optJSONObject("accepted")?.let { a -> runCatching { AcceptedStop(a.getString("stopId"), a.getLong("at")) }.getOrNull() },
         )
     }.getOrNull()
 }
