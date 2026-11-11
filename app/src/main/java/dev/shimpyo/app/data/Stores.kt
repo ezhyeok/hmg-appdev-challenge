@@ -1,15 +1,15 @@
 package dev.shimpyo.app.data
 
 import android.content.Context
-import dev.shimpyo.app.coach.StopLog
+import dev.shimpyo.coach.StopLog
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.PersonalMemory
 import dev.shimpyo.engine.PromptStat
 import dev.shimpyo.engine.TripProfile
+import java.io.File
 import org.json.JSONArray
 import org.json.JSONObject
-import java.io.File
 
 /**
  * 사용자 설정. 탑승자, 자동 환기 허용, 음성 사용, 시연 모드.

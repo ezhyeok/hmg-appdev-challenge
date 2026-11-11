@@ -4,7 +4,7 @@ import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import dev.shimpyo.app.coach.UiCommand
+import dev.shimpyo.coach.UiCommand
 
 /**
  * 화면이 바깥(서비스, 설정 저장소, 액티비티)과 주고받는 통로.

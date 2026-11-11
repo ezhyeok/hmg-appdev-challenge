@@ -30,11 +30,11 @@ import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.shimpyo.app.coach.VoiceState
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.DriveType
 import dev.shimpyo.app.ui.theme.PleosButtonType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
+import dev.shimpyo.coach.VoiceState
 
 /** Basic button 크기 [가이드: basic_size 도식] — 높이 100/80/64, 반경 32/24/16, 아이콘 48/40/32 */
 enum class ButtonSize(val height: Dp, val radius: Dp, val paddingH: Dp, val icon: Dp) {

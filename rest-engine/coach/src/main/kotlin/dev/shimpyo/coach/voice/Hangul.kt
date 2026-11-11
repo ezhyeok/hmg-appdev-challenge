@@ -1,4 +1,4 @@
-package dev.shimpyo.app.voice
+package dev.shimpyo.coach.voice
 
 /** 받침에 맞는 조사 ("안성휴게소를", "주유소로") */
 object Hangul {

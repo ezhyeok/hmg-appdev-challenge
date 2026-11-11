@@ -1,6 +1,5 @@
-package dev.shimpyo.app.coach
+package dev.shimpyo.coach
 
-import dev.shimpyo.app.data.Geo
 import dev.shimpyo.engine.CoachInput
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.Occupant

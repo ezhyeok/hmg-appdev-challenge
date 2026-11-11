@@ -2,10 +2,10 @@ package dev.shimpyo.app.ui.drive
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.vector.ImageVector
-import dev.shimpyo.app.coach.CoachUiState
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.components.ShimpyoIcons
 import dev.shimpyo.app.ui.theme.DriveLimits
+import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.engine.Level
 import dev.shimpyo.engine.Prompt
 import dev.shimpyo.engine.PromptKind

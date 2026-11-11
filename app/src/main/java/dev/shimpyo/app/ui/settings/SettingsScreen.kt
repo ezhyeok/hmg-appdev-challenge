@@ -19,7 +19,6 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
-import dev.shimpyo.app.coach.CoachUiState
 import dev.shimpyo.app.ui.LocalLayout
 import dev.shimpyo.app.ui.PrefsState
 import dev.shimpyo.app.ui.components.ChevronTrailing
@@ -36,6 +35,7 @@ import dev.shimpyo.app.ui.occupants.HealthConsentRow
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.PleosType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
+import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.engine.Occupant
 
 /**

@@ -14,8 +14,8 @@ import androidx.compose.ui.platform.LocalContext
 import dev.shimpyo.app.BuildConfig
 import dev.shimpyo.app.ShimpyoApp
 import dev.shimpyo.app.coach.CoachStore
-import dev.shimpyo.app.coach.UiCommand
 import dev.shimpyo.app.data.Settings
+import dev.shimpyo.coach.UiCommand
 import java.io.File
 
 /*

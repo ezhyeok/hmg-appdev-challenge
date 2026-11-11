@@ -18,9 +18,6 @@ import androidx.compose.runtime.saveable.rememberSaveableStateHolder
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
-import dev.shimpyo.app.coach.CoachUiState
-import dev.shimpyo.app.coach.UiCommand
-import dev.shimpyo.app.coach.VoiceState
 import dev.shimpyo.app.ui.components.HeaderMenuItem
 import dev.shimpyo.app.ui.components.LocalOverlays
 import dev.shimpyo.app.ui.components.OverlayState
@@ -40,6 +37,9 @@ import dev.shimpyo.app.ui.settings.SettingsScreen
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
 import dev.shimpyo.app.ui.urgent.UrgentScreen
 import dev.shimpyo.app.ui.urgent.UrgentStatus
+import dev.shimpyo.coach.CoachUiState
+import dev.shimpyo.coach.UiCommand
+import dev.shimpyo.coach.VoiceState
 import dev.shimpyo.engine.PromptKind
 import dev.shimpyo.engine.RankedStop
 import kotlinx.coroutines.delay

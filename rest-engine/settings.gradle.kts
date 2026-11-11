@@ -12,3 +12,6 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "rest-engine"
+// coach: 엔진을 차에서 돌리는 실행 계층(내비 추적, 정차 후보, 질문 상태기계, 시연/실제 전환, 코치 액터).
+// 안드로이드 없이 포트(Ports.kt) 뒤에서 돌아서 이 서버에서 바로 테스트한다. 앱은 포트를 Pleos SDK로 구현한다
+include(":coach")

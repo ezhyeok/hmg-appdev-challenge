@@ -1,7 +1,5 @@
-package dev.shimpyo.app.data
+package dev.shimpyo.coach
 
-import ai.pleos.playground.navi.data.TripRequest
-import dev.hmg.pleoskit.NaviKit
 import dev.shimpyo.engine.StopCandidate
 
 /**
@@ -9,24 +7,24 @@ import dev.shimpyo.engine.StopCandidate
  * 진행 방향 반대편 휴게소는 유턴을 해야 하므로 경로 거리가 직선거리보다 크게 나온다. 이걸로 방향을 판정한다.
  * 같은 후보는 차가 3km 이상 움직였거나 5분이 지났을 때만 다시 묻는다 (내비 요청을 아끼려고).
  */
-class RouteOracle(private val navi: NaviKit) {
+class RouteOracle(private val navi: NaviPort) : TripEstimator {
     private data class Entry(val distanceM: Double, val etaS: Double, val at: Long, val fromLat: Double, val fromLon: Double)
 
     // 후보 갱신 루프와 시연 시작(clear)이 다른 스레드에서 만진다
     private val cache = java.util.concurrent.ConcurrentHashMap<String, Entry>()
 
     /** false면 requestTrip을 쓰지 않는다 (길안내를 방해한다고 확인되면 끈다) */
-    @Volatile var enabled = true
+    @Volatile override var enabled = true
 
-    suspend fun refine(c: StopCandidate, lat: Double, lon: Double, now: Long): StopCandidate {
+    override suspend fun refine(c: StopCandidate, lat: Double, lon: Double, now: Long): StopCandidate {
         val straight = c.straightDistanceM ?: Geo.distanceM(lat, lon, c.lat, c.lon)
         val cached = cache[c.id]
         val fresh = cached != null && now - cached.at < MAX_AGE_MS && Geo.distanceM(lat, lon, cached.fromLat, cached.fromLon) < MOVE_M
         val entry = when {
             fresh -> cached!!
             !enabled -> return c.copy(straightDistanceM = straight)
-            else -> runCatching { navi.tripEstimate(TripRequest(c.lat, c.lon, "", c.name, ""), timeoutMs = 20_000) }.getOrNull()
-                ?.let { Entry(it.distance.toDouble(), it.eta.toDouble(), now, lat, lon) }
+            else -> runCatching { navi.tripEstimate(c.lat, c.lon, c.name, timeoutMs = 20_000) }.getOrNull()
+                ?.let { Entry(it.distanceM, it.etaS, now, lat, lon) }
                 ?.also { cache[c.id] = it }
                 ?: return c.copy(straightDistanceM = straight)
         }
@@ -42,7 +40,7 @@ class RouteOracle(private val navi: NaviKit) {
         )
     }
 
-    fun clear() = cache.clear()
+    override fun clear() = cache.clear()
 
     private companion object {
         const val MAX_AGE_MS = 5 * 60_000L

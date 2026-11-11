@@ -1,9 +1,5 @@
 package dev.shimpyo.app.coach
 
-import ai.pleos.playground.navi.constants.NaviMode
-import ai.pleos.playground.navi.constants.WaypointIndex
-import ai.pleos.playground.navi.data.RequestWaypointInfo
-import ai.pleos.playground.navi.data.RouteInfo
 import ai.pleos.playground.vehicle.api.model.area.SeatArea
 import ai.pleos.playground.vehicle.constant.area.TurnSignalValue
 import ai.pleos.playground.vehicle.constant.control.CruiseControl
@@ -19,14 +15,25 @@ import dev.hmg.pleoskit.SttKit
 import dev.hmg.pleoskit.TtsKit
 import dev.hmg.pleoskit.VehicleKit
 import dev.shimpyo.app.ShimpyoApp
-import dev.shimpyo.app.data.RouteOracle
 import dev.shimpyo.app.devtools.KitSelfTest
 import dev.shimpyo.app.devtools.SdkVerify
-import dev.shimpyo.app.voice.Hangul
-import dev.shimpyo.app.voice.IntentParser
 import dev.shimpyo.app.voice.PleosLlmInterpreter
 import dev.shimpyo.app.voice.VoiceAgent
-import dev.shimpyo.app.voice.YesNo
+import dev.shimpyo.coach.CongestionMath
+import dev.shimpyo.coach.DemoDirector
+import dev.shimpyo.coach.NaviMode
+import dev.shimpyo.coach.NaviPoll
+import dev.shimpyo.coach.OccupantPhrase
+import dev.shimpyo.coach.PromptRules
+import dev.shimpyo.coach.RouteOpportunities
+import dev.shimpyo.coach.RouteOpportunity
+import dev.shimpyo.coach.RouteOracle
+import dev.shimpyo.coach.SignalHub
+import dev.shimpyo.coach.StopLog
+import dev.shimpyo.coach.UiCommand
+import dev.shimpyo.coach.voice.Hangul
+import dev.shimpyo.coach.voice.IntentParser
+import dev.shimpyo.coach.voice.YesNo
 import dev.shimpyo.engine.CabinAction
 import dev.shimpyo.engine.CabinState
 import dev.shimpyo.engine.CoachEngine
@@ -44,6 +51,7 @@ import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 import dev.shimpyo.engine.TurnSignal
 import dev.shimpyo.engine.VoiceIntent
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -53,7 +61,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
-import kotlin.math.roundToInt
 
 /**
  * 쉼표의 본체. 주행 중 계속 살아 있는 포그라운드 서비스.
@@ -77,7 +84,9 @@ class CoachService : PleosForegroundService() {
     private val parser = IntentParser()
     /** 규칙으로 못 알아들은 말만 맡는다. 응답이 없으면 자동으로 꺼진다 */
     private val interpreter by lazy { PleosLlmInterpreter(this) }
-    private val oracle by lazy { RouteOracle(navi) }
+    /** 코치 계층이 쓰는 내비 경계 (SDK 타입 → 도메인 타입) */
+    private val naviPort by lazy { KitNaviPort(navi) }
+    private val oracle by lazy { RouteOracle(naviPort) }
     private val director = DemoDirector()
 
     private val hub = SignalHub()
@@ -362,16 +371,16 @@ class CoachService : PleosForegroundService() {
     private suspend fun goTo(stop: StopCandidate) {
         if (stop.id.startsWith("tbt:")) {
             // 좌표를 모르는 곳: 내비 장소 검색을 열어 둔다
-            runCatching { navi.showPlaceSearch(stop.name) }
+            naviPort.showPlaceSearch(stop.name)
             voice.say("내비에서 ${Hangul.eulReul(stop.name)} 찾아 두었어요. 정차 중에 선택해 주세요")
             return
         }
         val guiding = route?.guiding == true
         val ok = try {
             if (guiding) {
-                navi.addWaypoint(RequestWaypointInfo(latitude = stop.lat, longitude = stop.lon, poiName = stop.name, waypointIndex = WaypointIndex.FIRST, poiId = "", address = "", poiSubId = ""))
+                naviPort.addWaypoint(stop.lat, stop.lon, stop.name)
             } else {
-                navi.startRoute(RouteInfo(latitude = stop.lat, longitude = stop.lon, poiName = stop.name, poiId = "", address = "", poiSubId = ""))
+                naviPort.startRoute(stop.lat, stop.lon, stop.name)
             }
         } catch (e: CancellationException) {
             throw e
@@ -525,7 +534,7 @@ class CoachService : PleosForegroundService() {
     private fun nearestKnownPlace(): String? {
         val lat = hub.lat ?: return null
         val lon = hub.lon ?: return null
-        return app.stops.near(lat, lon, null, 300.0, URGENT_KINDS, limit = 1).firstOrNull()?.name
+        return app.stops.near(lat, lon, null, 300.0, URGENT_KINDS, now = now(), limit = 1).firstOrNull()?.name
     }
 
     // ------------------------------------------------------------ 신호 수집
@@ -606,7 +615,7 @@ class CoachService : PleosForegroundService() {
                     if (forceTbt || lastTbtAt == 0L || real - lastTbtAt >= interval) {
                         forceTbt = false
                         val at = odometerM // 내비는 요청 시점의 위치에서 잰다
-                        val tbt = navi.tbt()
+                        val tbt = naviPort.tbt()
                         tbtSnap = TbtSnap(RouteOpportunities.extract(tbt), RouteOpportunities.nextManeuverDistance(tbt), at)
                         lastTbtAt = real
                     }
@@ -616,10 +625,10 @@ class CoachService : PleosForegroundService() {
                 // 위치 SDK 갱신이 끊기면 내비의 현재 위치로 대신한다. P로 서 있으면 위치가 그대로라 다시 묻지 않는다
                 val standing = hub.gear == Gear.PARK && (hub.speedKph ?: 0f) < 1f
                 if (!director.active && now() - hub.locationAt > 15_000 && (hub.lat == null || !standing)) {
-                    val c = navi.currentLocation()
-                    hub.lat = c.latitude
-                    hub.lon = c.longitude
-                    hub.heading = c.heading.toFloat()
+                    val c = naviPort.currentLocation()
+                    hub.lat = c.lat
+                    hub.lon = c.lon
+                    hub.heading = c.heading
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -666,12 +675,12 @@ class CoachService : PleosForegroundService() {
     }
 
     private suspend fun refreshRoute() {
-        val s = navi.routeState()
-        if (s.naviMode != lastNaviMode) {
-            Log.i(TAG, "navi mode: ${s.naviMode}")
-            lastNaviMode = s.naviMode
+        val s = naviPort.routeStatus()
+        if (s.mode != lastNaviMode) {
+            Log.i(TAG, "navi mode: ${s.mode}")
+            lastNaviMode = s.mode
         }
-        val guiding = NaviPoll.isGuiding(s.naviMode)
+        val guiding = NaviPoll.isGuiding(s.mode)
         if (guiding && route?.guiding != true) {
             CongestionMath.reset()
             markNaviReset()
@@ -684,8 +693,8 @@ class CoachService : PleosForegroundService() {
             return
         }
         val at = odometerM
-        val d = navi.destination()
-        val remain = d.remainDistance.toDouble()
+        val d = naviPort.destination()
+        val remain = d.remainDistanceM
         // 내비가 확인한 진행으로 주행 거리 보정을 믿을지 정하고, 경로가 바뀌었으면 TBT를 바로 다시 받는다
         val p = NaviPoll.checkProgress(prevRemainM, prevRemainOdometerM, remain, at, odometerTrusted)
         odometerTrusted = p.trusted
@@ -695,21 +704,21 @@ class CoachService : PleosForegroundService() {
         }
         prevRemainM = remain
         prevRemainOdometerM = at
-        val items = s.trafficStatus?.congestionItemList.orEmpty()
-        items.forEach { c -> CongestionMath.observe("${c.roadName}|${c.startCrossName}", c.offset, remain) }
+        val items = s.congestion
+        items.forEach { c -> CongestionMath.observe("${c.roadName}|${c.startName}", c.offsetM, remain) }
         val congestion = items.map { c ->
             CongestionSegment(
-                startDistanceM = CongestionMath.startFromCar(c.offset, remain),
-                lengthM = c.distance,
-                durationS = CongestionMath.durationS(c.trafficCongestionTime),
-                type = c.trafficCongestionType.name,
+                startDistanceM = CongestionMath.startFromCar(c.offsetM, remain),
+                lengthM = c.lengthM,
+                durationS = c.durationS,
+                type = c.type,
                 roadName = c.roadName,
-                startName = c.startCrossName,
-                endName = c.endCrossName,
+                startName = c.startName,
+                endName = c.endName,
             )
         }.filter { it.startDistanceM + it.lengthM > 0 }
         routeSnap = RouteSnap(
-            RouteState(guiding = true, remainDistanceM = remain, remainTimeS = d.remainTime.toDouble(), congestion = congestion),
+            RouteState(guiding = true, remainDistanceM = remain, remainTimeS = d.remainTimeS, congestion = congestion),
             at,
         )
         destinationName = d.name

@@ -79,6 +79,8 @@ dependencies {
     implementation(project(":pleos-kit"))
     // 판단 로직 (includeBuild("rest-engine")가 이 좌표를 대체한다)
     implementation("dev.shimpyo:rest-engine:0.1.0")
+    // 코치 실행 계층 (안드로이드 없는 순수 Kotlin, rest-engine 빌드의 :coach). 앱은 포트를 SDK로 구현한다
+    implementation("dev.shimpyo:coach:0.1.0")
     // Pleos LLM SDK: 공모전 안내에는 없고 API 레퍼런스만 있다. 에뮬레이터에서 동작하는지 확인 중
     implementation("ai.pleos.playground:LLM:2.1.3.2")
 

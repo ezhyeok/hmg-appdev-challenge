@@ -1,6 +1,6 @@
 package dev.shimpyo.app.ui.drive
 
-import dev.shimpyo.app.coach.CoachUiState
+import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.Prompt

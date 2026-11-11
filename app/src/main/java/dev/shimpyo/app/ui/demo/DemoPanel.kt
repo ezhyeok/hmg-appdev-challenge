@@ -29,7 +29,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.shimpyo.app.coach.CoachUiState
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.LocalLayout
 import dev.shimpyo.app.ui.components.ListDivider
@@ -40,6 +39,8 @@ import dev.shimpyo.app.ui.components.pressable
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.PleosType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
+import dev.shimpyo.coach.CoachUiState
+import dev.shimpyo.coach.UiCommand
 
 /** 시연 시나리오 (DemoDirector의 이름과 같다) */
 data class DemoScenario(val key: String?, val title: String, val detail: String, val icon: ImageVector)

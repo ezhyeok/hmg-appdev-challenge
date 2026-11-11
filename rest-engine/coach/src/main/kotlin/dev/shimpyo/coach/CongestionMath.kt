@@ -1,4 +1,4 @@
-package dev.shimpyo.app.coach
+package dev.shimpyo.coach
 
 /**
  * NaviHelper 정체 정보(TrafficCongestionInfo)를 '차 기준' 값으로 바꾼다.

@@ -2,12 +2,12 @@ package dev.shimpyo.app.ui.preview
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
-import dev.shimpyo.app.coach.CoachUiState
 import dev.shimpyo.app.ui.MemoryPrefs
 import dev.shimpyo.app.ui.PreviewHost
 import dev.shimpyo.app.ui.Screen
 import dev.shimpyo.app.ui.ShimpyoContent
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
+import dev.shimpyo.coach.CoachUiState
 
 /*
  * 화면별 미리보기 (Android Studio). 크기는 Pleos Connect 앱 윈도 기준:

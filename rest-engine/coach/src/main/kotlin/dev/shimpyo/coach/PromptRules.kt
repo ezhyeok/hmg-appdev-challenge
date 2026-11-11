@@ -1,9 +1,9 @@
-package dev.shimpyo.app.coach
+package dev.shimpyo.coach
 
 import dev.shimpyo.engine.PromptKind
 
 /** 화면에 떠 있는 질문을 언제 거둘지 (CoachService). 순수 규칙이라 PromptRulesTest로 지킨다 */
-internal object PromptRules {
+object PromptRules {
     /** 달리는 동안에만 뜻이 있는 질문 (앞쪽 정차·휴식·상태 확인) */
     private val DRIVING_KINDS = setOf(PromptKind.LAST_CHANCE, PromptKind.REST_SUGGESTION, PromptKind.CHECK_IN)
 

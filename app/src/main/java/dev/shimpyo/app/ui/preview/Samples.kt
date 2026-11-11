@@ -1,8 +1,8 @@
 package dev.shimpyo.app.ui.preview
 
-import dev.shimpyo.app.coach.CoachUiState
-import dev.shimpyo.app.coach.StopLog
-import dev.shimpyo.app.coach.VoiceState
+import dev.shimpyo.coach.CoachUiState
+import dev.shimpyo.coach.StopLog
+import dev.shimpyo.coach.VoiceState
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.Gauge

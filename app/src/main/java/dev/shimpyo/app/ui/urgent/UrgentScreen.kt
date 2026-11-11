@@ -35,7 +35,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.shimpyo.app.coach.VoiceState
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.LocalLayout
 import dev.shimpyo.app.ui.components.ButtonGap
@@ -55,6 +54,7 @@ import dev.shimpyo.app.ui.theme.DriveLimits
 import dev.shimpyo.app.ui.theme.DriveType
 import dev.shimpyo.app.ui.theme.PleosType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
+import dev.shimpyo.coach.VoiceState
 import dev.shimpyo.engine.RankedStop
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind

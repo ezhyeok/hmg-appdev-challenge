@@ -1,6 +1,5 @@
-package dev.shimpyo.app.coach
+package dev.shimpyo.coach
 
-import ai.pleos.playground.navi.constants.NaviMode
 import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind

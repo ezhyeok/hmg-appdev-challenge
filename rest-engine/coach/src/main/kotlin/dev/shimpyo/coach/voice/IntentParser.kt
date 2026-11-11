@@ -1,4 +1,4 @@
-package dev.shimpyo.app.voice
+package dev.shimpyo.coach.voice
 
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType

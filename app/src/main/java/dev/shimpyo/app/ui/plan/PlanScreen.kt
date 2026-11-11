@@ -29,7 +29,6 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import dev.shimpyo.app.coach.CoachUiState
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.LocalLayout
 import dev.shimpyo.app.ui.RestroomGap
@@ -50,6 +49,7 @@ import dev.shimpyo.app.ui.stripData
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.PleosType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
+import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.PlannedStop
 import dev.shimpyo.engine.StopCandidate

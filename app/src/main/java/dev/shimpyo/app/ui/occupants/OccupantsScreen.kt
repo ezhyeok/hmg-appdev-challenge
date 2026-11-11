@@ -30,7 +30,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.shimpyo.app.coach.VoiceState
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.Labels.isHealth
 import dev.shimpyo.app.ui.LocalLayout
@@ -49,6 +48,8 @@ import dev.shimpyo.app.ui.components.SmallChip
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.PleosType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
+import dev.shimpyo.coach.UiCommand
+import dev.shimpyo.coach.VoiceState
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import kotlinx.coroutines.delay

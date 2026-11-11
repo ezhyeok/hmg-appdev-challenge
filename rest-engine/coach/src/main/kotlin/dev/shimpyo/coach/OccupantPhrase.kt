@@ -1,4 +1,4 @@
-package dev.shimpyo.app.coach
+package dev.shimpyo.coach
 
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType

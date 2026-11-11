@@ -1,11 +1,11 @@
 package dev.shimpyo.app.ui
 
 import androidx.compose.runtime.Immutable
-import dev.shimpyo.app.coach.CoachUiState
 import dev.shimpyo.app.ui.components.StripMark
 import dev.shimpyo.app.ui.components.StripSpan
 import dev.shimpyo.app.ui.components.StripSpanKind
 import dev.shimpyo.app.ui.components.StripStop
+import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.PlannedStop
 import dev.shimpyo.engine.StopCandidate

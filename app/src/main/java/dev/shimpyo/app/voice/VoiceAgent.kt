@@ -3,7 +3,7 @@ package dev.shimpyo.app.voice
 import dev.hmg.pleoskit.SttKit
 import dev.hmg.pleoskit.TtsKit
 import dev.shimpyo.app.coach.CoachStore
-import dev.shimpyo.app.coach.VoiceState
+import dev.shimpyo.coach.VoiceState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock

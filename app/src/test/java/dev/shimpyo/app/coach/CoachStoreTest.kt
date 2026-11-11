@@ -1,5 +1,6 @@
 package dev.shimpyo.app.coach
 
+import dev.shimpyo.coach.UiCommand
 import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.flow.toList
 import kotlinx.coroutines.runBlocking

@@ -1,7 +1,5 @@
-package dev.shimpyo.app.data
+package dev.shimpyo.coach
 
-import android.content.Context
-import dev.shimpyo.app.coach.RouteOpportunities
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 import dev.shimpyo.engine.stops.StopTable
@@ -11,13 +9,16 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 
 /**
- * 앱에 들어 있는 정차 후보 표(assets/data/stops.bin, [StopAssets])를 격자 색인으로 찾는다. 로딩은 한 번만 하고 메모리에 둔다.
+ * 앱에 들어 있는 정차 후보 표(assets/data/stops.bin, 앱의 StopAssets가 읽는다)를 격자 색인으로 찾는다. 로딩은 한 번만 하고 메모리에 둔다.
  *
  * 색인은 행 번호(IntArray)만 들고, 거리·방향 거르기는 표의 원시 배열로 한 뒤 통과한 행만 StopCandidate로 만든다.
  * 고속도로 휴게소·졸음쉼터(532곳) 전용 색인을 따로 둬서, 60km 반경을 보는 [ahead]가 공중화장실 6만 곳을
  * 훑지 않는다. 각 색인은 예전 색인과 같은 칸 순서·행 순서로 돌기 때문에 결과(거리가 같은 후보의 순서까지)가 같다.
  */
-class StopRepository(private val context: Context) {
+class StopRepository(
+    /** 표 읽기 (앱: assets의 stops.bin을 메모리 매핑). 실패하면 null */
+    private val loadTable: () -> StopTable?,
+) : StopIndex {
     private val loadLock = Mutex()
     @Volatile private var table: StopTable? = null
     @Volatile private var all: GridIndex? = null
@@ -27,12 +28,13 @@ class StopRepository(private val context: Context) {
     @Volatile private var ids: Map<String, Int>? = null
 
     val count: Int get() = table?.size ?: 0
+    override val loaded: Boolean get() = table != null
 
     /** 표를 읽고 색인을 만든다 (에뮬레이터에서 1초 안팎). 행 수를 돌려준다 */
     suspend fun ensureLoaded(): Int = loadLock.withLock {
         table?.let { return it.size }
         withContext(Dispatchers.IO) {
-            val t = StopAssets.loadTable(context) ?: return@withContext 0
+            val t = loadTable() ?: return@withContext 0
             all = GridIndex(t) { true }
             highway = GridIndex(t) { t.kind(it) in HIGHWAY_KINDS }
             normalizedNames = arrayOfNulls(t.size)
@@ -45,7 +47,10 @@ class StopRepository(private val context: Context) {
      * 진행 방향 앞쪽 후보. [heading]이 없으면 방향 필터 없이 반경만 본다.
      * 결과에는 현재 위치 기준 직선거리를 채워 둔다.
      */
-    fun ahead(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, maxAngle: Double = 75.0): List<StopCandidate> {
+    override fun ahead(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>): List<StopCandidate> =
+        ahead(lat, lon, heading, radiusM, kinds, maxAngle = 75.0)
+
+    fun ahead(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, maxAngle: Double): List<StopCandidate> {
         val t = table ?: return emptyList()
         val out = ArrayList<StopCandidate>()
         indexFor(kinds).forEachIn(lat, lon, radiusM) { i ->
@@ -70,9 +75,9 @@ class StopRepository(private val context: Context) {
      * 거르기·정렬은 행 번호와 거리로만 하고 마지막에 [limit]곳만 StopCandidate로 만든다(강남역 부근 반경 5km에서
      * 예전에는 841곳을 만들어 15곳을 썼다). 정렬이 안정적이라 결과는 예전과 같다.
      */
-    fun near(
+    override fun near(
         lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>,
-        now: Long = System.currentTimeMillis(), limit: Int = Int.MAX_VALUE,
+        now: Long, limit: Int,
     ): List<StopCandidate> {
         val t = table ?: return emptyList()
         val hits = ArrayList<Hit>()
@@ -105,7 +110,7 @@ class StopRepository(private val context: Context) {
      * TBT에서 읽은 이름과 맞는 후보. 이름은 정규화해서 비교하고(방향 표기·접미어 제거),
      * 현재 위치에서 [maxStraightM] 안에 있는 것만 돌려준다 (양방향이 다 나올 수 있다).
      */
-    fun matchByName(name: String, kind: StopKind, lat: Double, lon: Double, maxStraightM: Double): List<StopCandidate> {
+    override fun matchByName(name: String, kind: StopKind, lat: Double, lon: Double, maxStraightM: Double, heading: Float?): List<StopCandidate> {
         val t = table ?: return emptyList()
         val key = RouteOpportunities.normalizeName(name)
         if (key.isEmpty()) return emptyList()

@@ -1,7 +1,5 @@
-package dev.shimpyo.app.coach
+package dev.shimpyo.coach
 
-import ai.pleos.playground.navi.constants.TurnType
-import ai.pleos.playground.navi.data.TBTInfo
 import dev.shimpyo.engine.StopKind
 
 /** 경로 위 화장실 기회 하나 (TBT에서 읽은 것) */
@@ -21,14 +19,14 @@ data class RouteOpportunity(
  */
 object RouteOpportunities {
 
-    fun extract(tbt: List<TBTInfo>): List<RouteOpportunity> {
+    fun extract(tbt: List<TbtItem>): List<RouteOpportunity> {
         var cumulative = 0.0
         val out = ArrayList<RouteOpportunity>()
         for (item in tbt) {
-            cumulative += item.distance.coerceAtLeast(0.0)
+            cumulative += item.distanceM.coerceAtLeast(0.0)
             val kind = when (item.type) {
-                TurnType.TURN_ENTER_SERVICEAREA -> StopKind.HIGHWAY_REST_AREA
-                TurnType.TURN_RESTAREA -> StopKind.DROWSY_SHELTER
+                TbtType.SERVICE_AREA -> StopKind.HIGHWAY_REST_AREA
+                TbtType.REST_AREA -> StopKind.DROWSY_SHELTER
                 else -> null
             } ?: continue
             val name = item.description.trim()
@@ -40,7 +38,7 @@ object RouteOpportunities {
     }
 
     /** 다음 회전까지 거리 (첫 항목) */
-    fun nextManeuverDistance(tbt: List<TBTInfo>): Double? = tbt.firstOrNull()?.distance
+    fun nextManeuverDistance(tbt: List<TbtItem>): Double? = tbt.firstOrNull()?.distanceM
 
     private fun isRestStop(name: String, kind: StopKind): Boolean = when (kind) {
         StopKind.HIGHWAY_REST_AREA -> name.contains("휴게소") || name.contains("쉼터")

@@ -1,4 +1,4 @@
-package dev.shimpyo.app.coach
+package dev.shimpyo.coach
 
 import dev.shimpyo.engine.CoachEngine
 import dev.shimpyo.engine.CoachInput

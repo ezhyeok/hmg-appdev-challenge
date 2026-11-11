@@ -1,4 +1,4 @@
-package dev.shimpyo.app.data
+package dev.shimpyo.coach
 
 import kotlin.math.abs
 import kotlin.math.atan2

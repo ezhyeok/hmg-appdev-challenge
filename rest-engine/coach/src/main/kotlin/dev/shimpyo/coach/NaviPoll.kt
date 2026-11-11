@@ -1,6 +1,5 @@
-package dev.shimpyo.app.coach
+package dev.shimpyo.coach
 
-import ai.pleos.playground.navi.constants.NaviMode
 import dev.shimpyo.engine.StopCandidate
 
 /**
@@ -11,15 +10,13 @@ import dev.shimpyo.engine.StopCandidate
  * 받는다. 주행 거리 보정은 내비가 실제로 그만큼 나아갔다고 확인할 때만 쓴다([checkProgress]). 확인 전이나 어긋나면
  * 예전처럼 거리를 그대로 두고 5초마다 받는다(에뮬레이터의 내비는 판교에 서 있어 차속만으로 줄이면 내비와 어긋난다).
  */
-internal object NaviPoll {
+object NaviPoll {
     /**
      * 경로가 있는 길안내인지. SAFE_GUIDING은 경로 없는 안전운전 모드다(SPEC 8장: 경로 전에는 SAFE_GUIDING, kit의 isGuiding도
      * ROUTE_GUIDING만 본다). 예전에는 이것도 길안내로 봐서 경로 없이 TBT·목적지를 계속 조회했고, 수락하면 startRoute 대신
      * addWaypoint를 불러 실패했다(2026-11-11 감사). SIMULATION_GUIDING은 내비의 모의 주행(경로 있음)이다.
      */
-    val GUIDING_MODES: Set<NaviMode> = setOf(NaviMode.ROUTE_GUIDING, NaviMode.SIMULATION_GUIDING)
-
-    fun isGuiding(mode: NaviMode?): Boolean = mode in GUIDING_MODES
+    fun isGuiding(mode: NaviMode?): Boolean = mode?.hasRoute == true
 
     /** 경로 상태(정체·길안내 여부)와 목적지 조회 간격 */
     const val ROUTE_MS = 15_000L

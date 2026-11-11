@@ -1,6 +1,5 @@
 package dev.shimpyo.app.ui.history
 
-import androidx.compose.runtime.Immutable
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -16,13 +15,13 @@ import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.runtime.remember
-import kotlinx.coroutines.delay
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.produceState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.produceState
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.CornerRadius
@@ -33,7 +32,6 @@ import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import dev.shimpyo.app.coach.StopLog
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.LocalLayout
 import dev.shimpyo.app.ui.components.EmptyMessage
@@ -46,11 +44,13 @@ import dev.shimpyo.app.ui.components.SmallChip
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.PleosType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
+import dev.shimpyo.coach.StopLog
 import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 import kotlin.math.max
 import kotlin.math.roundToInt
+import kotlinx.coroutines.delay
 
 /*
  * 5. 휴식 기록 (screens.md 5장, 정차 중에만). 기어 P와 문 열림으로 자동 기록한 정차와 연속 주행 시간을 보여 준다.
