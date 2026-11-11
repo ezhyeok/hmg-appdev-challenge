@@ -13,13 +13,13 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.TextMeasurer
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.drawText
 import androidx.compose.ui.text.rememberTextMeasurer
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -69,7 +69,9 @@ fun RouteStrip(
     val label = if (driving) DriveType.Minimum else PleosType.BodySmallStrong
     // 글자 줄 높이는 sp라 글꼴 배율을 따른다
     val labelH = with(LocalDensity.current) { label.lineHeight.toDp() } + 4.dp
-    val metrics = StripMetrics(labelH = labelH, railH = 52.dp, scaleH = if (driving) 0.dp else 30.dp)
+    // 계획 정차 번호도 주행 중에는 주행 화면 최소 글자(28)로 키운다 (UI 감사 #25: 26이었다)
+    val number = if (driving) PleosType.BodyMediumStrong else PleosType.BodySmallStrong
+    val metrics = StripMetrics(labelH = labelH, railH = 52.dp, scaleH = if (driving) 0.dp else 30.dp, plannedR = if (driving) 23.dp else 20.dp)
     val palette = StripPalette(
         rail = c.timelineRoute,
         opportunity = c.timelineOpportunity,
@@ -89,11 +91,11 @@ fun RouteStrip(
             .height(metrics.labelH * 2 + metrics.railH + metrics.scaleH)
             .semantics { contentDescription = description },
     ) {
-        drawStrip(axisM, stops, spans, destinationM, palette, measurer, label, metrics)
+        drawStrip(axisM, stops, spans, destinationM, palette, measurer, label, number, metrics)
     }
 }
 
-private class StripMetrics(val labelH: Dp, val railH: Dp, val scaleH: Dp)
+private class StripMetrics(val labelH: Dp, val railH: Dp, val scaleH: Dp, val plannedR: Dp)
 
 private class StripPalette(
     val rail: Color,
@@ -129,6 +131,7 @@ private fun DrawScope.drawStrip(
     p: StripPalette,
     measurer: TextMeasurer,
     labelStyle: TextStyle,
+    numberStyle: TextStyle,
     m: StripMetrics,
 ) {
     val axis = max(axisM, 1.0)
@@ -199,10 +202,11 @@ private fun DrawScope.drawStrip(
                 drawCircle(p.card, radius = 7.dp.toPx(), center = center)
             }
             StripMark.PLANNED -> {
-                drawCircle(p.card, radius = 23.dp.toPx(), center = center)
-                drawCircle(p.planned, radius = 20.dp.toPx(), center = center)
+                val r = m.plannedR.toPx()
+                drawCircle(p.card, radius = r + 3.dp.toPx(), center = center)
+                drawCircle(p.planned, radius = r, center = center)
                 s.number?.let { n ->
-                    val t = measurer.measure(n.toString(), PleosType.BodySmallStrong)
+                    val t = measurer.measure(n.toString(), numberStyle)
                     drawText(t, color = p.onPlanned, topLeft = Offset(center.x - t.size.width / 2f, center.y - t.size.height / 2f))
                 }
             }

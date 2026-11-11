@@ -6,6 +6,7 @@ import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -31,57 +32,72 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.LocalLayout
+import dev.shimpyo.app.ui.RequestFocusOnce
 import dev.shimpyo.app.ui.components.ButtonGap
+import dev.shimpyo.app.ui.components.ButtonSize
 import dev.shimpyo.app.ui.components.ChipFlow
 import dev.shimpyo.app.ui.components.EmptyMessage
+import dev.shimpyo.app.ui.components.FitColumn
 import dev.shimpyo.app.ui.components.ListDivider
 import dev.shimpyo.app.ui.components.ListGroup
+import dev.shimpyo.app.ui.components.MicModel
 import dev.shimpyo.app.ui.components.PageHeader
 import dev.shimpyo.app.ui.components.PleosButton
+import dev.shimpyo.app.ui.components.ShimpyoCard
 import dev.shimpyo.app.ui.components.ShimpyoIcons
 import dev.shimpyo.app.ui.components.SmallChip
 import dev.shimpyo.app.ui.components.ToggleButton
 import dev.shimpyo.app.ui.components.VoiceButton
 import dev.shimpyo.app.ui.components.pressable
+import dev.shimpyo.app.ui.drive.acceptLabel
+import dev.shimpyo.app.ui.drive.shortQuestion
+import dev.shimpyo.app.ui.limitChars
+import dev.shimpyo.app.ui.shortStopName
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.DriveLimits
 import dev.shimpyo.app.ui.theme.DriveType
 import dev.shimpyo.app.ui.theme.PleosType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
-import dev.shimpyo.coach.VoiceState
+import dev.shimpyo.engine.Prompt
 import dev.shimpyo.engine.RankedStop
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 
-/** 급해 결과 상태 */
-enum class UrgentStatus { LOADING, FAILED, READY }
-
 /**
- * 3. 급해 결과 (screens.md 3장). 엔진이 매긴 순위를 그대로 보여 준다.
+ * 3. 급해 결과 (screens.md 3장). 엔진이 매긴 순위를 그대로 보여 준다. 단계는 [UrgentModel](urgentView)이 정한다.
  *
- * 주행 중: 최대 2곳([DriveLimits.MAX_URGENT_RESULTS]), 카드 전체가 하나의 터치 영역(높이 220 이상).
- * 1순위는 Filled, 2순위는 Basic. 자동으로 넘기거나 회전하지 않고, 지도는 그리지 않는다.
+ * 주행 중: 최대 2곳(주행 제한의 항목 수 [maxItems]), 카드 전체가 하나의 터치 영역(높이 220 이상). 1순위는 Filled, 2순위는 Basic.
+ * 자동으로 넘기거나 회전하지 않고, 지도는 그리지 않는다. 터치 요소는 마이크·1순위·2순위·닫기 4개다.
  * 정차 중: 필터(교환대·24시간·주차 가능)와 시설 줄이 있는 목록.
+ * CCP: 결과가 나오면 1순위에 포커스를 둔다 (screens.md 3.4).
+ *
+ * @param question 이 화면이 떠 있는 동안 코치가 다른 질문을 했다(예: 마지막 기회). 주행 중에는 터치 요소를 늘리지 않고
+ *   글자로만 알리고(대답은 음성 또는 닫은 뒤 주행 화면), 정차 중에는 버튼을 같이 둔다 (UI 감사 #27)
  */
 @Composable
 fun UrgentScreen(
-    results: List<RankedStop>?,
-    status: UrgentStatus,
+    view: UrgentView,
     driving: Boolean,
+    maxItems: Int,
     pickingId: String?,
-    voice: VoiceState,
-    voiceEnabled: Boolean,
+    mic: MicModel,
+    onMic: () -> Unit,
     onPick: (RankedStop) -> Unit,
     onClose: () -> Unit,
     onRetry: () -> Unit,
-    onListen: () -> Unit,
     modifier: Modifier = Modifier,
+    maxChars: Int = DriveLimits.MAX_STRING_LENGTH,
+    cabinSupported: Boolean = true,
+    question: Prompt? = null,
+    onAnswer: (Prompt, Boolean) -> Unit = { _, _ -> },
     badge: String? = null,
     badgeShort: String? = null,
 ) {
@@ -96,46 +112,104 @@ fun UrgentScreen(
             margin = layout.margin,
             // 주행 중에는 아래 [닫기]와 겹치는 뒤로 버튼을 빼서 터치 요소를 4개(마이크, 1·2순위, 닫기)로 둔다
             onBack = if (driving) null else onClose,
-            trailing = { VoiceButton(voice, voiceEnabled, onListen) },
+            trailing = { VoiceButton(mic, onMic, driving = driving) },
         )
         val body = Modifier.fillMaxWidth().weight(1f).padding(start = layout.margin, end = layout.margin, bottom = layout.bottom)
-        when {
-            status == UrgentStatus.LOADING -> Notice(body, "가까운 화장실을 찾는 중이에요", "진행 방향, 주차, 영업 여부를 보고 있어요", null, onClose, null)
-            status == UrgentStatus.FAILED -> Notice(body, "위치를 확인할 수 없어요", "잠시 후 다시 시도해 주세요", "다시 시도", onClose, onRetry)
-            results.isNullOrEmpty() -> Notice(body, "가까운 곳에 열린 화장실이 없어요", "다음 휴게소까지 기다려 주세요", null, onClose, null)
-            driving -> DrivingResults(results.take(DriveLimits.MAX_URGENT_RESULTS), pickingId, onPick, onClose, body)
-            else -> ParkedResults(results, pickingId, onPick, body)
+        Column(body) {
+            if (question != null) {
+                QuestionStrip(question, driving, cabinSupported, maxChars, onAnswer)
+                Spacer(Modifier.height(Dimens.Space.m))
+            }
+            val rest = Modifier.fillMaxWidth().weight(1f)
+            val n = urgentNotice(view.status)
+            when {
+                n != null -> Notice(rest, n, onClose, onRetry)
+                driving -> DrivingResults(view.results.take(maxItems.coerceIn(1, DriveLimits.MAX_URGENT_RESULTS)), pickingId, maxChars, onPick, onClose, rest)
+                else -> ParkedResults(view.results, pickingId, onPick, rest)
+            }
         }
     }
 }
 
+/** 결과 대신 보이는 안내. READY면 null */
+data class UrgentNotice(val title: String, val detail: String, val retry: Boolean)
+
+fun urgentNotice(status: UrgentStatus): UrgentNotice? = when (status) {
+    UrgentStatus.LOCATING -> UrgentNotice("위치를 확인하는 중이에요", "확인되면 바로 가까운 화장실을 찾아요", retry = false)
+    UrgentStatus.SEARCHING -> UrgentNotice("가까운 화장실을 찾는 중이에요", "진행 방향, 주차, 영업 여부를 보고 있어요", retry = false)
+    UrgentStatus.READY -> null
+    UrgentStatus.NO_LOCATION -> UrgentNotice("위치를 확인할 수 없어요", "잠시 후 다시 시도해 주세요", retry = true)
+    UrgentStatus.NO_RESULT -> UrgentNotice("가까운 곳에 열린 화장실이 없어요", "조금 더 가서 다시 찾아 보세요", retry = true)
+    UrgentStatus.NO_RESPONSE -> UrgentNotice("가까운 화장실을 찾지 못했어요", "위치를 확인하지 못했을 수 있어요. 다시 시도해 주세요", retry = true)
+    UrgentStatus.SERVICE_STARTING -> UrgentNotice("준비하고 있어요", "잠시 후 가까운 화장실을 찾아요", retry = false)
+    UrgentStatus.SERVICE_OFF -> UrgentNotice("코치가 멈췄어요", "앱을 다시 열면 이어서 찾을 수 있어요", retry = false)
+}
+
 @Composable
-private fun Notice(modifier: Modifier, title: String, detail: String, actionText: String?, onClose: () -> Unit, onAction: (() -> Unit)?) {
+private fun Notice(modifier: Modifier, n: UrgentNotice, onClose: () -> Unit, onRetry: () -> Unit) {
+    val retryFocus = remember { FocusRequester() }
     Column(modifier) {
         Box(Modifier.fillMaxWidth().weight(1f), contentAlignment = Alignment.Center) {
-            EmptyMessage(title, detail = detail, icon = ShimpyoIcons.Wc)
+            EmptyMessage(n.title, detail = n.detail, icon = ShimpyoIcons.Wc)
         }
         Row(horizontalArrangement = Arrangement.spacedBy(ButtonGap)) {
-            if (actionText != null && onAction != null) {
-                PleosButton(actionText, onAction, Modifier.weight(1f), filled = true, labelStyle = DriveType.ActionLabel)
+            if (n.retry) {
+                PleosButton("다시 시도", onRetry, Modifier.weight(1f).focusRequester(retryFocus), filled = true, labelStyle = DriveType.ActionLabel)
             }
             PleosButton("닫기", onClose, Modifier.weight(1f), labelStyle = DriveType.ActionLabel)
         }
     }
+    if (n.retry) RequestFocusOnce(retryFocus, n.title)
+}
+
+/** 급해 화면 위의 다른 질문 (UI 감사 #27) */
+@Composable
+private fun QuestionStrip(p: Prompt, driving: Boolean, cabinSupported: Boolean, maxChars: Int, onAnswer: (Prompt, Boolean) -> Unit) {
+    val c = ShimpyoTheme.colors
+    ShimpyoCard(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = Dimens.Space.l, vertical = Dimens.Space.m)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Icon(ShimpyoIcons.Info, contentDescription = null, modifier = Modifier.size(Dimens.Icon.small), tint = c.iconSecondary)
+            Spacer(Modifier.width(Dimens.Space.xs))
+            Text(
+                limitChars(p.stop?.let { "${shortStopName(it.name)}: ${shortQuestion(p)}" } ?: shortQuestion(p), maxChars),
+                style = DriveType.Minimum,
+                color = c.textPrimary,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (driving) {
+            Text("말로 응·아니 하거나, 닫고 답해 주세요", style = DriveType.Minimum, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        } else {
+            Spacer(Modifier.height(Dimens.Space.s))
+            Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Space.m)) {
+                val accept = acceptLabel(p, cabinSupported)
+                if (accept != null) PleosButton(accept, { onAnswer(p, true) }, Modifier.weight(1f), size = ButtonSize.Medium)
+                PleosButton(if (accept != null) "괜찮아요" else "확인", { onAnswer(p, false) }, Modifier.weight(1f), size = ButtonSize.Medium)
+            }
+        }
+    }
 }
 
 @Composable
-private fun DrivingResults(results: List<RankedStop>, pickingId: String?, onPick: (RankedStop) -> Unit, onClose: () -> Unit, modifier: Modifier) {
+private fun DrivingResults(results: List<RankedStop>, pickingId: String?, maxChars: Int, onPick: (RankedStop) -> Unit, onClose: () -> Unit, modifier: Modifier) {
     val layout = LocalLayout.current
+    val firstFocus = remember { FocusRequester() }
     Column(modifier) {
-        Text("진행 방향 · 주차 가능 · 지금 열린 곳을 빠른 순으로", style = DriveType.Minimum, color = ShimpyoTheme.colors.textSecondary, maxLines = 1)
-        Spacer(Modifier.height(Dimens.Space.m))
+        // 가장 좁은 compact 세로(628dp - 여백 48)에서도 한 줄에 들어가는 길이 (UI 감사 #10: 예전 문구는 잘렸다)
+        Text("진행 방향 · 주차 가능 · 빠른 순", style = DriveType.Minimum, color = ShimpyoTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Spacer(Modifier.height(if (layout.compact) Dimens.Space.s else Dimens.Space.m))
         // 두 카드가 남는 높이를 나눠 가진다 (주행 중 터치 영역은 클수록 좋다). 1곳이면 2순위 자리는 비워 둔다
         val slots: @Composable (Modifier) -> Unit = { cell ->
             for (i in 0 until DriveLimits.MAX_URGENT_RESULTS) {
                 val r = results.getOrNull(i)
                 if (r != null) {
-                    UrgentResultCard(i + 1, r, primary = i == 0, picking = pickingId == r.stop.id, onClick = { onPick(r) }, modifier = cell)
+                    UrgentResultCard(
+                        i + 1, r, primary = i == 0, picking = pickingId == r.stop.id, enabled = pickingId == null, compact = layout.compact, maxChars = maxChars,
+                        onClick = { onPick(r) },
+                        modifier = if (i == 0) cell.focusRequester(firstFocus) else cell,
+                    )
                 } else {
                     Spacer(cell)
                 }
@@ -146,18 +220,32 @@ private fun DrivingResults(results: List<RankedStop>, pickingId: String?, onPick
                 slots(Modifier.weight(1f).fillMaxHeight())
             }
         } else {
-            Column(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(ButtonGap)) {
+            Column(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(if (layout.compact) Dimens.Space.m else ButtonGap)) {
                 slots(Modifier.weight(1f).fillMaxWidth())
             }
         }
-        Spacer(Modifier.height(ButtonGap))
+        Spacer(Modifier.height(if (layout.compact) Dimens.Space.m else ButtonGap))
         PleosButton("닫기", onClose, Modifier.fillMaxWidth(), labelStyle = DriveType.ActionLabel)
     }
+    RequestFocusOnce(firstFocus, results.firstOrNull()?.stop?.id)
 }
 
-/** 주행 중 결과 카드: 순위, 종류 아이콘, 이름(40), "3분 · 1.1km · 진행 방향"(30), 배지 2개까지, "여기로 >"(40) */
+/**
+ * 주행 중 결과 카드: 순위, 종류 아이콘, 이름(40), "3분 · 1.1km · 진행 방향"(30), 배지 2개까지와 "여기로 >"(40), 소요 구성(28).
+ * 높이가 모자라면 소요 구성 → 배지 줄 순으로 뺀다(FitColumn). 이름과 시간은 늘 남는다.
+ */
 @Composable
-private fun UrgentResultCard(rank: Int, r: RankedStop, primary: Boolean, picking: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+private fun UrgentResultCard(
+    rank: Int,
+    r: RankedStop,
+    primary: Boolean,
+    picking: Boolean,
+    enabled: Boolean,
+    compact: Boolean,
+    maxChars: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val c = ShimpyoTheme.colors
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -170,43 +258,51 @@ private fun UrgentResultCard(rank: Int, r: RankedStop, primary: Boolean, picking
     val fg = if (primary) c.textOnFilledPrimary else c.textPrimary
     val fg2 = if (primary) c.textOnFilledSecondary else c.textSecondary
     val chipBg = if (primary) c.textOnFilledPrimary.copy(alpha = 0.16f) else c.cardContainer
-    Column(
-        modifier
-            .heightIn(min = Dimens.Drive.urgentResultCardMinHeight)
-            .pressable(interaction, enabled = !picking, cornerRadius = Dimens.Radius.l, onClick = onClick)
-            .clip(RoundedCornerShape(Dimens.Radius.l))
-            .background(bg)
-            .padding(Dimens.Space.xl),
-        verticalArrangement = Arrangement.Center,
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            RankMark(rank, primary)
-            Spacer(Modifier.width(Dimens.Space.m))
-            Icon(Labels.kindIcon(r.stop.kind), contentDescription = Labels.kindName(r.stop.kind), modifier = Modifier.size(Dimens.Icon.base), tint = fg)
-            Spacer(Modifier.width(Dimens.Space.s))
-            Text(r.stop.name, style = DriveType.StopName, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+    val breakdown = urgentBreakdown(r)
+    val rows = buildList<@Composable () -> Unit> {
+        add {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                RankMark(rank, primary)
+                Spacer(Modifier.width(Dimens.Space.m))
+                Icon(Labels.kindIcon(r.stop.kind), contentDescription = Labels.kindName(r.stop.kind), modifier = Modifier.size(Dimens.Icon.base), tint = fg)
+                Spacer(Modifier.width(Dimens.Space.s))
+                Text(limitChars(r.stop.name, maxChars), style = DriveType.StopName, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+            }
         }
-        Spacer(Modifier.height(Dimens.Space.s))
-        Text(urgentMeta(r), style = DriveType.StopMeta, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        urgentBreakdown(r)?.let { Text(it, style = DriveType.Minimum, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
-        Spacer(Modifier.height(Dimens.Space.m))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            ChipFlow(Modifier.weight(1f), maxLines = 1) {
-                urgentBadges(r).take(2).forEach { badge ->
-                    Box(
-                        Modifier.height(Dimens.Component.chipHeight).clip(RoundedCornerShape(Dimens.Radius.s)).background(chipBg)
-                            .padding(horizontal = Dimens.Component.chipPaddingHorizontal),
-                        contentAlignment = Alignment.Center,
-                    ) {
-                        Text(badge, style = DriveType.ReasonChip, color = fg, maxLines = 1)
+        add { Text(limitChars(urgentMeta(r), maxChars), style = DriveType.StopMeta, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        // 소요 구성은 시간 바로 아래에 두되, 높이가 모자라면 배지 줄보다 먼저 뺀다 (priority)
+        if (breakdown != null) add { Text(breakdown, style = DriveType.Minimum, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        add {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ChipFlow(Modifier.weight(1f), maxLines = 1) {
+                    urgentBadges(r).take(2).forEach { badge ->
+                        Box(
+                            Modifier.height(Dimens.Component.chipHeight).clip(RoundedCornerShape(Dimens.Radius.s)).background(chipBg)
+                                .padding(horizontal = Dimens.Component.chipPaddingHorizontal),
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Text(badge, style = DriveType.ReasonChip, color = fg, maxLines = 1)
+                        }
                     }
                 }
+                Spacer(Modifier.width(Dimens.Space.m))
+                Text(if (picking) "넣는 중" else "여기로", style = DriveType.ActionLabel, color = fg, maxLines = 1)
+                if (!picking) Icon(ShimpyoIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(Dimens.Icon.base), tint = fg)
             }
-            Spacer(Modifier.width(Dimens.Space.m))
-            Text(if (picking) "넣는 중" else "여기로", style = DriveType.ActionLabel, color = fg, maxLines = 1)
-            if (!picking) Icon(ShimpyoIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(Dimens.Icon.base), tint = fg)
         }
     }
+    FitColumn(
+        rows = rows,
+        gap = if (compact) Dimens.Space.xs else Dimens.Space.s,
+        required = 2,
+        priority = if (breakdown != null) listOf(0, 1, 3, 2) else null,
+        modifier = modifier
+            .heightIn(min = Dimens.Drive.urgentResultCardMinHeight)
+            .pressable(interaction, enabled = enabled && !picking, cornerRadius = Dimens.Radius.l, onClick = onClick)
+            .clip(RoundedCornerShape(Dimens.Radius.l))
+            .background(bg)
+            .padding(if (compact) Dimens.Space.l else Dimens.Space.xl),
+    )
 }
 
 @Composable
@@ -275,7 +371,7 @@ private fun ParkedResults(results: List<RankedStop>, pickingId: String?, onPick:
             ListGroup {
                 shown.forEachIndexed { i, r ->
                     if (i > 0) ListDivider()
-                    ParkedRow(results.indexOf(r) + 1, r, pickingId == r.stop.id) { onPick(r) }
+                    ParkedRow(results.indexOf(r) + 1, r, pickingId == r.stop.id, enabled = pickingId == null) { onPick(r) }
                 }
             }
         }
@@ -285,7 +381,7 @@ private fun ParkedResults(results: List<RankedStop>, pickingId: String?, onPick:
 
 /** 목록 항목(세 줄): 순위·이름·총 소요 / 거리·방향·영업 / 시설(있음·없음)과 주차 형태 */
 @Composable
-private fun ParkedRow(rank: Int, r: RankedStop, picking: Boolean, onClick: () -> Unit) {
+private fun ParkedRow(rank: Int, r: RankedStop, picking: Boolean, enabled: Boolean, onClick: () -> Unit) {
     val c = ShimpyoTheme.colors
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
@@ -294,7 +390,7 @@ private fun ParkedRow(rank: Int, r: RankedStop, picking: Boolean, onClick: () ->
         Modifier
             .fillMaxWidth()
             .heightIn(min = 140.dp)
-            .pressable(interaction, enabled = !picking, cornerRadius = Dimens.Radius.m, onClick = onClick)
+            .pressable(interaction, enabled = enabled && !picking, cornerRadius = Dimens.Radius.m, onClick = onClick)
             .clip(RoundedCornerShape(Dimens.Radius.m))
             .background(if (pressed) c.buttonBasicPressed else Color.Transparent)
             .padding(horizontal = Dimens.Space.l, vertical = Dimens.Space.m),
