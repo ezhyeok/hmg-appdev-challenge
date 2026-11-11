@@ -125,6 +125,30 @@ class CoachCoreTest {
         assertEquals("화면 목록 1등과 엔진 질문이 같은 곳", rig.state.urgent!!.first().stop.id, rig.state.prompt?.stop?.id)
     }
 
+    // ------------------------------------------------------------ 질문 이유 (UI 닫힘 검증 #6)
+
+    @Test
+    fun aJamLastChanceAskedWhileTheGaugeIsNowIsStillPublishedAsAJamLastChance() = runTest {
+        // 코어는 카드를 띄울 때의 이유를 엔진 추천(next)에서 가져온다. 예전에는 화장실 게이지가 NOW(10분 이하, 또는 누가 말함)면
+        // 엔진 추천의 이유가 LAST_CHANCE_*가 아니라 NEXT_NEAREST_RESTROOM이었다(추천은 NOW를 먼저 봤다). 그래서 "앞에 1시간 정체가
+        // 있어요 … 정체 전 마지막 화장실이에요"라고 묻는 카드의 promptReasons가 [NEXT_NEAREST_RESTROOM]이고, 화면은 맥락 줄을
+        // '가까운 화장실', 칩을 '가장 빨리 가는 곳'으로 그렸다('정체 1시간' 칩이 없다). 가장 급할 때(아이가 화장실을 말했고 다음이
+        // 정체 전 마지막) 생겼다. 엔진이 질문의 이유를 추천에 함께 싣는다 (엔진 PromptReasonsTest). 여기서는 화면 상태까지 본다
+        val rig = CoreRig(this)
+        rig.voice.listens += "아이가 화장실 가고 싶대"
+        rig.drive(100f)
+        rig.start()
+        rig.command(UiCommand.Demo("holiday"))
+        rig.runUntil(120_000) { rig.state.ahead.firstOrNull()?.id == "oksan" } ?: error("천안을 지나치지 않았다")
+        rig.command(UiCommand.Listen)
+        rig.runUntil(5_000) { rig.state.prompt != null } ?: error("답이 없다")
+        val p = rig.state.prompt!!
+        assertEquals("oksan", p.stop?.id)
+        assertTrue("전제: 엔진은 정체 전 마지막 화장실이라고 묻는다 (${p.speech})", "정체 전 마지막 화장실" in p.speech)
+        val codes = rig.state.promptReasons.map { it.code }
+        assertTrue("카드 이유에 정체 전 마지막이 없다: $codes (화면 맥락 줄이 '가까운 화장실'이 된다)", "LAST_CHANCE_CONGESTION" in codes)
+    }
+
     // ------------------------------------------------------------ 급해
 
     @Test

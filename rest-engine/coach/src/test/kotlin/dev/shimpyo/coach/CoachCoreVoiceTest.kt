@@ -5,7 +5,9 @@ import dev.shimpyo.coach.fakes.DRIVER
 import dev.shimpyo.coach.fakes.FakeInterpreter
 import dev.shimpyo.coach.fakes.FakeSettings
 import dev.shimpyo.coach.fakes.FakeVoice
+import dev.shimpyo.coach.fakes.InMemoryMemory
 import dev.shimpyo.coach.fakes.KID
+import dev.shimpyo.engine.Level
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.PromptKind
@@ -61,6 +63,29 @@ class CoachCoreVoiceTest {
         assertEquals("거절했는데 급해 요청이 열렸다 (번호 ${rig.state.urgentRequestId})", UrgentState.IDLE, rig.state.urgentState)
         assertEquals("거절 뒤에 또 묻는다: ${rig.voice.asked}", 1, rig.voice.asked.size)
         assertNull("거절한 카드는 내려간다", rig.state.prompt)
+    }
+
+    // ------------------------------------------------------------ 묻는 말은 필요가 아니다 (리뷰 R-F2)
+
+    @Test
+    fun askingHowLongToTheRestroomDoesNotMarkANeedOrTeachTheModel() = runTest {
+        // 예전에는 엔진 계약의 HowLong 예문 "화장실까지 얼마나 남았어?"가 IntentParser에서 OccupantNeed(null, RESTROOM)로 읽혔다
+        // ('화장실'을 '얼마나 남'보다 먼저 봤다). 코어는 그대로 엔진에 넘기고, 엔진은 운전자가 화장실이 필요하다고 말한 것으로 봤다:
+        // 게이지가 70분/OK에서 0분/NOW로 뛰고, 80분 간격이 관측으로 학습 파일에 저장되고, 답 대신 "다음 화장실은 …에 들를까요?"를 물었다.
+        // 말 해석 규칙은 IntentParserTest가 지킨다. 여기서는 마이크에서 엔진·학습 파일까지 이어서 본다
+        val memory = InMemoryMemory()
+        val rig = CoreRig(this, memory = memory, settings = FakeSettings(listOf(DRIVER)))
+        rig.voice.listens += "화장실까지 얼마나 남았어?"
+        rig.drive(100f)
+        rig.fix(37.40, 127.10)
+        rig.start()
+        rig.run(20 * 60_000L)
+        assertEquals("전제: 여유가 있다", Level.OK, rig.state.restroom?.level)
+        rig.command(UiCommand.Listen)
+        rig.run(10_000)
+        assertEquals("물어봤을 뿐인데 화장실이 필요하다고 말한 것이 됐다 (${rig.state.restroom?.reasons?.map { it.code }})", Level.OK, rig.state.restroom?.level)
+        assertTrue("물어봤을 뿐인데 화장실 간격을 배웠다: ${memory.stored.restroomIntervalsMin}", memory.stored.restroomIntervalsMin.isEmpty())
+        assertTrue("남은 시간을 답한다: said=${rig.voice.said} asked=${rig.voice.asked}", rig.voice.said.any { "여유" in it })
     }
 
     // ------------------------------------------------------------ 음성 안내 끔 (리뷰 R-F4, UI 닫힘 검증 #12)
