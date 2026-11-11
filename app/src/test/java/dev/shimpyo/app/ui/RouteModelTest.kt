@@ -137,6 +137,16 @@ class RouteModelTest {
     }
 
     @Test
+    fun stalePlanDistanceIsNotComparedWithRemainingDistance() {
+        // 계획 때 52km였던 정차. 그 뒤 40km를 달려 남은 거리는 30km다. 후보 목록에는 없다(지나쳤다는 증거도 없음)
+        val p = PlannedStop(opp("anseong", 52.0), setOf(Purpose.RESTROOM), 10, 2_700.0)
+        val s = CoachUiState(guiding = true, remainDistanceM = 30_000.0, plan = PitStopPlan(listOf(p), 10), ahead = emptyList())
+        assertEquals(listOf("anseong"), livePlan(s).map { it.stop.id })
+        // 지금 후보 값이 목적지보다 멀면 뺀다
+        assertTrue(livePlan(s.copy(ahead = listOf(opp("anseong", 45.0)))).isEmpty())
+    }
+
+    @Test
     fun livePlanEtaIsLive() {
         val p = PlannedStop(opp("anseong", 52.0), setOf(Purpose.RESTROOM), 10, arriveInS = 2_700.0)
         val s = CoachUiState(guiding = true, remainDistanceM = 150_000.0, remainTimeS = 6_000.0, ahead = listOf(opp("anseong", 10.0)), plan = PitStopPlan(listOf(p), 10))

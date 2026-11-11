@@ -131,7 +131,7 @@ data class LivePlannedStop(
 /**
  * 계획을 지금 위치에 맞춘다 (UI 감사 #4: 계획 때 거리·도착 시간이 그대로 보였고, 지나친 정차가 첫 번째로 남았다).
  * - 지나침: 후보 목록에 없는데 뒤의 계획 정차는 있으면 지나친 것이다.
- * - 목적지 뒤(길안내 중 남은 거리보다 먼 곳)는 뺀다.
+ * - 목적지 뒤(길안내 중 남은 거리보다 먼 곳)는 뺀다. 지금 후보에 있는 정차만 견준다(계획 때 거리는 낡았다).
  * - 거리를 전혀 모르면(경로 거리·직선거리 없음) 도착 시간 × 평균 속도로 어림하고, 도착 0초(PLAN_NOW)는 지금 위치다.
  *   예전에는 이런 정차가 계획 화면에서 조용히 빠졌다.
  * 코치가 계획을 다시 세우거나 가지치기하면 그 값이 먼저다 (이 함수는 받은 계획을 지금 후보에 맞춰 보일 뿐이다).
@@ -148,7 +148,8 @@ fun livePlan(state: CoachUiState): List<LivePlannedStop> {
         val now = byId[p.stop.id]
         if (now == null && i < lastLive) return@forEachIndexed
         val (d, est) = plannedPosition(p, now, speed)
-        if (beyondDestination(state, d)) return@forEachIndexed
+        // 목적지와 비교는 지금 거리로만 한다: 계획 때 거리(52km)는 그 뒤 달린 만큼 낡아 남은 거리(30km)와 견줄 수 없다
+        if (now != null && beyondDestination(state, d)) return@forEachIndexed
         val eta = now?.etaS ?: if (now != null || !est) travelSeconds(0.0, d, state.congestion, speed) else p.arriveInS
         out += LivePlannedStop(p, out.size + 1, now ?: p.stop, now != null, d, est, eta)
     }

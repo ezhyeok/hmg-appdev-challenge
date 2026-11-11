@@ -176,7 +176,7 @@ private fun QuestionStrip(p: Prompt, driving: Boolean, onAnswer: (Prompt, Boolea
             )
         }
         if (driving) {
-            Text("\"응\" 또는 \"아니\"로 대답하거나, 닫고 주행 화면에서 답해 주세요", style = DriveType.Minimum, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Text("말로 응·아니 하거나, 닫고 답해 주세요", style = DriveType.Minimum, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         } else {
             Spacer(Modifier.height(Dimens.Space.s))
             Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Space.m)) {
