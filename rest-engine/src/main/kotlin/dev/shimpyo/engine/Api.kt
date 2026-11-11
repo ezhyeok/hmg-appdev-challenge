@@ -226,6 +226,12 @@ data class Prompt(
     val speech: String,
     val stop: StopCandidate? = null,
     val expiresAt: Long,
+    /**
+     * (추가) 사용자의 말에 대한 답인지 ("화장실 급해", "아이가 화장실 가고 싶대", "쉬고 싶어", "배고파", 주유, "얼마나 남았어").
+     * 엔진이 먼저 건 질문이면 false. 엔진은 서 있는 동안(기어 P) 정차를 먼저 묻지 않지만 사용자의 말에는 서 있어도 답하므로,
+     * 앱이 '달리는 동안에만 뜻이 있는 질문'을 거둘 때 이 값이 true인 것은 남겨야 그 답이 보인다
+     */
+    val userRequested: Boolean = false,
 )
 
 enum class CabinAction { FRESH_AIR, COOL_DOWN }

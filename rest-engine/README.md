@@ -25,6 +25,7 @@
 - `candidates`는 매 update마다 지금 위치 기준 거리로 넘긴다(`routeDistanceM`, 없으면 `straightDistanceM`).
 - `cabinAction = FRESH_AIR`는 사용자가 허용했을 때만 실행하고 1~2분 뒤 내기순환으로 되돌린다 (AI §1). 허용했으면 `cabinAutoAllowed = true`로 넘겨 질문을 생략한다.
 - 출발할 때 "출발 전에 화장실 다녀오셨어요?"에 '아니/모름'이면 `lastRestroomAt`을 출발 60분 전으로 넣기를 권한다 (AI §9-1). 계약상 값이 없으면 출발 시각으로 본다.
+- 닫힘 검증(2026-11-12) 뒤 추가한 것(모두 기본값이 있거나 새 함수): `CoachEngine.noteAccepted`, `Prompt.userRequested`, 이유 코드 `NEXT_REQUESTED_RESTROOM`·`NEXT_REQUESTED_CARE`, `CoachTexts`의 `alreadyAccepted`·`sleepyAdvice`·`restroomHere`·`careHere`·`reasonNextRequestedRestroom`·`reasonNextRequestedCare`.
 - v0.2에서 추가한 필드(모두 기본값 있음): `Occupant.intervalOverrideMin`, `TripProfile.driverWakeAt`, `StopCandidate.walkDistanceM`, `CoachInput.rangeKm`, `CoachInput.cabinAutoAllowed`, `DrivingStyle.persistent`, `CoachOutput.cabinReason`, `PersonalMemory.restroomCensoredMin`, `PersonalMemory.restroomSuggestedMin`, `CoachConfig`의 여러 값. JSON 저장 시 `PersonalMemory`의 새 두 필드도 함께 저장해야 개인화가 정확하다.
 
 ## 2. 한 번의 update 흐름
@@ -121,7 +122,8 @@ Q(p) = (b · ((1 − p)^(−1/a) − 1))^(1/k)   (필요 확률이 p가 되는 �
 - 질문 대상이 후보 목록에서 빠져도, 마지막으로 본 거리에서 150km/h로 달렸어도 아직 500m 밖이면 질문을 유지한다(목록 깜빡임).
 - 질문 id는 엔진 인스턴스마다 다른 접두어(프로세스 시작 시각 기반) + 번호. 앱은 id가 바뀔 때만 말하므로 엔진을 다시 만들어도, 새 여정이어도 겹치지 않는다.
 - 급한 질문(마지막 기회, NOW)은 우선순위가 낮은 활성 질문을 밀어낸다.
-- 기어 P로 서 있는 동안에는 앞쪽 정차(마지막 기회·휴식 제안)와 상태 확인을 묻지 않는다. 휴식은 15분, 화장실 시계는 3분이 지나야 되돌아가므로 그 사이에 "다음 휴게소에 들를까요?"가 나오던 것을 효과 시뮬레이션에서 찾아 고쳤다.
+- 기어 P로 서 있는 동안에는 엔진이 먼저 앞쪽 정차(마지막 기회·휴식 제안)와 상태 확인을 묻지 않는다. 휴식은 15분, 화장실 시계는 3분이 지나야 되돌아가므로 그 사이에 "다음 휴게소에 들를까요?"가 나오던 것을 효과 시뮬레이션에서 찾아 고쳤다.
+- 사용자가 말한 것에는 서 있어도, 움직이는지 몰라도(기어·차속 모름) 답한다. "아이가 화장실 가고 싶대"도 그렇다(예전에는 달릴 때만 답했다): 서 있으면 가장 가까운 화장실(500m 밖. 진입로를 놓칠 일이 없어 2km 안쪽도 답한다)을 달릴 때와 같은 질문으로 묻고, 선 곳 가까이(300m 안, 앱이 위치 기준 거리로 넣은 후보)에 화장실 있는 곳이 보이면 "가까이에 화장실이 있어요. 가휴게소예요."(INFO)라고 답한다. 길안내 중 지나친 진입로의 휴게소는 목록에서 빠지므로 '가까이'를 기억으로 짐작하지 않는다. 사용자의 말에 대한 답은 `Prompt.userRequested = true`로 표시한다: 앱이 서 있는 동안 '주행 질문'(LAST_CHANCE·REST_SUGGESTION)을 거두더라도 이것은 남겨야 답이 보인다.
 - 묻는 거리 학습(톰프슨 샘플링): 질문 종류 × 거리 구간(마지막 기회 2~3/3~4/4~5km, 휴식 2~5/5~10/10~20km)마다 수락률 `Beta(1 + 수락, 1 + 거절)`. 대상마다 한 번 표본을 뽑아 가장 큰 구간의 상한 안에 들어오면 묻고, 결과는 실제로 물은 구간에 쌓는다. 기록이 없으면 고르게 탐색하고, 잘 받아들여지는 거리로 점점 모인다.
 
 ### 3-9. 문구 (`CoachTexts`)

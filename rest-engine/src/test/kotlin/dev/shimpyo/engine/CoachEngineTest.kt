@@ -238,14 +238,19 @@ class CoachEngineTest {
 
     @Test
     fun noStopQuestionsWhileParked() {
-        // 휴게소에 서 있는 동안(기어 P)에는 "앞쪽 어디에 들를까요?"를 묻지 않는다 (몬테카를로에서 발견)
+        // 휴게소에 서 있는 동안(기어 P)에는 엔진이 먼저 "앞쪽 어디에 들를까요?"를 묻지 않는다 (몬테카를로에서 발견).
+        // 게이지가 NOW여도 그렇다: 아이 게이지 5분으로 서 있다
         val cands = listOf(stop("next", 5_000.0, name = "다음휴게소"))
-        val e = engine(adult(), child("kid", 5))
-        val parked = e.at(t0, gear = Gear.PARK, speed = 0f, candidates = cands, intent = VoiceIntent.OccupantNeed("kid", Purpose.RESTROOM))
+        val e = engine(adult(), child("kid", 5), last = mapOf("kid" to t0 - 55 * MIN))
+        val parked = e.at(t0, gear = Gear.PARK, speed = 0f, candidates = cands)
         assertEquals(Level.NOW, parked.restroom.level)
         assertNull(parked.prompt, "이미 서 있다")
+        assertNull(e.at(t0 + 20 * SEC, gear = Gear.PARK, speed = 0f, candidates = cands).prompt)
         val driving = e.at(t0 + 31 * SEC, speed = 80f, candidates = cands)
         assertEquals(PromptKind.LAST_CHANCE, driving.prompt?.kind, "출발하면 묻는다")
+        // 탑승자가 말한 것에는 서 있어도 답한다 (AuditVoiceTest.aPassengersRestroomNeedIsAnsweredWhileParked)
+        val asked = engine(adult(), child("kid", 5)).at(t0, gear = Gear.PARK, speed = 0f, candidates = cands, intent = VoiceIntent.OccupantNeed("kid", Purpose.RESTROOM))
+        assertEquals("next", asked.prompt?.stop?.id)
 
         val late = kst(2026, 11, 14, 1, 30) // 졸림 곡선 NOW
         val night = engine(adult(), start = late)

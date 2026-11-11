@@ -299,7 +299,7 @@ internal class PromptPolicy(
 
     private fun issue(c: Candidate, statKey: String?, now: Long, mono: Long): Issued {
         val ttl = config.promptTtlS * 1000L
-        val p = Prompt(id = ids.next(), kind = c.kind, speech = c.speech, stop = c.stop, expiresAt = now + ttl)
+        val p = Prompt(id = ids.next(), kind = c.kind, speech = c.speech, stop = c.stop, expiresAt = now + ttl, userRequested = c.userInitiated)
         val iss = Issued(p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes, c.reasons)
         iss.lastSeenD = c.distanceM ?: Double.NaN
         iss.lastSeenMono = mono

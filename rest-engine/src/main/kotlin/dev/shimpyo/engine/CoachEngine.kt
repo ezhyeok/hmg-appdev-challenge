@@ -283,37 +283,37 @@ class CoachEngine(
             )
         }
         if (needAnswer.on) {
-            if (moving) {
-                // 아직 안전하게 들를 수 있는 가장 가까운 화장실 기회. 그곳이 마지막 기회이기도 하면 그 이유(정체·공백)로 답한다
-                val t = nearestRestroom
-                val p = needAnswer.purpose
-                val fresh = !needAnswer.offered
-                addCand(
-                    if (t != null) {
-                        goingThere(t.stop, t.distanceM, fresh) ?: run {
-                            val lc = lastChance?.takeIf { it.opp.stop.id == t.stop.id }
-                            val speech = when {
-                                lc != null -> lastChanceSpeech(lc)
-                                p == Purpose.RESTROOM -> texts.restroomRequested(t.stop.name, t.distanceM)
-                                else -> texts.careStopSuggestion(t.stop.name, t.distanceM)
-                            }
-                            // 요청에 답한 곳이라는 이유. 그곳이 마지막 기회이기도 하면 그 이유가 앞에 온다 (문장도 그 이유로 말한다)
-                            val requested = if (p == Purpose.RESTROOM) Reason("NEXT_REQUESTED_RESTROOM", texts.reasonNextRequestedRestroom())
-                            else Reason("NEXT_REQUESTED_CARE", texts.reasonNextRequestedCare())
-                            ask(
-                                PromptKind.LAST_CHANCE, speech, t.stop, t.distanceM, restroom.level, user = true, fresh = fresh,
-                                purposes = purposesFor(t.stop, p, ctx),
-                                reasons = if (lc != null) lastChanceReasons(lc) + requested else listOf(requested),
-                            )
+            // 달릴 때는 아직 안전하게 들를 수 있는 가장 가까운 화장실 기회(진입로 2km 밖). 그곳이 마지막 기회이기도 하면 그 이유(정체·공백)로 답한다.
+            // 서 있어도(기어 P), 움직이는지 몰라도 답한다: 꽉 막힌 정체에서 P로 서 있을 때 "아이가 화장실 가고 싶대"에 말이 없었다(감사 V1·V4의
+            // 남은 부분, 닫힘 검증 E6). 선 곳 가까이에 화장실이 있으면 그렇게 답하고, 아니면 가장 가까운 화장실을 묻는다 (서 있으면 2km 안쪽도 들를 수 있다)
+            val p = needAnswer.purpose
+            val fresh = !needAnswer.offered
+            val here = if (stops.parked) parkedPlace(input.candidates, restroom = p == Purpose.RESTROOM) else null
+            val t = if (stops.parked) restroomOpps.firstOrNull { it.distanceM >= PromptPolicy.CANCEL_NEAR_M } else nearestRestroom
+            addCand(
+                when {
+                    here != null ->
+                        ask(PromptKind.INFO, if (p == Purpose.RESTROOM) texts.restroomHere(here.name) else texts.careHere(here.name), user = true, fresh = fresh)
+                    t == null -> ask(PromptKind.INFO, texts.restroomRequestedNone(), user = true, fresh = fresh)
+                    else -> goingThere(t.stop, t.distanceM, fresh) ?: run {
+                        val lc = lastChance?.takeIf { it.opp.stop.id == t.stop.id }
+                        val speech = when {
+                            lc != null -> lastChanceSpeech(lc)
+                            p == Purpose.RESTROOM -> texts.restroomRequested(t.stop.name, t.distanceM)
+                            else -> texts.careStopSuggestion(t.stop.name, t.distanceM)
                         }
-                    } else {
-                        ask(PromptKind.INFO, texts.restroomRequestedNone(), user = true, fresh = fresh)
-                    },
-                    needAnswer,
-                )
-            } else {
-                needAnswer.clear() // 이미 서 있다(또는 아직 움직이는지 모른다): 앞쪽 정차를 물을 때가 아니다
-            }
+                        // 요청에 답한 곳이라는 이유. 그곳이 마지막 기회이기도 하면 그 이유가 앞에 온다 (문장도 그 이유로 말한다)
+                        val requested = if (p == Purpose.RESTROOM) Reason("NEXT_REQUESTED_RESTROOM", texts.reasonNextRequestedRestroom())
+                        else Reason("NEXT_REQUESTED_CARE", texts.reasonNextRequestedCare())
+                        ask(
+                            PromptKind.LAST_CHANCE, speech, t.stop, t.distanceM, restroom.level, user = true, fresh = fresh,
+                            purposes = purposesFor(t.stop, p, ctx),
+                            reasons = if (lc != null) lastChanceReasons(lc) + requested else listOf(requested),
+                        )
+                    }
+                },
+                needAnswer,
+            )
         }
         if (restAnswer.on) {
             val t = restTarget
@@ -763,6 +763,26 @@ class CoachEngine(
         if (stop == null || a.stopId != stop.id) return null
         val text = texts.alreadyAccepted(stop.name, distanceM)
         return ask(PromptKind.INFO, if (prefix != null) "$prefix $text" else text, user = true, fresh = fresh)
+    }
+
+    /**
+     * 서 있는 곳: 지금 후보 가운데 [CoachConfig.mealPlaceRadiusM] 안의 가장 가까운 곳. [restroom]이면 화장실이 있고 닫히지 않은 곳만.
+     * 앱이 위치 기준 거리로 넣어 준 후보가 있을 때만 안다(길안내가 없을 때, 시연). 길안내 중 경로 위 후보는 진입로를 지나면 목록에서
+     * 빠지므로 여기서는 기억으로 짐작하지 않는다: 정체 속에서 방금 지나친 휴게소를 '가까이에 있다'고 답하느니 다음 화장실을 묻는 쪽이 낫다.
+     */
+    private fun parkedPlace(candidates: List<StopCandidate>, restroom: Boolean): StopCandidate? {
+        var best: StopCandidate? = null
+        var bestD = Double.POSITIVE_INFINITY
+        for (i in candidates.indices) {
+            val c = candidates[i]
+            if (restroom && (!c.facilities.restroom || c.openNow == false)) continue
+            val d = MealStopRule.proximityM(c)
+            if (d <= config.mealPlaceRadiusM && d < bestD) { // 같은 거리면 목록 앞쪽 (결정적)
+                best = c
+                bestD = d
+            }
+        }
+        return best
     }
 
     private fun addCand(c: PromptPolicy.Candidate, owner: Pending?) {
