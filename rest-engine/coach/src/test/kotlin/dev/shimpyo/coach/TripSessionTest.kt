@@ -105,6 +105,43 @@ class TripSessionTest {
     }
 
     @Test
+    fun aSavedParkIsCreditedOnlyAsFarAsTheLastHeartbeatSawIt() {
+        // 12분 전 P(문 열림), 2분 뒤 맥박을 쓰고 꺼졌다가 10분 뒤 다시 켜졌다. 예전에는 '지금까지 서 있었다'로 세어 화장실 시계를
+        // 정차 시작 + 3분으로 당겼다. 차가 그 사이 떠났으면 그 정차는 2분짜리라 기록에도 없다: 게이지와 기록이 어긋났다
+        // (서비스 닫힘 검증 N3). 맥박이 본 만큼만 세고, 차가 지금도 P면 첫 틱이 이어 센다
+        val now = t0 + 3 * hour
+        val clock = WorldClock(now)
+        val since = now - 12 * min
+        val hb = heartbeat(savedAt = now - 10 * min, continuous = 80.0, park = ParkState(since, doorSeen = true), restroom = t0)
+        val s = TripSession.open(hb, emptyList(), now, clock, InMemoryTripStore())
+        assertEquals(TripOrigin.RESUMED, s.origin)
+        assertEquals(ParkState(since, doorSeen = true), s.restoredPark)
+        assertEquals("본 것은 2분뿐이다: 화장실 정차로 세지 않는다", t0, s.anchor.restroomFallbackAt)
+        assertEquals("휴식도 아니다", 80.0, s.anchor.continuousDrivingMin, 0.0)
+
+        // (a) 차가 떠나 있었다: 정차는 마지막 맥박 때 끝났다
+        clock.advance(1_000)
+        s.onTick(clock.now(), null)
+        assertEquals(t0, s.anchor.restroomFallbackAt)
+
+        // (b) 차가 아직 P다: 못 본 10분도 서 있던 것이다
+        val clock2 = WorldClock(now)
+        val s2 = TripSession.open(hb, emptyList(), now, clock2, InMemoryTripStore())
+        clock2.advance(1_000)
+        s2.onTick(clock2.now(), ParkState(since, doorSeen = true))
+        assertEquals("문 열림 + 3분: 화장실 정차", since + 3 * min, s2.anchor.restroomFallbackAt)
+        clock2.advance(4 * min)
+        s2.onTick(clock2.now(), ParkState(since, doorSeen = true))
+        assertEquals("16분: 휴식", 0.0, s2.anchor.continuousDrivingMin, 0.0)
+
+        // 맥박이 이미 본 화장실 정차·휴식은 그대로 센다
+        val seen = heartbeat(savedAt = now - 5 * min, continuous = 0.0, park = ParkState(now - 25 * min, doorSeen = true), restroom = t0)
+        val s3 = TripSession.open(seen, emptyList(), now, WorldClock(now), InMemoryTripStore())
+        assertEquals(now - 25 * min + 3 * min, s3.anchor.restroomFallbackAt)
+        assertEquals(0.0, s3.anchor.continuousDrivingMin, 0.0)
+    }
+
+    @Test
     fun headUnitOffForABreakKeepsTheTripCountsARestAndForgetsTheRestroom() {
         val clock = WorldClock(t0)
         val now = t0 + 3 * hour

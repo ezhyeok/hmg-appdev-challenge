@@ -147,7 +147,8 @@ class CoachCore(private val d: CoachDeps) {
         // 되돌린 정차를 아직 판정하지 못했으면 맥박을 새로 쓰지 않는다 (확인하지 못한 정차를 '지금까지 서 있었다'로 남기지 않는다)
         if (!recorder.restorePending) runCatching { worlds.flush() }.onFailure { log.w("trip flush failed: ${it.message}") }
         memorySaver.atShutdown(worlds.memoryToSave())?.let { m ->
-            runCatching { d.memory.save(m.memory, m.generation) }.onFailure { log.w("memory save failed: ${it.message}") }
+            val ok = runCatching { d.memory.save(m.memory, m.generation) }.onFailure { log.w("memory save failed: ${it.message}") }.getOrDefault(false)
+            memorySaver.finished(m.memory, ok)
         }
     }
 
