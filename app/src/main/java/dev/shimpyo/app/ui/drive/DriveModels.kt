@@ -380,10 +380,11 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
         code == "NEXT_ACCEPTED" -> "들르기로 한 곳"
         code == "NEXT_REST" -> "쉬어 갈 곳"
         code == "NEXT_MEAL" -> "식사할 곳"
-        code == "NEXT_REQUESTED_RESTROOM" -> CONTEXT_REQUESTED_RESTROOM
-        code == "NEXT_REQUESTED_CARE" -> CONTEXT_REQUESTED_CARE
+        // 질문 카드와 같은 순서: 마지막 기회가 먼저, 그다음 요청에 답한 곳. 이유가 놓인 순서와 관계없이 본다
         "LAST_CHANCE_CONGESTION" in codes -> CONTEXT_JAM
         codes.any { it.startsWith("LAST_CHANCE_") } -> CONTEXT_GAP
+        "NEXT_REQUESTED_RESTROOM" in codes -> CONTEXT_REQUESTED_RESTROOM
+        "NEXT_REQUESTED_CARE" in codes -> CONTEXT_REQUESTED_CARE
         else -> if (state.guiding) "다음 화장실" else "진행 방향 가까운 화장실"
     }
     val restroom = Purpose.RESTROOM in next.purposes || next.purposes.isEmpty()

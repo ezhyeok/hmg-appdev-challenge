@@ -97,6 +97,19 @@ class PromptContextTest {
     }
 
     @Test
+    fun theRecommendationCardNamesARequestedStopWhateverTheReasonOrder() {
+        // 질문이 내려간 뒤의 추천 카드도 같은 말로 부른다. 이유가 놓인 순서와 관계없다
+        val asked = Reason("NEXT_REQUESTED_RESTROOM", "말씀하신 화장실이에요")
+        val card = stopCard(running.copy(next = rec(oksan, nearest, asked)), driving = true)
+        assertEquals("요청하신 화장실", card.context)
+        assertFalse(card.chips.toString(), "요청하신 화장실" in card.chips)
+        assertEquals("요청하신 곳", stopCard(running.copy(next = rec(oksan, Reason("NEXT_REQUESTED_CARE", "말씀하신 곳이에요"))), driving = true).context)
+        // 그곳이 마지막 기회이기도 하면 마지막 기회가 먼저다 (질문 카드와 같은 순서)
+        val jam = Reason("LAST_CHANCE_CONGESTION", texts.reasonLastChanceCongestion(60))
+        assertEquals("정체 전 마지막 화장실", stopCard(running.copy(next = rec(oksan, asked, jam)), driving = true).context)
+    }
+
+    @Test
     fun aRequestAnsweredWithTheLastChanceStopKeepsTheLastChanceLabel() {
         // 요청에 답한 곳이 마지막 기회이기도 하면 엔진은 마지막 기회 문장으로 답한다: 이유에 LAST_CHANCE_*가 있으면 그것이 먼저다
         val reasons = listOf(Reason("NEXT_REQUESTED_RESTROOM", "말씀하신 화장실이에요"), Reason("LAST_CHANCE_CONGESTION", texts.reasonLastChanceCongestion(60)))
