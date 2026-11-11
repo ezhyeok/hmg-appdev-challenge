@@ -11,9 +11,13 @@ internal class Opportunity(val stop: StopCandidate, val distanceM: Double, val a
  * v는 내비의 남은 거리·시간에서 정체 몫을 뺀 값(정체 밖 평균 속도). 모르면 현재 속도(30km/h 이상일 때),
  * 그것도 없으면 고속도로 평균 속도.
  *
- * 정체 목록 정리: 내비는 한 정체를 여러 항목으로 쪼개고, 같은 구간을 겹쳐 보내거나 목적지 너머까지 보낼 수 있다.
- * 그래서 항목을 [0, 목적지]로 자르고 합집합으로 만든다(겹친 곳은 가장 느린 항목의 속도로 한 번만 센다).
- * 예전에는 겹친 항목을 더하고(+20분), 목적지 너머 정체까지 세서 자유 속도가 틀어졌다(감사 R11, R12).
+ * 정체 목록 정리 ([buildJams]): 내비는 한 정체를 여러 항목으로 쪼개고, 같은 항목을 두 번 보내거나 목적지 너머까지 보낼 수 있다.
+ * - 같은 항목이 두 번 온 것(시작·길이·통과 시간·도로명·시작/끝 이름이 모두 같다)은 한 번만 센다. 예전에는 더해서 +20분이었다(감사 R12).
+ * - 서로 다른 항목의 범위가 겹치면 뒤 항목을 앞 항목이 끝나는 곳에 이어 놓는다(길이와 통과 시간을 그대로 지킨다).
+ *   내비는 시작 거리를 반올림해 보낸다(가까우면 100m, 10km 밖은 1km 단위): 2026-11-12 실측 목록은 98km에 8개, 99km에 6개 항목이
+ *   같은 시작 거리로 왔고, 길이·평균 속도가 서로 다른 별개 구간이었다(내비 요약도 길이를 다 더한 값이다). 겹친 곳을 한 번만 세는
+ *   합집합으로는 101km 안 29항목 2,480m·385초가 1,110m·200초로 줄었다: 여러 항목으로 오는 먼 정체일수록 작게 보였다.
+ * - 그 뒤 [0, 목적지]로 자른다. 예전에는 목적지 너머 정체까지 세서 자유 속도가 틀어졌다(감사 R11).
  *
  * 후보 도착 시간: etaS(내비가 교통을 반영해 계산한 값)가 있으면 그것, 없으면 위 식. 그리고 경로 거리순으로
  * 엔진이 '뒤 후보에 먼저 닿는다'고 지어내지 않게 한다 (감사 R13: 20km 후보는 내비 40분인데 25km 후보가 엔진 계산 15분).
@@ -33,11 +37,8 @@ internal class RouteContext(private val config: CoachConfig) {
     var jamDur = DoubleArray(jamCap)
         private set
 
-    // 정체 합집합을 만들 때 쓰는 작업 배열 (재사용)
-    private var rawS = DoubleArray(8)
-    private var rawE = DoubleArray(8)
-    private var rawPace = DoubleArray(8)
-    private var cuts = DoubleArray(16)
+    // 정체 목록을 정리할 때 쓰는 작업 배열 (재사용): 남긴 항목의 원래 위치
+    private var rawIdx = IntArray(8)
 
     /** 정체 밖 자유 속도 (m/s) */
     var vFreeMps = config.highwayAvgSpeedKph / 3.6
@@ -221,56 +222,68 @@ internal class RouteContext(private val config: CoachConfig) {
     }
 
     /**
-     * 정체 항목 → 겹치지 않는 구간 목록 (jamStart/jamEnd/jamDur, 시작순).
-     * 값이 이상한 항목(길이·시간 0 이하, NaN·무한대)은 빼고, [0, 목적지]로 자른 뒤, 겹친 곳은 가장 느린 속도(초/m)로 한 번만 센다.
-     * 이어진 같은 속도 구간은 하나로 합친다.
+     * 정체 항목 → 겹치지 않는 구간 목록 (jamStart/jamEnd/jamDur, 시작순). 클래스 설명의 '정체 목록 정리'.
+     * 1. 값이 이상한 항목(길이·시간 0 이하, NaN·무한대), 이미 지나온 항목, 목적지 너머에서 시작하는 항목은 뺀다.
+     * 2. 같은 항목이 두 번 온 것은 한 번만 남긴다 ([sameItem]).
+     * 3. 시작순으로 놓고(같으면 받은 순서: 내비는 경로 순서로 보낸다), 앞 항목과 겹치면 앞 항목이 끝나는 곳부터 이어 놓는다.
+     * 4. [0, 목적지]로 자른다 (잘린 만큼 통과 시간도 비례해서 줄인다). 이어진 같은 속도 구간은 하나로 합친다.
      */
     private fun buildJams(items: List<CongestionSegment>) {
         jamN = 0
+        val n = items.size
+        if (n == 0) return
+        if (rawIdx.size < n) rawIdx = IntArray(maxOf(n, rawIdx.size * 2))
         var r = 0
-        for (c in items) {
+        outer@ for (i in 0 until n) {
+            val c = items[i]
             val start = c.startDistanceM
             val len = c.lengthM
             val dur = c.durationS
             if (!start.isFinite() || !len.isFinite() || !dur.isFinite() || len <= 0.0 || dur <= 0.0) continue
-            val s = maxOf(start, 0.0) // 정체 안에 있다: 남은 부분만
-            var e = start + len
-            if (!destM.isNaN()) e = minOf(e, destM) // 목적지 너머는 경로가 아니다
-            if (e <= s) continue // 이미 지나온 정체
-            if (r == rawS.size) {
-                rawS = rawS.copyOf(r * 2)
-                rawE = rawE.copyOf(r * 2)
-                rawPace = rawPace.copyOf(r * 2)
+            if (start + len <= 0.0) continue // 이미 지나온 정체
+            if (!destM.isNaN() && start >= destM) continue // 목적지 너머는 경로가 아니다
+            for (k in 0 until r) if (sameItem(items[rawIdx[k]], c)) continue@outer
+            rawIdx[r++] = i
+        }
+        // 시작순. 항목은 수십 개라 삽입 정렬 (안정 정렬: 시작 거리가 같으면 받은 순서)
+        for (a in 1 until r) {
+            val x = rawIdx[a]
+            val sx = items[x].startDistanceM
+            var b = a - 1
+            while (b >= 0 && items[rawIdx[b]].startDistanceM > sx) {
+                rawIdx[b + 1] = rawIdx[b]
+                b--
             }
-            rawS[r] = s
-            rawE[r] = e
-            rawPace[r] = dur / len
-            r++
+            rawIdx[b + 1] = x
         }
-        if (r == 0) return
-        if (cuts.size < 2 * r) cuts = DoubleArray(4 * r)
-        for (i in 0 until r) {
-            cuts[2 * i] = rawS[i]
-            cuts[2 * i + 1] = rawE[i]
-        }
-        java.util.Arrays.sort(cuts, 0, 2 * r)
-        var u = 0 // 겹치지 않는 경계만 남긴다
-        for (i in 0 until 2 * r) if (u == 0 || cuts[i] > cuts[u - 1]) cuts[u++] = cuts[i]
-        for (k in 0 until u - 1) {
-            val a = cuts[k]
-            val b = cuts[k + 1]
-            var pace = 0.0
-            for (i in 0 until r) if (rawS[i] <= a && rawE[i] >= b && rawPace[i] > pace) pace = rawPace[i]
-            if (pace <= 0.0) continue // 정체 사이 빈 구간
+        var cursor = Double.NEGATIVE_INFINITY // 앞 항목이 끝난 곳
+        for (k in 0 until r) {
+            val c = items[rawIdx[k]]
+            val from = maxOf(c.startDistanceM, cursor)
+            val to = from + c.lengthM
+            cursor = to
+            val s = maxOf(from, 0.0) // 정체 안에 있다: 남은 부분만
+            val e = if (destM.isNaN()) to else minOf(to, destM)
+            if (e <= s) continue
+            val pace = c.durationS / c.lengthM
             val last = jamN - 1
-            if (last >= 0 && jamEnd[last] == a && samePace(jamDur[last] / (jamEnd[last] - jamStart[last]), pace)) {
-                jamDur[last] += pace * (b - a)
-                jamEnd[last] = b
+            if (last >= 0 && jamEnd[last] == s && samePace(jamDur[last] / (jamEnd[last] - jamStart[last]), pace)) {
+                jamDur[last] += pace * (e - s)
+                jamEnd[last] = e
             } else {
-                addJam(a, b, pace * (b - a))
+                addJam(s, e, pace * (e - s))
             }
         }
     }
+
+    /**
+     * 같은 항목이 두 번 온 것인지: 시작 거리·길이·통과 시간·도로명·시작/끝 이름이 모두 같을 때만.
+     * 이름과 길이만으로는 가릴 수 없다: 실측 목록에는 같은 시작 거리(반올림)에 길이 100m인 서로 다른 항목이 여럿 있고,
+     * 이름이 비어 오는 항목도 있다. 조금이라도 다르면 별개 구간으로 보고 이어 놓는다(작게 세는 쪽이 더 나쁘다: 먼 정체를 놓친다)
+     */
+    private fun sameItem(a: CongestionSegment, b: CongestionSegment): Boolean =
+        a.startDistanceM == b.startDistanceM && a.lengthM == b.lengthM && a.durationS == b.durationS &&
+            a.roadName == b.roadName && a.startName == b.startName && a.endName == b.endName
 
     private fun samePace(p: Double, q: Double): Boolean = kotlin.math.abs(p - q) <= 1e-9 * maxOf(p, q)
 
