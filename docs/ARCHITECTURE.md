@@ -36,7 +36,10 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
 1. `MainActivity`가 실행 중 권한(차속, 위치)을 받고 `CoachService`(포그라운드 서비스)를 시작한다. 포그라운드여야 내비가 앞에 와도 얼려지지 않는다.
    권한을 나중에 받으면 `PermissionsChanged`로 신호 수집을 다시 잇는다. 주행 중 UX 제한은 화면이 직접 구독한다(모르면 제한).
 2. `CarSignals`가 신호를 `SignalHub`(기어·차속·조향·제동·방향지시등·크루즈·문·공조)와 `PositionTracker`(위치 SDK, 끊기면 내비 위치)에 모은다.
-   연결이 실패하면 2초부터 최대 1분 간격으로 다시 한다.
+   연결 셋(Car API, Vehicle SDK, 위치 SDK)을 신호 목록으로 선언하고, 받는 방법은 coach 모듈의 `SignalCollector` 하나가 맡는다: 연결·기능 확인·
+   신호마다 따로 다시 시도(`Retry`/`Backoff`, 2초부터 최대 1분), 리스너 값이 없을 때만 한 번 읽기, 30초마다 다시 읽어 조용한 신호가 멎은 것인지
+   확인(`SignalHealth`), 읽기가 모두 실패하고 이벤트도 없으면 연결을 버리고 새로 맺기(`LinkHealth`, Vehicle 서비스가 강제 종료된 경우).
+   끊긴 동안 그 신호는 '모름'(null)이다. 조향 표본은 받은 순간의 단조 시계로 찍고 틱에서 엔진 시계로 옮긴다(시연 배속과 무관).
 3. `NaviTracker`가 내비 조회를 혼자 한다: 경로 상태·목적지 15초, 길안내 중 TBT 5~20초(다음 화장실·회전 거리와 주행 거리 보정에 따라), 내비 이벤트와
    경유지 추가 뒤에는 곧바로. 경로가 바뀔 때마다 epoch를 올리고 옛 TBT를 새 경로와 섞지 않는다. 결과는 불변 `NaviSnapshot` 하나.
 4. `CandidateProvider`가 엔진에 넣을 정차 후보를 만든다: 길안내 중이면 TBT의 경로 위 휴게소·졸음쉼터를 이름으로 공공데이터(`stops.bin` 6만여 곳)와
@@ -73,7 +76,14 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
 - 부품 사이에는 불변 스냅샷(`NaviSnapshot`, `CandidateSnap`)만 오간다. 다른 루프가 코어를 부르지 않고 `CoachGates`만 읽는다.
 - 시계 둘: `CoachClock`(엔진과 세계 상태, 시연이면 가상·배속), `ElapsedClock`(질문 수명, 조회 간격, 환기 문, 위치 신선도처럼 시연 전환을 넘는 것).
 - SDK 호출은 kit의 전용 스레드에서 실행된다(`SdkThreads`). 내비 요청은 kit이 한 번에 하나씩, 경로 변경 명령은 3초 간격.
-- 파일: 시작 때 IO에서 읽고, 학습은 IO 효과로, 정차 기록·여정 맥박은 앱의 쓰기 스레드(한 번에 하나, 맡긴 순서)로 AtomicFile에 쓴다.
+  SDK 객체도 그 스레드에서 처음 쓸 때 만든다(`LazySdk`): 서비스 시작이 메인 스레드를 잡는 시간이 줄고, 연결을 버리고 새로 만들 수 있다.
+- 말하기·듣기는 요청 id가 없는 SDK라 kit의 `TurnRunner`가 한 번에 하나씩 돌린다: 새 요청은 앞 요청의 끝(완료·멈춤·오류) 이벤트를 기다린 뒤에
+  나가므로 앞 요청의 늦은 이벤트가 새 요청의 결과로 읽히지 않는다. 질문을 끝까지 말하지 못했으면(끊김·오류) 마이크를 열지 않는다(`VoiceAgent`).
+- 서비스는 시스템이 다시 만들 때(`onStartCommand(null)` 또는 `onTaskRemoved`만 오는 경우)에도 같은 시작 경로를 탄다(`PleosForegroundService`).
+- 개발용 점검(kit 점검, SDK 실험)은 debug 소스셋(`app/src/debug/.../devtools`)에만 있다. 제출용 빌드에는 코드와 권한이 없고, 인텐트로는
+  시연 전환만 된다(`LaunchExtras`, `DevHooks`, `tools/laptop/devhooks-check.sh`).
+- 파일: 시작 때 IO에서 읽고, 학습은 IO 효과로, 정차 기록·여정 맥박은 앱의 쓰기 스레드(한 번에 하나, 맡긴 순서)로 AtomicFile에 쓴다
+  (임시 파일 → fsync → 이름 바꾸기). 읽지 못하는 파일은 지우지 않고 `<이름>.corrupt`로 옮긴 뒤 빈 상태로 시작한다.
 
 ## 5. 데이터
 - 휴게소·졸음쉼터·공중화장실·주유소·공영주차장: `app/src/main/assets/data/`, 출처와 라이선스는 `tools/data/README.md`.

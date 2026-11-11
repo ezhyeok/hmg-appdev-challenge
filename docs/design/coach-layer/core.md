@@ -287,8 +287,9 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 
 다른 담당이 닫은 것 가운데 코어까지 이어서 보는 두 가지도 코어 테스트로 옮겼다: 묻는 말은 필요가 아니다(R-F2,
 `CoachCoreVoiceTest.askingHowLongToTheRestroomDoesNotMarkANeedOrTeachTheModel`), 카드 이유에 정체 전 마지막이 실린다(UI-6,
-`CoachCoreTest.aJamLastChanceAskedWhileTheGaugeIsNowIsStillPublishedAsAJamLastChance`). `closure/`에 실패로 남은 것은 하나다:
-시연에서 조향 표본의 시각(`ReviewSampleClockTest`, R-F6, 앱의 `CarSignals`·`SignalHub` 담당).
+`CoachCoreTest.aJamLastChanceAskedWhileTheGaugeIsNowIsStillPublishedAsAJamLastChance`). `closure/`에 실패로 남아 있던
+시연에서 조향 표본의 시각(`ReviewSampleClockTest`, R-F6)은 `SignalHub`가 닫았다: `addSteering`이 받은 순간의 단조 시계를 찍고 `drain(now)`이
+틱의 엔진 시계로 옮긴다(시연 배속과 무관, `SignalHubTest`).
 
 ## 12. 닫은 결함
 

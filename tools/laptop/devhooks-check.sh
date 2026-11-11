@@ -56,8 +56,10 @@ run_tool() {  # run_tool <이름> <extras>
   # 점검이 보내는 경로 요청 (requestRoute·addWaypoint·cancelRoute). 코치의 조회(getXxx)는 센 것에 넣지 않는다
   navi=$(T=60 adb_ logcat -d | grep "$PKG >> ai.umos" | grep -c -E "requestToNaviProvider\((RequestRoute|AddWaypoint|CancelRoute|RequestRouteWithWaypoints)")
   if [ "$build" = "release" ]; then
-    if [ "$ran" -eq 0 ] && [ -z "$changed" ] && [ "$navi" -eq 0 ] && [ "$ignored" -ge 1 ]; then
-      echo "OK  $name ignored: no dev tool log, vehicle values unchanged for ${WATCH}s, no route command, 'ignored' logged"
+    # 화면(MainActivity, LaunchExtras.pick)이 release에서는 이 옵션을 서비스로 넘기지 않으므로 서비스의 'ignored' 로그는
+    # 없는 것이 정상이다 (0). 1 이상이면 화면은 넘겼고 서비스(DevHooks)가 막은 것이다. 어느 쪽이든 통과
+    if [ "$ran" -eq 0 ] && [ -z "$changed" ] && [ "$navi" -eq 0 ]; then
+      echo "OK  $name ignored: no dev tool log, vehicle values unchanged for ${WATCH}s, no route command (reached the service: $ignored)"
     else
       echo "FAIL $name on a release build: dev tool log lines=$ran, route commands=$navi, ignored logged=$ignored, vehicle changed: ${changed:-no}"
       echo "     before: $before"
