@@ -27,18 +27,17 @@ import dev.shimpyo.coach.EngineFactory
 import dev.shimpyo.coach.NaviTracker
 import dev.shimpyo.coach.Odometer
 import dev.shimpyo.coach.PositionTracker
+import dev.shimpyo.coach.Retry
 import dev.shimpyo.coach.RouteOracle
 import dev.shimpyo.coach.SignalHub
 import dev.shimpyo.coach.UiCommand
 import dev.shimpyo.engine.CoachEngine
 import dev.shimpyo.engine.Gear
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -96,7 +95,7 @@ class CoachService : PleosForegroundService() {
             ),
         )
         core = c
-        signals = CarSignals(kits.car, kits.vehicle, kits.location, cabin, hub, positions) { r -> CoachStore.update { copy(drivingRestricted = r) } }
+        signals = CarSignals(kits.car, kits.vehicle, kits.location, cabin, hub, positions, elapsed, AppLog) { r -> CoachStore.update { copy(drivingRestricted = r) } }
 
         scope.launch { c.run() }
         scope.launch { tracker.run() }
@@ -106,7 +105,7 @@ class CoachService : PleosForegroundService() {
             val n = app.stops.ensureLoaded()
             CoachStore.update { copy(status = "정차 후보 데이터 ${n}곳") }
         }
-        scope.launch { retrying("voice") { voice.connect() } }
+        scope.launch { Retry.untilSuccess("voice", AppLog) { voice.connect() } }
         startSignals()
         // 화면 명령 (CoachStore의 Channel: 서비스가 받기 전에 온 명령도 남아 있다)
         scope.launch {
@@ -170,23 +169,11 @@ class CoachService : PleosForegroundService() {
         super.onDestroy()
     }
 
-    private suspend fun retrying(name: String, block: suspend () -> Unit) {
-        var wait = CarSignals.RETRY_MIN_MS
-        while (true) {
-            try {
-                block()
-                return
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "$name: ${e.message} (retry in ${wait / 1000}s)")
-            }
-            delay(wait)
-            wait = (wait * 2).coerceAtMost(CarSignals.RETRY_MAX_MS)
-        }
-    }
-
-    /** kit는 처음 쓸 때 만든다. 끝날 때는 만든 것만 놓는다 (예전에는 놓으려고 SDK 객체를 새로 만들었다, D11) */
+    /**
+     * kit는 처음 쓸 때 만든다. 끝날 때는 만든 것만 놓는다 (예전에는 놓으려고 SDK 객체를 새로 만들었다, D11).
+     * kit 객체를 만드는 것은 가볍다: SDK 객체(NaviHelper, Vehicle, TTS, STT, FusedLocation)는 kit이 connect 할 때 SDK 전용
+     * 스레드에서 만든다. 그래서 onServiceStarted(메인 스레드)에서 조립해도 SDK를 메인 스레드에서 건드리지 않는다 (서비스 감사 SV-N4)
+     */
     private class Kits(context: Context) {
         private val made = ArrayList<() -> Unit>()
         private fun <T : Any> kit(make: () -> T, release: (T) -> Unit) = lazy {

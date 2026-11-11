@@ -4,14 +4,8 @@ import ai.pleos.playground.stt.SpeechToText
 import ai.pleos.playground.stt.listener.ResultListener
 import ai.pleos.playground.tts.TextToSpeech
 import android.content.Context
-import kotlinx.coroutines.CancellationException
-import kotlinx.coroutines.CoroutineStart
-import kotlinx.coroutines.async
-import kotlinx.coroutines.channels.BufferOverflow
-import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.flow.MutableSharedFlow
-import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.CompletableDeferred
+import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -29,26 +23,56 @@ import ai.pleos.playground.tts.constant.Mode as TtsMode
 import ai.pleos.playground.tts.listener.EventListener as TtsEventListener
 import ai.pleos.playground.tts.listener.OnInitializeListener as TtsInitListener
 
+/** 말하기. 쓰는 쪽(앱의 VoiceAgent)이 가짜로 바꿔 시험할 수 있게 [TtsKit]에서 뽑은 모양 */
+interface SpeechOutput {
+    suspend fun connect()
+
+    /** 끝까지 말했으면 true, 중간에 멈췄으면 false. 말하지 못하면 [PleosSdkException] */
+    suspend fun speak(text: String): Boolean
+
+    /** 말하는 중이면 멈춘다 */
+    fun stop()
+}
+
+/** 듣기. [SttKit]에서 뽑은 모양 */
+interface SpeechInput {
+    suspend fun connect()
+
+    /** 한 번 듣고 인식한 문장을 돌려준다. 아무 말도 없었으면 null */
+    suspend fun listen(timeoutMs: Long): String?
+
+    /** 듣는 중이면 멈춘다 */
+    fun stop()
+}
+
 /**
  * TextToSpeech SDK 래퍼. 기본은 ON_DEVICE 모드라 Playground 앱 등록(Client ID/Secret) 없이 쓸 수 있다.
  * 권한: `pleos.car.permission.TTS_SERVICE`.
+ *
+ * 한 번에 한 문장만 보낸다. SDK 이벤트에 요청 번호가 없어서, 멈춘 문장의 끝남 이벤트(onStop)를 받고 나서 다음 문장을 보낸다
+ * (Turns.kt, 서비스 감사 P13).
  */
 class TtsKit(
     context: Context,
-    mode: TtsMode = TtsMode.ON_DEVICE,
+    private val mode: TtsMode = TtsMode.ON_DEVICE,
     private val locale: Locale = Locale.KOREA,
-) {
-    /** SDK 원본 객체. SERVER/HYBRID 모드의 `registerApp`이나 오디오 존 설정에 쓴다. */
-    val raw = TextToSpeech(context.applicationContext, mode)
+) : SpeechOutput {
+    private val appContext = context.applicationContext
+    private val sdk = LazySdk { TextToSpeech(appContext, mode) }
 
-    private sealed interface Event {
-        data object Done : Event
-        data object Stopped : Event
-        data class Failed(val type: TtsErrorType) : Event
+    /**
+     * SDK 원본 객체. SERVER/HYBRID 모드의 `registerApp`이나 오디오 존 설정에 쓴다.
+     * 처음 쓰는 곳에서 만들어진다: [connect]를 먼저 부르면 SDK 전용 스레드에서 만들어진다 (메인 스레드에서 처음 쓰지 말 것).
+     */
+    val raw: TextToSpeech get() = sdk.value
+
+    private sealed interface End {
+        data object Done : End
+        data object Stopped : End
+        data class Failed(val type: TtsErrorType) : End
     }
 
-    private val events = MutableSharedFlow<Event>(extraBufferCapacity = 8, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-    private val mutex = Mutex()
+    private val turns = TurnRunner<End>("TTS", SdkThreads.voice) { raw.stop() }
     private val connectMutex = Mutex()
 
     @Volatile
@@ -57,19 +81,22 @@ class TtsKit(
     private val listener = object : TtsEventListener {
         override fun onReady() = Unit
         override fun onStart() = Unit
-        override fun onDone() { events.tryEmit(Event.Done) }
-        override fun onStop() { events.tryEmit(Event.Stopped) }
-        override fun onError(errorType: TtsErrorType) { events.tryEmit(Event.Failed(errorType)) }
+        override fun onDone() = turns.onEnd(End.Done)
+        override fun onStop() = turns.onEnd(End.Stopped)
+        override fun onError(errorType: TtsErrorType) = turns.onEnd(End.Failed(errorType))
         override fun onUpdatedRms(rms: Double) = Unit
     }
 
-    suspend fun connect(timeoutMs: Long = 30_000) = connectMutex.withLock {
+    override suspend fun connect() = connect(CONNECT_TIMEOUT_MS)
+
+    suspend fun connect(timeoutMs: Long) = connectMutex.withLock {
         if (connected) return@withLock
         val ok = withTimeoutOrNull(timeoutMs) {
             withContext(SdkThreads.voice) {
+                val tts = sdk.value
                 suspendCancellableCoroutine { cont ->
                     val done = AtomicBoolean(false)
-                    raw.initialize(object : TtsInitListener {
+                    tts.initialize(object : TtsInitListener {
                         override fun onSuccess() {
                             if (done.compareAndSet(false, true)) cont.resume(Unit)
                         }
@@ -81,96 +108,115 @@ class TtsKit(
                         }
                     })
                 }
-                raw.addEventListener(listener)
-                raw.setLocale(locale)
+                tts.addEventListener(listener)
+                tts.setLocale(locale)
             }
         }
         if (ok == null) throw PleosSdkException("TextToSpeech.initialize", "no response in ${timeoutMs}ms")
         connected = true
     }
 
+    override suspend fun speak(text: String): Boolean = speak(text, SPEAK_TIMEOUT_MS)
+
     /**
      * [text]를 읽고, 재생이 끝날 때까지 기다린다. 한 번에 한 문장만 재생한다(나중 호출은 앞 문장이 끝난 뒤 시작).
-     * 호출한 코루틴이 취소되면 재생도 멈춘다. 끝까지 재생했으면 true, 중간에 멈췄으면 false.
+     * 호출한 코루틴이 취소되면 재생도 멈춘다. 끝까지 재생했으면 true, 중간에 멈췄으면(또는 보내기 전에 [stop]이 왔으면) false.
      */
-    suspend fun speak(text: String, timeoutMs: Long = 60_000): Boolean = mutex.withLock {
-        coroutineScope {
-            val waiter = async(start = CoroutineStart.UNDISPATCHED) { events.first() }
-            try {
-                withContext(SdkThreads.voice) { raw.speak(text) }
-                when (val event = withTimeoutOrNull(timeoutMs) { waiter.await() }) {
-                    Event.Done -> true
-                    Event.Stopped -> false
-                    is Event.Failed -> throw PleosSdkException("TextToSpeech.speak", event.type.name)
-                    null -> {
-                        stop()
-                        throw PleosSdkException("TextToSpeech.speak", "not finished in ${timeoutMs}ms")
-                    }
-                }
-            } catch (c: CancellationException) {
-                stop()
-                throw c
-            } finally {
-                waiter.cancel()
+    suspend fun speak(text: String, timeoutMs: Long): Boolean {
+        val end = turns.run(send = { raw.speak(text) }) { turn ->
+            turns.awaitEnd(turn, timeoutMs, onUnconfirmedStop = End.Stopped) ?: run {
+                turns.stop()
+                throw PleosSdkException("TextToSpeech.speak", "not finished in ${timeoutMs}ms")
             }
+        }
+        return when (end) {
+            End.Done -> true
+            End.Stopped, null -> false
+            is End.Failed -> throw PleosSdkException("TextToSpeech.speak", end.type.name)
         }
     }
 
-    /** 재생 중인 음성을 멈춘다. */
-    fun stop() {
-        SdkThreads.voice.executor.execute { runCatching { raw.stop() } }
-    }
+    /** 재생 중인 음성을 멈춘다. 말하는 중이 아니면 아무것도 하지 않는다 */
+    override fun stop() = turns.stop()
 
     fun release() {
         SdkThreads.voice.executor.execute {
-            runCatching { raw.removeEventListener(listener) }
-            runCatching { raw.release() }
+            sdk.ifCreated { tts ->
+                runCatching { tts.removeEventListener(listener) }
+                runCatching { tts.release() }
+            }
             connected = false
         }
+    }
+
+    companion object {
+        const val CONNECT_TIMEOUT_MS = 30_000L
+        const val SPEAK_TIMEOUT_MS = 60_000L
     }
 }
 
 /**
  * SpeechToText SDK 래퍼. 기본은 ON_DEVICE 모드.
  * 권한: `pleos.car.permission.STT_SERVICE`.
+ *
+ * 한 번에 한 번만 듣는다. 멈추거나 끝난 듣기의 끝남 이벤트(onEndedRecognition)를 받고 나서 다음 듣기를 시작한다 (Turns.kt).
  */
 class SttKit(
     context: Context,
-    mode: SttMode = SttMode.ON_DEVICE,
+    private val mode: SttMode = SttMode.ON_DEVICE,
     private val locale: Locale = Locale.KOREA,
-) {
-    val raw = SpeechToText(context.applicationContext, mode)
+) : SpeechInput {
+    private val appContext = context.applicationContext
+    private val sdk = LazySdk { SpeechToText(appContext, mode) }
 
-    private sealed interface Event {
-        data class Text(val text: String, val completed: Boolean) : Event
-        data object Ended : Event
-        data class Failed(val type: SttErrorType) : Event
+    /** SDK 원본 객체. 처음 쓰는 곳에서 만들어진다 ([connect]를 먼저 부르면 SDK 전용 스레드) */
+    val raw: SpeechToText get() = sdk.value
+
+    private sealed interface End {
+        data object Ended : End
+        data class Failed(val type: SttErrorType) : End
     }
 
-    private val events = MutableSharedFlow<Event>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
-    private val mutex = Mutex()
+    /** 듣기 한 번이 받은 문장. 최종 결과(completed)가 오면 끝남 이벤트를 기다리지 않고 돌려준다 */
+    private class Heard {
+        @Volatile var last: String? = null
+        val completed = CompletableDeferred<Unit>()
+    }
+
+    private val turns = TurnRunner<End>("STT", SdkThreads.voice) { raw.stop() }
     private val connectMutex = Mutex()
 
     @Volatile
     private var connected = false
 
+    @Volatile
+    private var heard: Heard? = null
+
     private val listener = object : ResultListener {
         override fun onReady() = Unit
         override fun onStartedRecognition() = Unit
-        override fun onUpdated(stt: String, completed: Boolean) { events.tryEmit(Event.Text(stt, completed)) }
-        override fun onEndedRecognition() { events.tryEmit(Event.Ended) }
-        override fun onError(errorType: SttErrorType) { events.tryEmit(Event.Failed(errorType)) }
+        override fun onUpdated(stt: String, completed: Boolean) {
+            val h = heard ?: return
+            if (stt.isNotBlank()) h.last = stt
+            if (completed) h.completed.complete(Unit)
+        }
+
+        override fun onEndedRecognition() = turns.onEnd(End.Ended)
+        override fun onError(errorType: SttErrorType) = turns.onEnd(End.Failed(errorType))
         override fun onUpdatedEpdData(on: Long, off: Long) = Unit
         override fun onUpdatedRms(rms: Double) = Unit
     }
 
-    suspend fun connect(timeoutMs: Long = 30_000) = connectMutex.withLock {
+    override suspend fun connect() = connect(CONNECT_TIMEOUT_MS)
+
+    suspend fun connect(timeoutMs: Long) = connectMutex.withLock {
         if (connected) return@withLock
         val ok = withTimeoutOrNull(timeoutMs) {
             withContext(SdkThreads.voice) {
+                val stt = sdk.value
                 suspendCancellableCoroutine { cont ->
                     val done = AtomicBoolean(false)
-                    raw.initialize(object : SttInitListener {
+                    stt.initialize(object : SttInitListener {
                         override fun onSuccess() {
                             if (done.compareAndSet(false, true)) cont.resume(Unit)
                         }
@@ -182,8 +228,8 @@ class SttKit(
                         }
                     })
                 }
-                raw.addListener(listener)
-                raw.setLocale(locale)
+                stt.addListener(listener)
+                stt.setLocale(locale)
             }
         }
         if (ok == null) throw PleosSdkException("SpeechToText.initialize", "no response in ${timeoutMs}ms")
@@ -194,58 +240,64 @@ class SttKit(
      * 차량 마이크로 한 번 듣고 인식한 문장을 돌려준다. [timeoutMs] 안에 인식이 끝나지 않으면 그때까지의
      * 중간 결과를 돌려준다(아무 말도 없었으면 null).
      */
-    suspend fun listen(timeoutMs: Long = 10_000): String? = mutex.withLock {
-        recognize("SpeechToText.request", timeoutMs) { raw.request() }
-    }
+    override suspend fun listen(timeoutMs: Long): String? = recognize("SpeechToText.request", timeoutMs) { raw.request() }
+
+    suspend fun listen(): String? = listen(LISTEN_TIMEOUT_MS)
 
     /**
      * 마이크 대신 PCM 오디오(16kHz, 16bit, mono)를 넣어 인식한다. ON_DEVICE 모드에서만 동작한다.
      * 마이크가 없는 에뮬레이터에서 음성 대화 흐름을 시험할 때 쓴다.
      */
-    suspend fun recognizePcm(pcm: ByteArray, timeoutMs: Long = 20_000): String? = mutex.withLock {
+    suspend fun recognizePcm(pcm: ByteArray, timeoutMs: Long = 20_000): String? =
         recognize("SpeechToText.sendAudio", timeoutMs) {
             raw.sendAudio(pcm)
             raw.completeAudioSend()
         }
+
+    private sealed interface Outcome {
+        data class Finished(val end: End) : Outcome
+        data object Completed : Outcome
+        data object TimedOut : Outcome
     }
 
-    private suspend fun recognize(name: String, timeoutMs: Long, start: () -> Unit): String? = coroutineScope {
-        var last: String? = null
-        val waiter = async(start = CoroutineStart.UNDISPATCHED) {
-            events.first { event ->
-                when (event) {
-                    is Event.Text -> {
-                        if (event.text.isNotBlank()) last = event.text
-                        event.completed
-                    }
-                    Event.Ended, is Event.Failed -> true
+    private suspend fun recognize(name: String, timeoutMs: Long, start: () -> Unit): String? {
+        val h = Heard()
+        val outcome = turns.run(send = {
+            heard = h
+            start()
+        }) { turn ->
+            withTimeoutOrNull(timeoutMs) {
+                select<Outcome> {
+                    turn.end.onAwait { Outcome.Finished(it) }
+                    // 최종 결과가 왔다. 끝남 이벤트는 다음 요청을 보내기 전에 기다린다 (TurnRunner.settle)
+                    h.completed.onAwait { Outcome.Completed }
+                    turn.stopAsked.onAwait { Outcome.Finished(turns.confirmStop(turn, onUnconfirmedStop = End.Ended)) }
                 }
-            }
+            } ?: Outcome.TimedOut
         }
-        try {
-            withContext(SdkThreads.voice) { start() }
-            val end = withTimeoutOrNull(timeoutMs) { waiter.await() }
-            if (end is Event.Failed && last == null) throw PleosSdkException(name, end.type.name)
-            if (end == null) stop()
-            last
-        } catch (c: CancellationException) {
-            stop()
-            throw c
-        } finally {
-            waiter.cancel()
+        if (outcome is Outcome.Finished && outcome.end is End.Failed && h.last == null) {
+            throw PleosSdkException(name, outcome.end.type.name)
         }
+        // 시간 안에 끝나지 않았으면 마이크를 닫는다
+        if (outcome == Outcome.TimedOut) turns.stop()
+        return h.last
     }
 
-    /** 듣기를 멈추고 마이크를 닫는다. */
-    fun stop() {
-        SdkThreads.voice.executor.execute { runCatching { raw.stop() } }
-    }
+    /** 듣기를 멈추고 마이크를 닫는다. 듣는 중이 아니면 아무것도 하지 않는다 */
+    override fun stop() = turns.stop()
 
     fun release() {
         SdkThreads.voice.executor.execute {
-            runCatching { raw.removeListener(listener) }
-            runCatching { raw.release() }
+            sdk.ifCreated { stt ->
+                runCatching { stt.removeListener(listener) }
+                runCatching { stt.release() }
+            }
             connected = false
         }
+    }
+
+    companion object {
+        const val CONNECT_TIMEOUT_MS = 30_000L
+        const val LISTEN_TIMEOUT_MS = 10_000L
     }
 }

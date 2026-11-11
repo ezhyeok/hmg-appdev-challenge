@@ -172,6 +172,9 @@ class SignalCollectorTest {
         pass(60_000) // 늦어도 다음 다시 시도(최대 60초)에 걸린다
         assertEquals(13.9f, speeds.last)
         assertEquals(1, speed.subscriptions)
+        assertTrue(log.lines.any { it.startsWith("W car.speed failed: CAR_SPEED") })
+        assertEquals("다시 받기 시작한 것을 남긴다 (기기 확인의 근거)", 1, log.lines.count { it == "I car.speed: receiving again" })
+        assertFalse("처음부터 잘 받은 신호는 남기지 않는다", log.lines.any { it == "I car.gear: receiving again" })
     }
 
     @Test

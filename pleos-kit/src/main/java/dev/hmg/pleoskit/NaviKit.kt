@@ -75,9 +75,14 @@ sealed interface NaviEvent {
  * 권한: 조회는 `pleos.car.permission.NAVI_ROUTE`, 경로 변경은 `NAVI_ROUTE_SEARCH`.
  */
 class NaviKit(context: Context) {
+    private val appContext = context.applicationContext
+    private val sdk = LazySdk { NaviHelper(appContext) }
 
-    /** SDK 원본 객체. kit에 없는 API(즐겨찾기, 최근 목적지, 화면 전환 등)에 쓴다. */
-    val raw = NaviHelper(context.applicationContext)
+    /**
+     * SDK 원본 객체. kit에 없는 API(즐겨찾기, 최근 목적지, 화면 전환 등)에 쓴다.
+     * 처음 쓰는 곳에서 만들어진다: [connect]를 먼저 부르면 SDK 전용 스레드에서 만들어진다 (메인 스레드에서 처음 쓰지 말 것).
+     */
+    val raw: NaviHelper get() = sdk.value
 
     private val _events = MutableSharedFlow<NaviEvent>(extraBufferCapacity = 64, onBufferOverflow = BufferOverflow.DROP_OLDEST)
 
@@ -121,9 +126,10 @@ class NaviKit(context: Context) {
         if (connected) return@withLock
         val ok = withTimeoutOrNull(timeoutMs) {
             withContext(SdkThreads.navi) {
+                val helper = sdk.value
                 suspendCancellableCoroutine { cont ->
                     val done = AtomicBoolean(false)
-                    raw.initialize(
+                    helper.initialize(
                         onConnected = { if (done.compareAndSet(false, true)) cont.resume(Unit) },
                         onFailed = { t ->
                             if (done.compareAndSet(false, true)) {
@@ -132,7 +138,7 @@ class NaviKit(context: Context) {
                         },
                     )
                 }
-                raw.addListener(listener)
+                helper.addListener(listener)
             }
         }
         if (ok == null) throw PleosSdkException("NaviHelper.initialize", "no response in ${timeoutMs}ms")
@@ -141,8 +147,10 @@ class NaviKit(context: Context) {
 
     fun release() {
         SdkThreads.navi.executor.execute {
-            runCatching { raw.removeListener(listener) }
-            runCatching { raw.release() }
+            sdk.ifCreated { helper ->
+                runCatching { helper.removeListener(listener) }
+                runCatching { helper.release() }
+            }
             connected = false
         }
     }
@@ -223,12 +231,12 @@ class NaviKit(context: Context) {
         command("removeWaypoint") { raw.removeWaypoint(index) }
     }
 
-    /** 길안내를 끝낸다. `naviMode`가 `ROUTE_GUIDING`에서 벗어나면 true. */
     /** 내비 화면에서 장소 검색을 연다. 좌표를 모르는 곳(이름만 아는 휴게소 등)으로 안내할 때 쓴다 */
-    suspend fun showPlaceSearch(keyword: String) = withContext(SdkThreads.navi) {
+    suspend fun showPlaceSearch(keyword: String) = sdkSend(SdkThreads.navi, "requestNavigationScreen") {
         raw.requestNavigationScreen(NavigationScreenRequest.SearchPlace(keyword))
     }
 
+    /** 길안내를 끝낸다. 경로가 있는 길안내 모드에서 벗어나면 true. */
     suspend fun cancelRoute(confirmTimeoutMs: Long = 20_000): Boolean = mutex.withLock {
         command("cancelRoute") { raw.cancelRoute() }
         awaitGuiding(false, confirmTimeoutMs)
@@ -260,9 +268,8 @@ class NaviKit(context: Context) {
         val wait = lastCommandAt + COMMAND_GAP_MS - SystemClock.elapsedRealtime()
         if (wait > 0) delay(wait)
         try {
-            withContext(SdkThreads.navi) { send() }
-        } catch (e: Exception) {
-            throw PleosSdkException(name, e.message ?: e.javaClass.simpleName, e)
+            // 취소는 PleosSdkException으로 바꾸지 않는다 (sdkSend, 리뷰 R-F13)
+            sdkSend(SdkThreads.navi, name, send)
         } finally {
             lastCommandAt = SystemClock.elapsedRealtime()
         }
@@ -280,10 +287,11 @@ class NaviKit(context: Context) {
     ): NaviEvent = coroutineScope {
         val waiter = async(start = CoroutineStart.UNDISPATCHED) { _events.first(match) }
         try {
-            withContext(SdkThreads.navi) { send() }
-        } catch (e: Exception) {
+            sdkSend(SdkThreads.navi, name, send)
+        } catch (e: Throwable) {
+            // 보내지 못했거나 취소됐다: 기다리던 구독을 걷는다. 취소는 그대로 던진다 (리뷰 R-F13)
             waiter.cancel()
-            throw PleosSdkException(name, e.message ?: e.javaClass.simpleName, e)
+            throw e
         }
         val event = withTimeoutOrNull(timeoutMs) { waiter.await() }
         if (event == null) {

@@ -17,8 +17,11 @@ import kotlinx.coroutines.withContext
  * 권한: `pleos.car.permission.FUSED_LOCATION` (dangerous, 실행 중 요청 필요. [PleosPermissions] 참고).
  */
 class LocationKit(context: Context) {
+    private val appContext = context.applicationContext
+    private val sdk = LazySdk { FusedLocation(appContext) }
 
-    val raw = FusedLocation(context.applicationContext)
+    /** SDK 원본 객체. 처음 쓰는 곳에서 만들어진다 ([connect]를 먼저 부르면 SDK 전용 스레드). [reconnect] 뒤에는 새 객체다 */
+    val raw: FusedLocation get() = sdk.value
 
     @Volatile
     private var connected = false
@@ -28,9 +31,17 @@ class LocationKit(context: Context) {
 
     suspend fun connect() = withContext(SdkThreads.location) {
         if (!connected) {
-            raw.initialize()
+            sdk.value.initialize()
             connected = true
         }
+    }
+
+    /** 연결이 죽었다고 보고 SDK 객체를 버린 뒤 새로 붙는다. 수집 중인 Flow는 다시 수집해야 한다 ([VehicleKit.reconnect]와 같다) */
+    suspend fun reconnect() = withContext(SdkThreads.location) {
+        connected = false
+        sdk.drop()?.let { old -> runCatching { old.release() } }
+        sdk.value.initialize()
+        connected = true
     }
 
     /** 마지막으로 알려진 위치. 없으면 null. */
@@ -78,7 +89,7 @@ class LocationKit(context: Context) {
 
     fun release() {
         SdkThreads.location.executor.execute {
-            runCatching { raw.release() }
+            sdk.ifCreated { runCatching { it.release() } }
             connected = false
         }
     }

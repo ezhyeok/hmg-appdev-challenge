@@ -166,16 +166,20 @@ class SignalCollector(
     }
 
     private suspend fun <T : Any> watch(name: String, w: SignalWatch<T>, health: Health): Nothing {
+        var attempt = 0
         // 처음 다시 읽기(refreshMs)도 못 넘기고 죽는 구독은 간격을 늘려 다시 건다. 그동안에도 값은 다시 읽기로 따라간다
-        Retry.forever(name, clock, log, Backoff(healthyMs = 2 * refreshMs + 1)) { subscribe(w, health) }
+        Retry.forever(name, clock, log, Backoff(healthyMs = 2 * refreshMs + 1)) {
+            val again = attempt++ > 0
+            subscribe(w, health) { if (again) log.i("$name: receiving again") }
+        }
     }
 
-    /** 구독 한 번. 구독이 죽었다고 판단하면 예외로 끝난다 */
-    private suspend fun <T : Any> subscribe(w: SignalWatch<T>, health: Health): Unit = coroutineScope {
+    /** 구독 한 번. 구독이 죽었다고 판단하면 예외로 끝난다. [onFirstEvent]: 이번 구독의 리스너가 처음 값을 줬다 */
+    private suspend fun <T : Any> subscribe(w: SignalWatch<T>, health: Health, onFirstEvent: () -> Unit): Unit = coroutineScope {
         val seen = Seen<T>()
         launch {
             w.source.changes().collect { v ->
-                seen.event(v)
+                if (seen.event(v)) onFirstEvent()
                 health.event()
                 w.onValue(v)
             }
@@ -236,11 +240,13 @@ class SignalCollector(
             @Synchronized get
             private set
 
+        /** 리스너가 값을 줬다. 이번 구독의 첫 이벤트면 true */
         @Synchronized
-        fun event(v: T?) {
+        fun event(v: T?): Boolean {
             events++
             known = true
             last = v
+            return events == 1
         }
 
         /** 읽은 값을 첫 값으로 삼는다. 아직 아무 값도 받지 못했을 때만이다 (늦게 읽은 옛 값이 리스너 값을 덮지 않게) */
