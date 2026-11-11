@@ -73,20 +73,50 @@ OSM 차로 위 위치로 다시 확인: `StopRepositoryTest.approachesToTheFixed
 - 재현: 경부선 부산방향 실제 차로 위 39곳(기흥→옥천, 감사와 같은 구간), 화장실 있는 앞 6곳 중
   같은 길 109 / 다른 길 125(예전 순서) → **같은 길 205 / 다른 길 29**. 감사 원래의 39곳은 13점 꺾은선 위라 39곳 중 5곳만
   차로 위에 있어서 대부분 '모름'(123/111 → 131/103). (감사가 적은 250/508은 앞 6곳이 아니라 전체 개수다.)
+  2026-11-12 먼 같은 이름 쌍 규칙(3.3, C2)을 넣은 뒤로는 203/31, 127/107이다: 20km보다 멀고 분명히 갈리지 않는 반대편 쌍이 2~4곳 남는다.
 
 ### 3.3 방향 거르기 (`ahead`, `near`, `matchByName`)
 
 | 상황 | 규칙 | 이유 / 테스트 |
 |---|---|---|
-| 방위 모름(`heading == null`) | 방향 거르기 없음 | 서 있는 차의 방위는 믿을 수 없다. **부르는 쪽은 기어 P·저속이면 null을 넘긴다** |
+| 방위 모름(`heading == null`) | 방향 거르기 없음 | 방위는 '달리는 방향'이다. 부르는 쪽(코어)은 서 있거나 느릴 때도 **마지막으로 달리던 방위**를 넘긴다(닫힘 검증 C1). null은 아직 움직인 적이 없을 때뿐이다 |
 | 300m보다 먼 시설 | 진행 방향 ±75° 원뿔 | 예전과 같다 |
 | 300m 안 시설 | 진행 축으로 50m보다 뒤면 뺀다(`ahead`) | 지나친 휴게소는 진출로도 지났다. 예전에는 300m 안이면 뒤라도 남김(#11). `facilityJustPassedIsDroppedButOneAbeamIsKept` |
 | 반대 차로 | 차로 방위가 진행 방향과 90° 넘게 다르면 뺀다(2km보다 멀면 '나→시설' 방위와 비교) | 예전과 같다 |
+| 20km보다 먼 같은 이름 쌍 | '나→시설' 방위와 차로 방위의 차가 110° 넘을 때만 뺀다. 70~110° 사이면 둘 다 남는다 | 길이 시설 앞에서 꺾이면 그 방위가 두 차로와 거의 직각이 된다(C2, 아래). `farUpstreamTheOppositeTwinIsNeverTheOnlyOneOffered`, `farAwayTheBearingDecidesBetweenSameNameTwinsOnlyWhenItIsClear` |
 | 시설 안 | 차가 **고속도로 차로 위가 아니고** 휴게소·졸음쉼터 250m 안이면 그 시설은 반대 차로·뒤쪽 검사를 안 한다 | 주차장에 반대로 세운 차가 자기 휴게소를 잃지 않게(#10). 반경만으로는 안 된다: 방향별 시설 93%는 반대 차로가 시설 점 150m 안(중앙값 51m)을 지나가서 지나가는 차에게 건너편 시설이 다시 나온다. `carParkedFacingTheOtherWayKeepsTheRestAreaItIsIn`, `passingTheOppositeTwinDoesNotOfferIt` |
 | `near`의 directionOk | 150m보다 멀고 진행 방향과 100° 넘게 다르면 false | 예전과 같다(시설 안이면 true) |
 
-남은 한계: 차로 위 45m 안에 세운 졸음쉼터 차가 반대 방향을 보고 서 있으면 반대 차로와 맞춰질 수 있다. 확실한 신호는 속도라서
-정차 중에는 방위를 넘기지 않는 것이 부르는 쪽 계약이다(코치 담당 A/E에 알림).
+**멀리 있는 같은 이름 쌍 (닫힘 검증 C2).** 2km보다 먼 시설의 반대 차로 판정은 '나 → 시설' 방위를 쓴다. 차로 방위를 그 자리의
+실제 방위로 고친 뒤(3.1) 길이 시설 앞에서 거꾸로 꺾이는 곳에서 이 방위가 틀린 쪽을 골랐다: 경부선 서울방향 차가 대신졸음쉼터
+22~59km 전에서 보면 서울방향 행이 94~103°, 부산방향 행이 76~85°라 반대편 행만 남았다(`matchByName`이 한 행만 주면
+CandidateProvider는 내비에 묻지 않고 그 행을 쓴다).
+
+- 규칙: 같은 이름·같은 종류 시설이 3km 안에 또 있는 행(양방향 쌍, 읽을 때 한 번 표시: `Loaded.hasTwin`)이 20km보다 멀면,
+  차이가 직각에서 20° 넘게 벗어날 때만 반대 차로로 뺀다. 그 안쪽이면 쌍의 두 행이 다 남는다. `matchByName`은 둘 다 돌려주고
+  (CandidateProvider가 requestTrip 거리로 고르거나 `tbt:`로 둔다), `ahead`도 둘 다 넣는다(하나를 빼면 '반경 안에는 넣은 것이 전부'라는
+  범위 약속이 깨진다).
+- 쌍이 아닌 시설과 20km 안은 예전 규칙 그대로다. 20km 안에서는 차로를 따라가 본 쌍이 모두 맞았다.
+- 왜 '멀면 언제나 둘 다'가 아닌가. 닫힘 검증의 표본(같은 노선·같은 방향 졸음쉼터에서 하류의 쌍을 본다, 직선 20~60km 154쌍)에서
+  예전 규칙은 151쌍이 맞고 3쌍이 틀렸는데(대신 2쌍, 구리남양주 → 시흥) 틀린 3쌍이 모두 직각에서 13° 안이었다. 20°로 두면
+  틀림 0, 둘 다 7, 한 행만(맞음) 147이다. 언제나 둘 다 주면 경로 시작 때 TBT 휴게소마다 requestTrip이 두 번 나가고, 내비가 답하지
+  못하면 먼 휴게소가 모두 `tbt:`였다가 20km에서 데이터 행으로 바뀐다(후보 id가 바뀐다). `TWIN_CLEAR_DEG`를 90으로 두면 그 동작이다.
+- 값을 다시 정할 때: 표본은 `drowsy_shelters.json`의 `rno`·`dir`·`km`(이정)로 같은 노선·같은 방향의 상류 쉼터를 차 위치로 삼고,
+  하류 쌍 T/T'에 `angleDiff(차로 방위, 나 → 시설 방위)`를 구해 90°와의 차를 본다.
+- 치른 값: 경부 재현(3.2)의 앞 6곳에서 같은 길 205 → 203곳, 감사 꺾은선 위치에서 131 → 127곳(먼 반대편 쌍이 남는다).
+  20km 안으로 들어오면 빠진다. 엔진이 묻는 거리(진입로 2~5km 전)에서는 예전과 같다.
+
+**서 있는 차 (닫힘 검증 C1).** 코어가 서 있는 동안에도 달리던 방위를 넘기므로 정차 중에도 방향 거르기를 한다(예전에는 방위를
+버려서 길안내 없이 서 있거나 기어가면 앞 6곳 중 191곳이 뒤·반대 차로·다른 길이었다).
+- 휴게소 안에 선 차는 그 휴게소를 잃지 않는다: 휴게소 시설 점은 본선에서 떨어져 있어 '시설 안'(차로 위가 아니고 250m 안)이 된다.
+  시설 점에서 진행 방향으로 0·60·150m 들어가 선 690곳 중 683곳에서 남는다(`aCarParkedInARestAreaKeepsItWithTheHeadingItArrivedWith`).
+- 졸음쉼터는 다르다: 본선에 붙어 있어 쉼터 안의 차도 80~95%가 '차로 위'(45m 안)로 맞춰진다. 그래서 쉼터 시설 점을 50m 넘게 지나
+  선 차에게는 그 쉼터가 `ahead()`에서 빠진다(같은 자리를 본선으로 지나가는 차와 위치로는 가를 수 없다. 가르는 신호는 속도·기어다).
+  "지금 서 있는 곳"은 `ahead()`가 아니라 `near(heading = null)`로 찾는다(StopRecorder가 정차 이름을 그렇게 찾는다).
+  `ahead()`에 정차 여부를 넘길 길을 더하는 것이 남은 일이다(포트 `StopIndex.ahead`와 `CandidateRequest`에 칸이 필요하다).
+
+남은 한계: 주차장을 시속 10km 넘게 반대로 돌다 선 차는 '달리던 방위'가 반대라, 자기 휴게소는 남지만(시설 안) 그 밖의 앞쪽 시설이
+다시 달리기 전까지 뒤쪽으로 걸러진다.
 
 ### 3.4 이름 맞추기 (`StopNames`, `matchByName`, 감사 #2 #5)
 
@@ -100,7 +130,7 @@ OSM 차로 위 위치로 다시 확인: `StopRepositoryTest.approachesToTheFixed
   "덕평자연휴게소" → 덕평. 거꾸로는 안 한다("안성" ↛ "안성맞춤").
 - 방위를 주면 반대 차로 행을 뺀다. 같은 이름이 3km 안에 둘 이상인 행 350개 모두 각자 차로로 3km 앞에서 다가가면 자기
   행만 나온다(`sameNamePairsResolveByLaneHeadingWithoutANaviRequest`) → 같은 이름마다 requestTrip을 보낼 필요가 없다.
-  남는 행이 없으면 빈 목록(반대 차로 행을 대신 주지 않는다).
+  남는 행이 없으면 빈 목록(반대 차로 행을 대신 주지 않는다). 20km보다 먼 쌍이 분명히 갈리지 않으면 두 행을 다 준다(3.3).
 
 ### 3.5 영업 시간 (`StopHours`, 감사 #8)
 
@@ -145,7 +175,8 @@ lineRoad:short[lineCount] lineFlags:byte[lineCount] lineStart:int[lineCount+1] p
 | 대신·동광주 접근(실제 차로 위) | `StopRepositoryTest.approachesToTheFixedSheltersSeeTheirOwnSide` |
 | 같은 길 먼저 / 국도에서는 거리 순 / 방위 없음 | `aheadRanksTheExpresswayUnderTheCarFirst`, `offTheExpresswayTheOrderIsDistance` |
 | 경부 39곳 앞 6곳 (실제 차로 + 감사 꺾은선) | `gyeongbuReplayKeepsTheTopSixOnTheRoad` |
-| 건너편 쌍둥이 지나가기 / 반대로 세운 차 | `passingTheOppositeTwinDoesNotOfferIt`, `carParkedFacingTheOtherWayKeepsTheRestAreaItIsIn` |
+| 건너편 쌍둥이 지나가기 / 반대로 세운 차 / 달리던 방위로 휴게소 안에 선 차 | `passingTheOppositeTwinDoesNotOfferIt`, `carParkedFacingTheOtherWayKeepsTheRestAreaItIsIn`, `aCarParkedInARestAreaKeepsItWithTheHeadingItArrivedWith` |
+| 멀리 있는 같은 이름 쌍 (대신·시흥 실제 4곳, 가상 굽이) | `farUpstreamTheOppositeTwinIsNeverTheOnlyOneOffered`, `farAwayTheBearingDecidesBetweenSameNameTwinsOnlyWhenItIsClear` |
 | 지나친 시설 / 옆의 시설 | `facilityJustPassedIsDroppedButOneAbeamIsKept` |
 | 같은 이름 쌍, 방향 표기 | `matchByNameUsesTheLaneHeadingForSameNamePairs`, `sameNamePairsResolveByLaneHeadingWithoutANaviRequest` |
 | 쉼터를 SERVICEAREA로 / 시설어만 / 앞부분 맞춤 | `shelterLabelledAsServiceAreaMatchesTheShelterNotTheRestArea`, `namesWithoutAnIdentityMatchNothingAndPrefixesOnlyOneWay` |
@@ -161,6 +192,7 @@ lineRoad:short[lineCount] lineFlags:byte[lineCount] lineStart:int[lineCount+1] p
 
 - `StopIndex` 포트는 바꾸지 않았다. `StopRepository.currentRoad(lat, lon, heading)`을 더했다(지금 고속도로 이름, 디버그·화면용).
 - `ahead()` 결과 순서가 바뀌었다(같은 길 먼저). 앞 N곳만 보정하는 쪽(CandidateProvider)은 그대로 `take(N)`하면 된다.
-- 방위 계약: 정차 중(기어 P·저속)이거나 방위 출처가 대체값(내비 0.0 등)이면 `heading = null`을 넘긴다(PositionTracker, 감사 #10).
+- 방위 계약(닫힘 검증 C1로 바뀜): `heading`은 달리는 방향이다. 코어는 시속 10km 이상으로 달릴 때 본 마지막 방위를 서 있거나 느릴 때도
+  넘기고, 아직 움직인 적이 없거나 방위 출처가 대체값(내비 0.0 등)이면 `null`을 넘긴다(PositionTracker, 감사 #10).
 - `matchByName`에 방위를 넘기면 같은 이름 쌍마다 requestTrip을 보낼 필요가 없다(현재 CoachService는 방위를 안 넘긴다).
 - TBT 기회의 종류도 이름의 시설어를 따르는 것이 맞다: `StopNames.kindFor(name, tbtKind)` (RouteOpportunities.extract 담당 A).

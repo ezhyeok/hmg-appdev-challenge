@@ -29,6 +29,9 @@ import java.util.concurrent.atomic.AtomicInteger
  * - 경로 변경을 알았는데 경로 상태를 아직 다시 못 읽었으면 TBT를 조회하지 않는다.
  * - 스냅샷의 tbtEpoch가 epoch와 다르면 NaviSnapshot이 TBT 값을 쓰지 않는다.
  *
+ * 답 없는 내비: 경로 상태 조회가 [ROUTE_STALE_MS](1분) 동안 이어서 실패하면 지난 스냅샷을 더 믿지 않고 '모름'(route = null)을 낸다.
+ * 그 전의 잠깐 실패에는 지난 스냅샷을 그대로 둔다. 다시 답하면 곧바로 회복하고, 길안내 중이면 새 epoch로 시작한다 (서비스 감사 SV-N5).
+ *
  * 스레드: [run]과 [pollOnce]는 한 코루틴(코치 디스패처)에서만 돈다. 아래 private 상태는 그 코루틴만 쓴다.
  * [requestRefresh]와 내비 이벤트는 원자 플래그와 CONFLATED 채널로만 루프에 알리므로 어느 스레드에서 불러도 되고 막히지 않는다.
  * 스냅샷은 한 번에 통째로 바꾼다. 읽는 쪽이 새 경로와 옛 TBT, 옛 목적지를 섞어 읽을 수 없다.
@@ -68,6 +71,10 @@ class NaviTracker(
     private var naviFrozen = false
     private var lastRequestAt: Long? = null
     private val failures = HashMap<String, Int>()
+    /** 경로 상태 조회가 이어서 실패하기 시작한 때 (첫 실패한 조회를 보낸 때). 답을 받으면 null */
+    private var routeFailingSince: Long? = null
+    /** 이번 실패에서 '모름'을 이미 냈다 (한 번만 내고 한 번만 알린다) */
+    private var routeUnknown = false
 
     /**
      * 내비를 곧바로 다시 읽게 한다 (수락해서 경유지를 넣거나 길안내를 시작한 뒤). 경로·TBT를 바로 받고 30초는 TBT를 5초마다 받는다.
@@ -140,9 +147,16 @@ class NaviTracker(
     private suspend fun pollRoute(startedAt: Long) {
         val status = call("routeStatus") { navi.routeStatus() }
         if (status == null) {
-            nextRouteAt = clock.elapsedMs() + NaviPoll.NEAR_MS
+            val now = clock.elapsedMs()
+            nextRouteAt = now + NaviPoll.NEAR_MS
+            routeFailed(startedAt, now)
             return
         }
+        val silentFor = routeFailingSince?.let { clock.elapsedMs() - it }
+        val wasUnknown = routeUnknown
+        routeFailingSince = null
+        routeUnknown = false
+        if (wasUnknown) log.i("navi answering again after ${silentFor!! / 1000}s")
         val prev = state.value
         if (status.mode != prev.mode) log.i("navi mode: ${prev.mode} -> ${status.mode}")
         if (!NaviPoll.isGuiding(status.mode)) {
@@ -159,6 +173,8 @@ class NaviTracker(
         nextRouteAt = startedAt + if (usable) NaviPoll.ROUTE_MS else NaviPoll.NEAR_MS
 
         val why = when {
+            // 답이 없던 사이 무슨 일이 있었는지(재탐색, 경유지) 모른다: 같은 목적지여도 새 경로로 다시 시작한다
+            wasUnknown -> "guidance seen again after the navi was silent"
             !prev.guiding -> "guidance started"
             routeChangePending -> "route changed (request or navi event)"
             usable && destinationMoved(prev.destination, dest) -> "destination changed"
@@ -221,8 +237,29 @@ class NaviTracker(
 
     /** 경로 없는 상태(SAFE_GUIDING·초기화 중 등): 경로·TBT·보정 신뢰를 모두 지운다 */
     private fun toIdle(prev: NaviSnapshot, mode: NaviMode) {
+        if (prev.guiding) log.i("navi epoch ${prev.epoch + 1}: guidance ended")
+        forgetRoute(prev, mode, RouteState(guiding = false))
+    }
+
+    /**
+     * 경로 상태 조회가 실패했다. 실패가 [ROUTE_STALE_MS] 동안 이어졌으면 지난 스냅샷(길안내·목적지·TBT)을 더 믿지 않는다:
+     * 경로를 모르는 상태(route = null, 길안내 아님과 다르다)를 한 번 내고 한 번 알린다. 예전에는 내비가 죽어도 몇 분 전 경로를
+     * 지금 것으로 계속 내보냈다 (서비스 감사 SV-N5). 그 전까지는 지난 스냅샷을 둔다: 잠깐의 실패에 엔진 입력이 깜박이지 않게.
+     * [startedAt]: 실패한 조회를 보낸 때. 무응답(호출마다 20초)과 빠른 실패(5초마다)를 같은 시간으로 재려고 실패 수가 아니라 시간으로 본다.
+     */
+    private fun routeFailed(startedAt: Long, now: Long) {
+        val since = routeFailingSince ?: startedAt.also { routeFailingSince = it }
+        if (routeUnknown || now - since < ROUTE_STALE_MS) return
+        routeUnknown = true
+        val prev = state.value
+        log.w("navi silent for ${(now - since) / 1000}s: route unknown" + if (prev.guiding) " (epoch ${prev.epoch + 1})" else "")
+        // 처음부터 답이 없었으면 스냅샷은 이미 '모름'이다
+        if (prev.route != null) forgetRoute(prev, NaviMode.UNKNOWN, route = null)
+    }
+
+    /** 경로·목적지·TBT·보정 신뢰를 지운 스냅샷을 낸다. 길안내 중이었으면 epoch를 올린다 (옛 경로에서 만든 것이 다음 경로와 섞이지 않게) */
+    private fun forgetRoute(prev: NaviSnapshot, mode: NaviMode, route: RouteState?) {
         val epoch = if (prev.guiding) prev.epoch + 1 else prev.epoch
-        if (prev.guiding) log.i("navi epoch $epoch: guidance ended")
         routeChangePending = false
         congestion.clear()
         prevRemainM = null
@@ -231,7 +268,7 @@ class NaviTracker(
         lastTbtAt = null
         tbtRetryAt = null
         val odo = odometer.meters
-        publish(NaviSnapshot(epoch = epoch, mode = mode, route = RouteState(guiding = false), routeOdometerM = odo, tbtOdometerM = odo, tbtEpoch = epoch))
+        publish(NaviSnapshot(epoch = epoch, mode = mode, route = route, routeOdometerM = odo, tbtOdometerM = odo, tbtEpoch = epoch))
     }
 
     private fun routeState(status: NaviRouteStatus, dest: NaviDestination, remain: Double?, odoAt: Double) = RouteState(
@@ -311,6 +348,7 @@ class NaviTracker(
 
     // ------------------------------------------------------------ 연결·이벤트·호출
 
+    // 다시 시도 간격(2초부터 두 배씩 1분까지)은 병합 때 코치 모듈의 공용 재시도 도우미(Retry.kt, 앱 담당 브랜치)로 바꾼다
     private suspend fun connect() {
         var wait = CONNECT_RETRY_MS
         while (true) {
@@ -400,6 +438,11 @@ class NaviTracker(
         const val MIN_REQUEST_GAP_MS = 1_000L
         const val MIN_WAIT_MS = 100L
         const val DESTINATION_MOVED_M = 100.0
+        /**
+         * 경로 상태 조회가 이만큼 이어서 실패하면 지난 스냅샷을 버린다. 시속 100km로 1.7km: 그 사이 휴게소 진입로 하나를 지날 수 있다.
+         * 들르기 하나가 내비 잠금을 잡는 시간(경유지 확인 20~45초)보다 길어서, 그 기다림만으로는 넘지 않는다.
+         */
+        const val ROUTE_STALE_MS = 60_000L
 
         private const val ROUTE = 1
         private const val TBT = 2

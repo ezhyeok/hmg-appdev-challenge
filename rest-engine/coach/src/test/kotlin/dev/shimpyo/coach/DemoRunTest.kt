@@ -1,9 +1,14 @@
 package dev.shimpyo.coach
 
+import dev.shimpyo.coach.fakes.DRIVER
+import dev.shimpyo.coach.fakes.FakeSettings
 import dev.shimpyo.coach.fakes.WorldClock
+import dev.shimpyo.coach.fakes.seededEngines
 import dev.shimpyo.engine.CoachInput
 import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.Gear
+import dev.shimpyo.engine.PersonalMemory
+import dev.shimpyo.engine.RouteState
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 import org.junit.Assert.assertEquals
@@ -107,6 +112,85 @@ class DemoRunTest {
         assertEquals(mapOf("driver" to a.restroomFallbackAt, "kid" to a.restroomFallbackAt), a.lastRestroomFor(holiday.scenario.occupants))
         val fatigue = checkNotNull(start("fatigue", clock)).anchor
         assertEquals(95.0, fatigue.continuousDrivingMin, 0.0)
+    }
+
+    // ------------------------------------------------------------ 경로 시간 (UI 감사 U2)
+
+    /**
+     * 엔진이 경로 상태에서 구하는 정체 밖 자유 속도 (RouteContext.prepare와 같은 식):
+     * (남은 거리 − 경로 안 정체 길이) ÷ (남은 시간 − 경로 안 정체 통과 시간). 정체는 [0, 남은 거리]로 자른다
+     */
+    private fun freeSpeedMps(route: RouteState): Double {
+        val remain = route.remainDistanceM!!
+        var jamM = 0.0
+        var jamS = 0.0
+        for (j in route.congestion) {
+            val from = maxOf(j.startDistanceM, 0.0)
+            val to = minOf(j.startDistanceM + j.lengthM, remain)
+            if (to <= from) continue
+            jamM += to - from
+            jamS += j.durationS * (to - from) / j.lengthM
+        }
+        return (remain - jamM) / (route.remainTimeS!! - jamS)
+    }
+
+    @Test
+    fun routeTimeIsTheScenarioSpeedOutsideTheJamsPlusTheJams() {
+        // 예전: 남은 시간 = 남은 거리 ÷ 25m/s (시나리오와 무관). 엔진은 거기서 정체 몫(귀성길 1시간)을 빼고 자유 속도를 구하므로
+        // 시속 119km가 나왔고 화면이 "옥산휴게소 14km · 7분"을 보였다. 시나리오의 가상 속도는 실제 1초에 가는 거리 ÷ 시각 배속이다
+        val expected = mapOf("holiday" to 100 / 3.6, "fatigue" to 90 / 3.6, "urgent" to 8.0, "stop" to 90 / 3.6)
+        for ((name, speed) in expected) {
+            // 정체 전, 정체 안(귀성길: 실제 97~197초), 정체를 지난 뒤
+            for (afterS in listOf(0L, 30L, 90L, 150L, 400L)) {
+                val clock = WorldClock(wallStart)
+                val run = checkNotNull(start(name, clock))
+                clock.advance(afterS * 1_000)
+                val route = run.apply(CoachInput(now = run.now(), gear = Gear.DRIVE)).route!!
+                assertEquals("$name ${afterS}초 뒤 엔진이 구하는 자유 속도 (m/s)", speed, freeSpeedMps(route), 1e-6)
+            }
+        }
+    }
+
+    @Test
+    fun theHolidayRouteTimeCountsTheJamOnce() {
+        val clock = WorldClock(wallStart)
+        val run = checkNotNull(start("holiday", clock))
+        val jam = run.scenario.congestion.single()
+        fun route() = run.apply(CoachInput(now = run.now(), gear = Gear.DRIVE)).route!!
+        // 출발: (310km − 정체 길이) ÷ 시속 100km + 정체 1시간
+        assertEquals((310_000.0 - jam.lengthM) / (100 / 3.6) + 3_600.0, route().remainTimeS!!, 1e-6)
+        // 정체 한가운데: 남은 정체는 절반만 센다
+        clock.advance(((jam.startM + jam.lengthM / 2) / 200.0 * 1_000).toLong())
+        val mid = route()
+        val left = jam.startM + jam.lengthM - run.travelledM()
+        assertEquals((mid.remainDistanceM!! - left) / (100 / 3.6) + 3_600.0 * left / jam.lengthM, mid.remainTimeS!!, 1e-6)
+        // 정체를 지난 뒤: 정체 몫이 없다
+        clock.advance(200_000)
+        val after = route()
+        assertTrue(after.congestion.isEmpty())
+        assertEquals(after.remainDistanceM!! / (100 / 3.6), after.remainTimeS!!, 1e-6)
+    }
+
+    @Test
+    fun theEngineArrivesAtTheScenarioSpeed() {
+        // 엔진까지: 귀성길의 옥산휴게소(정체 앞)까지 엔진이 계산한 도착 시간 = 경로 거리 ÷ 시속 100km ("14km · 8분", 예전 7분)
+        val clock = WorldClock(wallStart)
+        val run = checkNotNull(start("holiday", clock))
+        val world = CoachWorld.Demo(run)
+        val engine = world.newEngine(seededEngines(), FakeSettings(occupants = listOf(DRIVER)), PersonalMemory(), run.anchor)
+        val restArea = Facilities(restroom = true, food = true)
+        val candidates = listOf(oksan.copy(facilities = restArea), jukam.copy(facilities = restArea))
+        var checked = 0
+        repeat(60) {
+            val out = engine.update(world.apply(CoachInput(now = run.now(), gear = Gear.DRIVE, speedKph = 100f, candidates = world.candidates(candidates))))
+            val next = out.next?.stop
+            if (next?.id == "oksan" && next.routeDistanceM!! > 1_000.0) {
+                assertEquals("옥산휴게소 ${next.routeDistanceM!!.toInt()}m", next.routeDistanceM!! / (100 / 3.6), next.etaS!!, 1.0)
+                checked++
+            }
+            clock.advance(1_000)
+        }
+        assertTrue("옥산휴게소를 추천한 틱이 있어야 한다", checked > 0)
     }
 
     @Test

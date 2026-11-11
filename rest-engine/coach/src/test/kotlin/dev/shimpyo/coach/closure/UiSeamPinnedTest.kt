@@ -171,7 +171,9 @@ class UiSeamPinnedTest {
         rig.command(UiCommand.MakePlan)
         rig.run(1_000)
         val first = checkNotNull(rig.state.plan).stops.first().stop.id
-        assertEquals("전제: 첫 계획 정차는 바로 앞 휴게소", "cheonan", first)
+        // 시연 경로 시간이 시나리오 속도(시속 100km)와 맞은 뒤(U2)로는 첫 계획 정차가 정체 전 마지막 화장실인 옥산이다:
+        // 천안호두에서 서면 정체 뒤 죽암까지 73분이라 아이의 마감을 넘는다 (예전 시속 119km 계산으로는 72분이라 천안호두였다)
+        assertEquals("전제: 첫 계획 정차는 곧 지나칠 앞쪽 휴게소", "oksan", first)
         assertEquals(1L, rig.state.planGeneration)
         rig.runUntil(120_000) { rig.state.ahead.none { it.id == first } } ?: error("첫 정차를 지나치지 않았다")
         val late = rig.runUntil(35_000) { rig.state.plan!!.stops.none { it.stop.id == first } }

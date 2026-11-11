@@ -34,7 +34,8 @@ data class CandidateRequest(val pos: Fix?, val navi: NaviSnapshot, val policy: C
 
 interface TripEstimator {                                         // Ports.kt, RouteOracle이 구현
     var enabled: Boolean
-    suspend fun refine(c: StopCandidate, from: Fix): StopCandidate?   // null = 모름
+    // null = 모름. permit: 내비에 실제로 보내기 직전에 한 번 묻는다 (false면 보내지 않고 null). 캐시가 답하면 묻지 않는다
+    suspend fun refine(c: StopCandidate, from: Fix, permit: () -> Boolean = { true }): StopCandidate?
     fun clear()
 }
 ```
@@ -44,9 +45,9 @@ interface TripEstimator {                                         // Ports.kt, R
 - `refresh`에서 코치 시각 `now`를 뺐다. 계획 후보(휴게소·졸음쉼터)는 영업시간을 보지 않고, 오라클 캐시 나이는 실제 시간으로 바꿨다.
 - `run(request)`을 더했다. 갱신 시점(주기, epoch·TBT·위치·데이터·정책 변화, TBT 기다림 끝)을 이 부품이 정하고, 갱신을 자식 코루틴으로 돌려
   `reset()`이 루프를 죽이지 않고 진행 중인 갱신만 취소할 수 있게 하려고. 코어는 `launch { candidates.run { CandidateRequest(...) } }` 한 줄로 쓴다.
-- `TripEstimator.refine(c, lat, lon, now): StopCandidate` → `refine(c, from: Fix): StopCandidate?`. 실패를 '모름'(null)으로 돌려줘야
+- `TripEstimator.refine(c, lat, lon, now): StopCandidate` → `refine(c, from: Fix, permit): StopCandidate?`. 실패를 '모름'(null)으로 돌려줘야
   같은 이름 고르기에서 실패를 '가장 멂'으로 읽는 버그(D6)가 구조적으로 막힌다. `from.heading`은 캐시 판단에 쓴다.
-  지금 `CoachService`가 쓰는 예전 진입점은 `RouteOracle`에 `@Deprecated`로 남겨 앱이 그대로 컴파일된다 (코어가 바꾸면 지운다).
+  `permit`은 갱신 하나의 요청 수 한도를 '내비에 실제로 보낸 요청'으로만 세게 하는 길이다(4장, SV-N1). 보냈는지는 오라클만 안다.
 - `CandidateSnap`에 `source`(NONE/ROUTE/NEARBY)와 `naviGuiding`을 더했고, 기본 `untilM`을 null(완전)에서 0.0(주장 없음)으로 바꿨다.
   아직 아무것도 못 만든 목록이 '목적지까지 완전한 빈 목록'으로 읽히면 안 된다.
 
@@ -68,12 +69,37 @@ interface TripEstimator {                                         // Ports.kt, R
 1. 기회를 `NaviSnapshot.liveOpportunities`로 지금 위치에 맞추고, NaN·음수 거리는 뺀다.
 2. 이름이 종류를 말하면 이름을 믿는다(`effectiveKind`): TBT가 졸음쉼터를 SERVICEAREA로 보내면 extract는 휴게소로 두는데,
    그러면 같은 기본 이름의 반대편 휴게소(옥산졸음쉼터(서울방향) ↔ 옥산휴게소(부산방향) 0.3km)와 맞는다.
-3. `StopIndex.matchByName(name, kind, 위치, 경로거리 + 5km, heading)`. heading을 넘기면 반대 차로 행은 데이터 쪽에서 뺀다.
+3. 이번 epoch에 **확인한 행**이 있으면 그 행을 쓴다(2.1.1). 없으면 아래로 고른다.
+   `StopIndex.matchByName(name, kind, 위치, 경로거리 + 5km, heading)`. heading을 넘기면 반대 차로 행은 데이터 쪽에서 뺀다
+   (20km보다 먼 같은 이름 쌍이 분명히 갈리지 않으면 데이터 쪽이 둘 다 준다, data.md 3.3).
 4. 직선거리가 TBT 경로 거리와 어울리는 행만 남긴다: `경로×0.5 − 2km ≤ 직선 ≤ 경로 + 5km` (다른 노선의 같은 이름 시설을 뺀다).
 5. 남은 행이 0개면 좌표 없는 `tbt:이름` 후보, 1개면 그 행, 여럿이면 requestTrip으로 잰다(`chooseMeasured`):
    유턴 판정 행은 빼고, 못 잰 행은 '모름', TBT 거리와 가장 가까운 행을 고르되 2km + 10%를 넘으면 어느 것도 아니다 → `tbt:`.
 6. 모든 후보: `routeDistanceM` = TBT 누적 거리, `directionOk = true`, `etaS = null`.
 7. 같은 이름 `tbt:` 후보가 또 오면 `tbt:이름#2`. 같은 데이터 행이 두 번 오면 앞의 것만.
+
+#### 2.1.1 한 번 확인한 행은 그 경로에서 그 행이다 (SV-N1)
+
+엔진은 수락한 정차를 후보 id로 따라간다. id가 바뀌면 60초 뒤 '지나쳤다'고 보고 잊고 다시 묻는다. 예전에는 갱신마다 새로 골라서,
+달릴 때 차로 방위로 고른 행(`k06e247e4`)이 정체에 들어 방위를 모르게 되고(P·저속) 내비도 못 재는 동안 `tbt:옥천휴게소`로 바뀌었다
+(같은 이름 양방향 쌍은 185쌍 중 151쌍이 500m 안이라 방위 없이는 둘 다 맞는다). 이미 경유지로 넣은 휴게소를 다시 물었다.
+
+| 어떻게 골랐나 | 기억하나 | 이유 |
+|---|---|---|
+| 방위를 알고 한 행만 남음 (차로 방위) | 기억한다 (`resolved`) | 확인한 것이다 |
+| 여럿을 requestTrip 거리로 고름 | 기억한다 | 내비가 확인한 것이다 |
+| 방위를 모르는데 이름이 하나뿐 | 쓰되 기억하지 않는다 (임시) | 반대 차로 행뿐인 이름일 수 있다. 방위를 알면 다시 본다 |
+| 방위를 알 때 차로 방위가 그 이름의 행을 모두 뺌 | 이름을 적어 둔다 (`laneRejected`) | 방위를 다시 모르게 돼도 뺀 행으로 돌아가지 않는다 (행 ↔ `tbt:`를 오가지 않게) |
+| 못 고름 | `tbt:` | 나중에 고를 수 있게 되면 데이터 행으로 올라간다 (올라가는 것은 막지 않는다) |
+
+- 기억은 **내비 epoch 안에서만**이다. 경로가 바뀌면(재탐색, 경유지 추가, 되돌아가는 새 경로) 같은 이름이 반대편 시설일 수 있어 다시 고른다.
+  `reset()`(모드 전환)도 지운다.
+- 기억한 행은 직선거리가 TBT 경로 거리와 어울릴 때만 쓴다(4번의 창). 경로가 같은 이름의 다른 시설을 또 지날 수 있다.
+- 기억한 행에는 `matchByName`도 requestTrip도 쓰지 않는다. 직선거리만 지금 위치로 다시 잰다.
+- 코어가 느릴 때도 마지막으로 달리던 방위를 넘기게 되면(C1) 방위를 모르는 때는 출발 전뿐이다. 이 규칙은 방위가 null로 와도 성립한다
+  (`ServiceClosureOpenTest.anAcceptedRestAreaIsNotAskedAgainWhenTheCarSlowsDownAndTheNaviCannotMeasure`가 코어까지 조립해 본다).
+- 남은 것: `tbt:`에서 데이터 행으로 올라갈 때도 id는 바뀐다. `tbt:` 후보를 수락한 뒤(경유지 없이 "경로 위에 있어요" 안내) 행으로 올라가면
+  엔진이 한 번 더 물을 수 있다. 달리는 동안은 대개 처음부터 행으로 고르므로 드물다.
 
 ### 2.2 반경 검색 (`Nearby`)
 
@@ -123,9 +149,11 @@ epoch가 그대로인데 길안내만 켜진 경우도 같은 규칙을 따른�
 | 캐시 재사용 | 5분 안, 3km 안, 방향 90도 안 | 내비 요청 절약. 방향이 뒤집히면(유턴) 캐시 거리가 틀린다 (데이터 #11) |
 | 캐시 나이 | `ElapsedClock` | 예전에는 코치 시각이라 시연을 끄면 몇 시간씩 어긋났다 |
 | 방향 판정 | 경로 ≤ 직선 × 1.3 + 2km | 안성 부산방향 47.5/44.6km 통과, 서울방향 57.1/37.6km 유턴 |
-| 요청 시간 초과 | 8초 (NaviKit 잠금 대기 포함) | 예전 20초 × 6곳 = 2분 동안 경로·TBT 조회와 경유지 명령이 기다렸다 (P2, 데이터 #6) |
+| 요청 시간 초과 | 8초, 포트(NaviKit)가 내비 잠금을 얻은 뒤부터 잰다 | 예전 20초 × 6곳 = 2분 동안 경로·TBT 조회와 경유지 명령이 기다렸다 (P2, 데이터 #6) |
+| 차례(내비 잠금) 기다림 | 4초 더 기다린다. 그때까지 포트가 답도 실패도 내지 않았으면 차례가 오지 않은 것 | 포트는 내비에 한 번에 하나만 보낸다. 조회는 1~2초, 경유지·길안내 명령은 확인까지 20~45초 잠금을 잡는다 |
+| 차례가 오지 않음 | 실패가 아니다: 그 후보를 실패로 적지 않고 10초 뒤 다시 줄을 선다 (늘리지 않는다, 그 사이 캐시는 답한다). 연달아 3번이면 답 없는 내비처럼 쉰다 | 예전에는 잠금 기다림이 요청 시간 8초에 들어 있어, 들르기 하나가 잠금을 6초 넘게 잡으면 '답 없는 내비'로 보고 30초 넘게 쉬었다 (SV-N6) |
 | 실패한 후보 | 1분 뒤에 다시 | 경로를 못 찾는 곳을 갱신마다 묻지 않게 |
-| 내비가 답하지 않음(6초 넘게 걸린 실패) 또는 연달아 3번 실패 | 모든 요청을 30초→60초→…→5분 쉼, 답하면 처음으로 | 멈춘 내비에는 한 번의 시간 초과만 쓴다 |
+| 내비가 답하지 않음(포트가 6초 넘게 걸려 낸 실패) 또는 연달아 3번 실패 | 모든 요청을 30초→60초→…→5분 쉼, 답하면 처음으로 | 멈춘 내비에는 한 번의 시간 초과만 쓴다 |
 | 부른 쪽 취소 | 그대로 던진다, 실패로 세지 않는다 | 예전 runCatching이 CancellationException을 삼켰다 |
 | 포트 안쪽 시간 초과 (`TimeoutCancellationException`) | 실패 | 부른 코루틴이 살아 있으면 우리 취소가 아니다 (`ensureActive`로 구분) |
 | 이상한 답 (NaN, 음수) | 실패 | |
@@ -133,14 +161,18 @@ epoch가 그대로인데 길안내만 켜진 경우도 같은 규칙을 따른�
 | `clear()` | 캐시·실패·쉬기 모두 비움 | 모드 전환 |
 
 갱신 하나의 requestTrip은 `CandidateProvider`가 예산(15초, 요청 수 `oracleMax`)으로 한 번 더 묶는다. 예산이 끝나면 진행 중 요청을 취소하고
-나머지는 '모름'으로 넣는다. 요청 시간 초과(8초) < 예산(15초)이라 멈춘 내비를 한 갱신 안에서 알아채고 쉰다.
+나머지는 '모름'으로 넣는다(캐시가 아는 것은 예산이 끝난 뒤에도 쓴다). 요청 하나의 상한(차례 4초 + 요청 8초) < 예산(15초)이라 멈춘 내비를 한 갱신 안에서 알아채고 쉰다.
+
+요청 수 한도는 **내비에 실제로 보낸 요청**만 센다(`refine`의 `permit`). 예전에는 캐시가 바로 답한 것, 쉬는 중이라 묻지 않은 것까지 세어서,
+방위를 모를 때 같은 이름 쌍(두 번씩 쓴다)을 앞 세 쌍만 고르고 네 번째부터는 내비가 멀쩡해도 몇 번을 다시 만들어도 `tbt:`로 남았다(SV-N1).
 
 ## 5. 스레드
 
 모두 코치 디스패처(`limitedParallelism(1)`) 하나에서 쓴다. `run`이 유일한 갱신 루프이고 갱신은 그 자식 코루틴이다. `refresh`는 Mutex로
 한 번에 하나만 돈다. `live`·`withHorizon`은 스냅샷 하나만 읽는 순수 계산이라 매 틱(1초) 불러도 된다(후보 10~30개, NaviPoll.advanceCandidates;
 움직이지 않았으면 같은 리스트 인스턴스를 돌려줘 화면이 다시 그리지 않는다). 그래서 화면의 `ahead`가 20초가 아니라 매초 움직인다(UI 감사 #19).
-`RouteOracle`은 지금 `CoachService`가 여러 스레드에서 부르므로 상태를 잠금으로 지킨다(잠금 안에서 일시 중단하지 않는다).
+`RouteOracle`의 `clear()`는 세계 전환 때 코치 액터가 부르므로 상태를 잠금으로 지킨다(잠금 안에서 일시 중단하지 않는다).
+`CandidateProvider`의 기억(`resolved`, `laneRejected`)은 갱신(`refresh`, Mutex 안)과 `reset()`만 쓰고 둘 다 코치 디스패처에서 돈다.
 
 ## 6. 시나리오 표 (→ 테스트)
 
@@ -184,16 +216,28 @@ epoch가 그대로인데 길안내만 켜진 경우도 같은 규칙을 따른�
 | O7 | 취소 | 전파, 실패로 안 셈 | `cancellationPropagatesAndIsNotCountedAsAFailure` |
 | O8 | 포트 안쪽 시간 초과 | 실패 (취소 아님) | `aTimeoutInsideThePortIsAFailureNotACancellation` |
 | O9 | 꺼짐 / clear / 이상한 답 | 묻지 않음 / 다 비움 / 실패 | `disabledPassesThroughWithoutAsking`, `clearForgetsTheCacheFailuresAndPause`, `aGarbageAnswerIsAFailure` |
-| O10 | 조정값 불변식 | 요청 시간 초과 < 갱신 예산 | `oneRequestTimeoutFitsInsideTheRefreshBudget` |
-| O11 | 예전 진입점 | 실패하면 직선거리만 채운 후보 | `theOldEntryPointKeepsItsContractForTheCurrentService` |
+| O10 | 조정값 불변식 | 차례 기다림 + 요청 시간 초과 < 갱신 예산 | `oneRequestTimeoutFitsInsideTheRefreshBudget` |
+| O11 | 들르기가 내비 잠금을 잡고 있음 (SV-N6) | 9초 기다려 답하면 답. 오래 잡으면 그만두되 실패·쉼이 아니고 10초 뒤 다시, 캐시는 계속 답함 | `waitingInLineBehindANaviCommandIsNotNoAnswer` |
+| O12 | 잠금이 끝내 풀리지 않음 | 세 번 뒤 답 없는 내비처럼 쉼 | `aLineThatNeverMovesIsPausedLikeNoAnswerAfterThreeWaits` |
+| O13 | 차례는 왔는데 내비가 오류 | 그 후보의 실패 (1분 뒤 다시) | `aRequestThatGotItsTurnAndFailedIsStillAFailure` |
+| O14 | 요청 수 한도 (SV-N1) | 캐시 답·쉬는 후보는 허락을 쓰지 않음, 허락이 없으면 보내지 않고 실패로도 적지 않음 | `thePermitIsAskedOnlyForARealNaviRequest`, `withoutAPermitNothingIsSentAndNothingIsRemembered`, `aPausedOrFailedCandidateDoesNotSpendAPermit` |
+| C30 | 달릴 때 차로 방위로 고른 행, 방위를 잃고 내비도 못 잼 (SV-N1) | 같은 id, 내비에 다시 묻지 않음 | `aRowConfirmedByTheLaneKeepsItsIdWhenTheHeadingIsLostAndTheNaviCannotMeasure`, `ServiceClosureOpenTest.anAcceptedRestAreaIsNotAskedAgainWhenTheCarSlowsDownAndTheNaviCannotMeasure` |
+| C31 | 내비 거리로 고른 행, 뒤 요청은 실패 | 같은 id | `aRowChosenByNaviDistanceIsKeptWhenLaterRequestsFail` |
+| C32 | 새 epoch·reset | 다시 고름 (못 고르면 `tbt:`, 고르면 행으로 올라감) | `aNewRouteOrModeResolvesAgain` |
+| C33 | 방위 모를 때 이름이 하나뿐이라 고른 행 | 임시: 방위를 알면 다시 보고, 차로 방위가 뺀 행으로 돌아가지 않음 | `aRowPickedOnlyBecauseItsNameIsUniqueIsCheckedAgainOnceTheHeadingIsKnown` |
+| C34 | 경로가 같은 이름을 두 번 지남 | 기억한 행을 다른 시설에 쓰지 않음 | `aRememberedRowIsNotUsedForAnotherFacilityWithTheSameName` |
+| C35 | 방위 모름, 같은 이름 다섯 쌍 | 첫 갱신 세 쌍(6번), 다음 갱신에서 나머지: 내비에는 행마다 한 번(10번) | `aSameNamePairBeyondTheThirdIsStillResolvedWhenTheCarIsSlow`, `cacheAnswersDoNotUseUpTheRefreshBudgetInTheNearbySearch` |
 
 핵심 규칙마다 일부러 망가뜨려 본 결과(heading 안 넘김, 실패=가장 멂, 종류 바로잡기 없음, TBT 끝 무시, 반경 범위 없음, 목적지 뒤 안 뺌,
 쉬기 없음, 취소 삼킴, epoch 바뀌면 목록 버림, 옛 epoch로 범위 주장, etaS 지어내기) 11개 모두 위 테스트가 잡았다.
+2026-11-12에 더한 규칙(C30~C35, O11~O14)은 고치기 전 코드에서 9개가 실패하는 것을 먼저 확인했다.
 
 ## 7. 남은 것과 다른 부품에 기대는 것
 
-- `StopIndex.matchByName`의 heading 거르기는 데이터 담당이 `StopRepository`에 넣는다(인자는 이미 있다). 그 전에는 heading을 무시하므로
-  같은 이름 행이 둘 다 오고, 방향을 알아도 requestTrip으로 고른다(C4/C5 규칙). 차로 방위 데이터가 틀린 행(데이터 #1)은 데이터 담당이 고친다.
+- `StopIndex.matchByName`의 heading 거르기는 `StopRepository`에 들어 있다. 20km보다 먼 같은 이름 쌍이 분명히 갈리지 않으면 둘 다 온다
+  (닫힘 검증 C2, data.md 3.3): 그때는 requestTrip으로 고르고(C4/C5 규칙), 못 고르면 `tbt:`로 두었다가 20km 안에서 차로 방위로 고른다.
+- 내비 명령이 도는 동안(들르기) 오라클은 차례를 기다리다 그만둔다(4장). 캐시가 식은 후보는 그 갱신에서 '방향 모름'으로 들어갈 수 있다.
+  코어가 "지금 들르기 중"을 알려 주면 그동안 갱신을 미루는 편이 더 낫다(지금은 알 길이 없다: CandidateRequest에 칸을 더하면 된다).
 - `NaviSnapshot.tbtCoverageM`은 TBT를 받으면 모든 항목 거리의 합으로 채워야 한다(navi 담당). null이면 마지막 기회 거리를 닿는 거리로 본다(짧게).
   TBT가 통째로 비어 닿는 거리가 0이면 아직 못 받은 것으로 본다.
 - `RouteOpportunities.extract`(navi 담당)는 이름이 졸음쉼터인데 SERVICEAREA로 온 것을 휴게소로 둔다. 여기서 `effectiveKind`로 바로잡지만

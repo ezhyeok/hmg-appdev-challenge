@@ -17,9 +17,10 @@ object CandidateTuning {
     const val AHEAD_RADIUS_M = 60_000.0
 
     /**
-     * requestTrip으로 보정할 최대 후보 수 (CandidatePolicy.REAL). 요청 하나가 NaviKit 잠금을 잡는 동안 경로·TBT 조회와
+     * 갱신 하나가 내비에 보내는 requestTrip 수 (CandidatePolicy.REAL). 요청 하나가 NaviKit 잠금을 잡는 동안 경로·TBT 조회와
      * 경유지 명령이 기다리므로 적게 묻는다. 반경 안 가까운 순 6곳이면 평균 간격 15km로 약 90km, 엔진이 따지는 범위를 덮는다.
      * 자른 뒤에는 7번째의 직선거리를 범위(untilM)로 넘겨 그 뒤를 공백으로 보지 않게 한다.
+     * 캐시가 답한 것은 세지 않는다: 세면 방위를 모를 때 같은 이름 쌍(두 번씩 쓴다)을 앞 세 쌍만 고르고 네 번째부터는 영영 못 골랐다 (SV-N1).
      */
     const val ORACLE_MAX = 6
 
@@ -71,7 +72,8 @@ object CandidateTuning {
     /**
      * 갱신 하나가 requestTrip에 쓰는 최대 시간. 넘으면 남은 후보는 '모름'(directionOk = null)으로 넣는다.
      * 정상 응답(수 초) 몇 개는 들어가고, 멈춘 내비가 갱신 루프·내비 잠금을 오래 잡지 않는다 (서비스 감사 P2, 데이터 감사 #6).
-     * [ORACLE_REQUEST_TIMEOUT_MS]보다 길어야 멈춘 내비를 한 번의 갱신 안에서 알아채고 쉰다 (RouteOracleTest가 지킨다).
+     * 요청 하나의 상한([ORACLE_LINE_WAIT_MS] + [ORACLE_REQUEST_TIMEOUT_MS])보다 길어야 멈춘 내비를 한 번의 갱신 안에서 알아채고 쉰다
+     * (RouteOracleTest가 지킨다).
      */
     const val REFRESH_BUDGET_MS = 15_000L
 
@@ -81,12 +83,29 @@ object CandidateTuning {
     // ------------------------------------------------------------ RouteOracle
 
     /**
-     * requestTrip 하나의 시간 초과. 예전 20초는 6곳이면 2분이었다. 경로 계산은 서버에서 하고 정상이면 수 초 안에 온다.
-     * NaviKit 잠금을 기다리는 시간도 여기에 든다 (잠금 대기는 NaviKit의 시간 초과에 들지 않는다).
+     * requestTrip 하나의 시간 초과: 내비가 요청을 받은 뒤 답할 때까지. 포트(NaviKit)가 내비 잠금을 얻은 뒤부터 재고, 넘으면 포트가 실패를 낸다.
+     * 예전 20초는 6곳이면 2분이었다. 경로 계산은 서버에서 하고 정상이면 수 초 안에 온다.
      */
     const val ORACLE_REQUEST_TIMEOUT_MS = 8_000L
 
-    /** 이만큼 걸려 실패하면 '답이 없다'로 본다 (오류로 바로 답한 것과 구분). 시간 초과의 3/4 */
+    /**
+     * 내비 차례(NaviKit 잠금)를 기다려 주는 시간. 포트는 내비에 한 번에 하나만 보내서, 경로·TBT 조회나 경유지 명령이 끝나야 차례가 온다.
+     * 조회는 1~2초면 끝난다. 이보다 오래 걸리면 경유지·길안내 명령(확인까지 20~45초)이 잡고 있는 것이라 더 기다리지 않는다.
+     * 예전에는 이 기다림이 요청 시간 초과(8초)에 들어 있어서, 들르기 하나가 잠금을 6초 넘게 잡으면 '답 없는 내비'로 보고 30초 넘게 쉬었다
+     * (서비스 감사 SV-N6).
+     */
+    const val ORACLE_LINE_WAIT_MS = 4_000L
+
+    /** 차례가 오지 않았을 때 다시 줄을 서기까지. 내비가 실패한 것이 아니라서 늘리지 않는다 (그 사이에도 캐시는 답한다) */
+    const val ORACLE_BUSY_PAUSE_MS = 10_000L
+
+    /**
+     * 연달아 이만큼 차례가 오지 않으면 답 없는 내비처럼 쉰다 (12초 기다림 + 10초 쉼이 세 번이면 약 1분: 들르기 하나의 보통 길이보다 길다).
+     * 잠금을 영영 놓지 않는 포트에 갱신마다 줄을 서지 않게 하는 상한이다.
+     */
+    const val ORACLE_LINES_FOR_BACKOFF = 3
+
+    /** 포트가 이만큼 걸려 실패하면 '답이 없다'로 본다 (오류로 바로 답한 것과 구분). 요청 시간 초과의 3/4 */
     const val ORACLE_NO_ANSWER_MS = ORACLE_REQUEST_TIMEOUT_MS * 3 / 4
 
     /** 같은 후보를 다시 묻는 조건: 5분이 지났거나 3km 넘게 움직였거나 방향이 90도 넘게 바뀌었을 때 (내비 요청을 아끼려고) */

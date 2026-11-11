@@ -86,7 +86,7 @@ object GoToPlanner {
         GoToOutcome.ROUTE_STARTED -> "${Hangul.euRo(stop.name)} 안내할게요"
         GoToOutcome.ON_ROUTE -> {
             val ahead = distanceText(stop.routeDistanceM ?: stop.straightDistanceM)?.let { "$it 앞 " } ?: ""
-            "${eunNeun(stop.name)} 경로 위에 있어요, ${ahead}진입로로 들어가세요"
+            "${Hangul.eunNeun(stop.name)} 경로 위에 있어요, ${ahead}진입로로 들어가세요"
         }
         GoToOutcome.SEARCH_OPENED -> "내비에서 ${Hangul.eulReul(stop.name)} 찾아 두었어요. 화면에서 골라 주세요"
         GoToOutcome.FAILED -> "내비에 넣지 못했어요. 화면에서 다시 눌러 주세요"
@@ -101,9 +101,6 @@ object GoToPlanner {
         val tenths = (km * 10.0).roundToInt()
         return if (tenths % 10 == 0) "${tenths / 10}km" else "${tenths / 10}.${tenths % 10}km"
     }
-
-    // Hangul(voice/)에 없는 은/는. 공용 파일을 건드리지 않으려고 여기 둔다
-    private fun eunNeun(word: String) = word + if (Hangul.hasBatchim(word)) "은" else "는"
 }
 
 /**
