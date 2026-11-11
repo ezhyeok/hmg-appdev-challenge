@@ -191,6 +191,8 @@ Q(p) = (b · ((1 − p)^(−1/a) − 1))^(1/k)   (필요 확률이 p가 되는 �
 5. 개인화: 짧은 간격이 반복되면 회차마다 게이지가 줄어든다 (150 → 133 → 122 → 114분)
 6. 점심 피트스톱: 화장실 + 식사를 한 정차로 묶는다
 
+감사(2026-11-11)와 닫힘 검증(2026-11-12)에서 찾은 결함은 실패하던 테스트를 고친 뒤 회귀 방지로 남겼다(`audit/`와 주제별 파일). 닫힘 검증의 13건: 급해 시간 하나(`AuditUrgentTest`), NOW와 먼 마지막 기회·다시 대기 300m(`AuditDecisionsTest`), 정체 목록 이어 놓기(`AuditRouteTest`), 정차 중 요청(`AuditVoiceTest`), 묶음 마감의 뒷정리(`GroupNeedTest`: 계획은 한 사람 기준, 묶음 정차는 중도절단, 묶음 이유의 조건), 깨진 후보 범위(`CandidateHorizonTest`), 영업 시간 경계(`stops/StopHoursTest`). 함께 추가한 것: 화면에서 고른 정차지(`NoteAcceptedTest`), 질문과 추천의 이유(`PromptReasonsTest`).
+
 ## 8. 기획서 수치 (`runSim`)
 `./gradlew -p rest-engine runSim` (여정 수: `-PsimTrips=500`) — `src/sim/kotlin`(main·test와 분리된 소스 세트)이 엔진 코드를 그대로 불러 두 파일을 쓴다. 시드가 고정이라 같은 명령이면 같은 파일이 나온다.
 - `docs/plan/data/engine_curves.json`: 유형별 화장실 필요 곡선(사전예측 CDF, 게이지 0.5·판단 0.3 시각), 개인화(가상의 성인 12회 갱신 + 1,000명 앙상블, 중도절단 변형), 운전 패턴 편차(60분 주행, 분마다 EWMA·편차·지속·피로 단계), 피로 시계(13시 출발, 110분 휴식 유무).
