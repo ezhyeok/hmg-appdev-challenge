@@ -253,7 +253,7 @@ SDK와 라이브러리의 Manifest에서 합쳐져 APK에 들어가는 것(앱 M
 
 - `compose-stability.conf`에는 화면 매개변수로 들어오는 불변 타입만 하나씩 적는다(엔진 Api.kt 출력 타입과 코치 상태 타입). 예전 `dev.shimpyo.engine.*`는 가변 `CoachEngine`·`RouteContext`까지 안정으로 보였다. `StabilityConfigTest`가 지킨다: 적힌 쉼표 타입은 실제로 있고(이름을 바꾸면 조용히 효과가 사라진다) 필드가 모두 final이어야 하며, 묶음(`*`)으로 적지 않는다. 화면 쪽 모델(`GoToBusy`, `DescribeModel`, `OccupantsSummary` 등)은 코드에서 `@Immutable`로 표시한다.
 - 화면에 넘기는 람다는 `ContentActions`(한 화면 동안 같은 객체)만 잡는다. 함수 참조(`::pick`)는 쓰지 않는다. 헤더 `trailing` 람다는 `MicModel`·계획 계산 중 여부만 잡는다(매초 바뀌는 상태 전체를 잡으면 머리가 매초 다시 그려진다).
-- 확인: Compose 컴파일러 보고서(빌드 파일을 바꾸지 않고 `--init-script`로 `composeCompiler.reportsDestination`을 켬). 2026-11-12 기준 재시작 가능한 Composable 111개 모두 건너뛰기 가능, 런타임 안정성 매개변수는 `DriveActions`·`List<TimelineRow>` 두 개였고 `@Immutable`로 고쳤다. 남은 불안정 매개변수는 `RequestFocusOnce(key: Any?)` 하나(키라서 의도한 것).
+- 확인: Compose 컴파일러 보고서(빌드 파일을 바꾸지 않고 `--init-script`로 `composeCompiler.reportsDestination`을 켬). 2026-11-12 기준 재시작 가능한 Composable 111개 모두 건너뛰기 가능, 런타임 안정성 매개변수는 `DriveActions`·`List<TimelineRow>` 두 개였고 `@Immutable`로 고쳤다. 남은 불안정 매개변수는 `RequestFocusOnce(key: Any?)` 하나(키라서 의도한 것). 닫힘 검증 수정(탑승자 선택지, 코치 알림, 들르기 진행) 뒤 다시 냈다: 재시작 가능한 Composable 121개 모두 건너뛰기 가능, 불안정 매개변수는 그대로 그 하나.
 
 ## 7. 계약 필드가 비어 있을 때 (기본값)
 

@@ -243,9 +243,9 @@ object Labels {
         // 말로 한 요청("화장실 가고 싶대", 수유·반려견)에 답한 곳. 질문 카드에서는 맥락 줄이 이 말을 한다
         "NEXT_REQUESTED_RESTROOM" -> "요청하신 화장실"
         "NEXT_REQUESTED_CARE" -> "요청하신 곳"
-        // 맥락 줄이 이미 "정체 전 마지막 화장실"·"화장실 공백 전 마지막 기회"라서 칩은 길이만 보인다
-        "LAST_CHANCE_CONGESTION" -> durationIn(r.text)?.let { chipWithDuration("정체 ", it, "") } ?: "정체 전 마지막"
-        "LAST_CHANCE_GAP" -> durationIn(r.text)?.let { chipWithDuration("공백 ", it, "") } ?: "공백 전 마지막"
+        // 맥락 줄이 이미 "정체 전 마지막 화장실"·"화장실 공백 전 마지막 기회"라서 칩은 길이만 보인다 (0분이라고 쓰지 않는다)
+        "LAST_CHANCE_CONGESTION" -> durationIn(r.text)?.takeIf { it > 0 }?.let { chipWithDuration("정체 ", it, "") } ?: "정체 전 마지막"
+        "LAST_CHANCE_GAP" -> durationIn(r.text)?.takeIf { it > 0 }?.let { chipWithDuration("공백 ", it, "") } ?: "공백 전 마지막"
         "LAST_CHANCE_PREFERENCE" -> "기준보다 긴 공백"
         // 게이지(가장 급한 한 사람)는 넉넉한데 여럿이 타서 앞당겨 묻는 경우: 왜 묻는지 보인다 (엔진 GroupNeedTest, 감사 O6)
         "LAST_CHANCE_GROUP" -> firstNumber(r.text, "명")?.let { "${it}명이 타서" } ?: "여럿이 타서"

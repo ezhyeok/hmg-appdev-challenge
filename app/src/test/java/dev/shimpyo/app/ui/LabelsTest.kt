@@ -84,6 +84,9 @@ class LabelsTest {
         assertEquals("정체 1시간", Labels.shortReason(Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(60))))
         assertEquals("정체 1시간 30분", Labels.shortReason(Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(90))))
         assertEquals("공백 50분", Labels.shortReason(Reason("LAST_CHANCE_GAP", t.reasonLastChanceGap(50))))
+        // 0분이라고 쓰지 않는다 (화면 어디에도 "정체 0분"은 없다)
+        assertEquals("정체 전 마지막", Labels.shortReason(Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(0))))
+        assertEquals("공백 전 마지막", Labels.shortReason(Reason("LAST_CHANCE_GAP", t.reasonLastChanceGap(0))))
         // 여럿이 타서 앞당겨 묻는 이유는 인원과 함께 보인다
         assertEquals("4명이 타서", Labels.shortReason(Reason("LAST_CHANCE_GROUP", t.reasonLastChanceGroup(4))))
         assertEquals("여럿이 타서", Labels.shortReason(Reason("LAST_CHANCE_GROUP", "")))
