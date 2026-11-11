@@ -118,14 +118,14 @@ class CoachCoreTripTest {
     }
 
     @Test
-    fun withoutAnyGearSignalTheCoachStillStartsAfterTenSeconds() = runTest {
+    fun withoutAnyGearSignalTheCoachStillStartsAfterTheWait() = runTest {
         // Car 연결이 끝내 안 되면(기어 UNKNOWN) 엔진을 영영 기다리지 않는다. 보지 못한 시간은 선 것으로 세지 않는다
         val rig = restarted(this, gapMin = 30, sinceMin = 40)
         rig.start()
         rig.run(StopDetector.RESTORE_WAIT_MS - 2_000)
         assertNull(rig.state.restroom)
         rig.run(4_000)
-        assertNotNull("10초 뒤에는 게이지가 나온다", rig.state.restroom)
+        assertNotNull("기다림이 끝나면 게이지가 나온다", rig.state.restroom)
         val log = rig.appended().single()
         assertEquals(wall - 30 * min, log.end)
     }

@@ -479,7 +479,22 @@ class StopDetectorTest {
     }
 
     @Test
-    fun withoutAGearForTenSecondsTheRestoredStopEndsAtTheLastSeenTime() {
+    fun aGearThatArrivesElevenSecondsAfterARestartStillContinuesThePark() {
+        // 2026-11-12 에뮬레이터: Car 서비스가 죽었다 살아난 뒤 프로세스 시작 11초 만에 기어가 왔다. 기다림이 10초였을 때는
+        // 아직 P인데 0.8초 차이로 '떠났다'고 보고 화장실 아닌 10분 정차를 실제 기록에 썼다. 기어가 오면 그 값으로 정한다
+        val d = StopDetector()
+        val now = t0 + 40 * min
+        d.restore(ParkState(t0, doorSeen = false), now = now, lastSeenMs = t0 + 10 * min)
+        for (s in 1..10) assertNull(d.onTick(now + s * 1_000L, Gear.UNKNOWN, null, false))
+        assertTrue(d.restorePending)
+        assertNull("11초에 온 P: 그동안도 서 있었다", d.onTick(now + 11_000, Gear.PARK, 0f, false))
+        assertFalse(d.restorePending)
+        assertNull(d.takeRestoredEnd())
+        assertEquals(t0, d.parkState?.since)
+    }
+
+    @Test
+    fun withoutAGearForTheWholeWaitTheRestoredStopEndsAtTheLastSeenTime() {
         // 기어 신호가 끝내 오지 않는다 (Car 연결 실패): 보지 못한 시간을 선 것으로 세지 않는다. 코치도 더 기다리지 않고 엔진을 돌린다
         val d = StopDetector()
         val now = t0 + 40 * min
@@ -490,8 +505,9 @@ class StopDetectorTest {
         assertFalse(d.restorePending)
         assertEquals(t0 + 10 * min, d.takeRestoredEnd())
         // 그 뒤 P 신호가 오면 그때부터 새 정차다
-        d.onTick(now + 20_000, Gear.PARK, 0f, false)
-        assertEquals(ParkState(now + 20_000, doorSeen = false), d.parkState)
+        val later = now + StopDetector.RESTORE_WAIT_MS + 10_000
+        d.onTick(later, Gear.PARK, 0f, false)
+        assertEquals(ParkState(later, doorSeen = false), d.parkState)
     }
 
     @Test

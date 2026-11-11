@@ -218,9 +218,10 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
         /** 다시 대기로 보는 최대 이동 거리 (m): 한 정차를 시작한 뒤 P 밖에서 움직인 거리의 합 (엔진 StopTracker.REPARK_MAX_MOVE_M과 같다) */
         const val REPARK_MAX_MOVE_M = 300.0
         /**
-         * 되돌린 정차의 판정을 기어 신호 없이 기다리는 시간. Car 연결은 보통 1~2초 안에 온다. 그 동안 코치는 엔진을 돌리지 않으므로
-         * 길게 잡지 않는다: 넘으면 떠난 것으로 본다
+         * 되돌린 정차의 판정을 기어 신호 없이 기다리는 시간. Car 연결은 보통 1~2초 안에 오지만, Car 서비스가 죽었다 살아난 뒤에는
+         * 프로세스 시작 11초 만에 왔다(2026-11-12 에뮬레이터: 10초였을 때 0.8초 차이로 '떠났다'고 보고 아직 P인 차에 10분 정차를
+         * 기록했다). 그 동안 코치는 엔진을 돌리지 않으므로 무한정 기다리지는 않는다: 넘으면 떠난 것으로 본다
          */
-        const val RESTORE_WAIT_MS = 10_000L
+        const val RESTORE_WAIT_MS = 30_000L
     }
 }

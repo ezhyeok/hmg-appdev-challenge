@@ -273,7 +273,7 @@ class CoachCore(private val d: CoachDeps) {
             log.i("stop recorded: ${(r.log.end - r.log.start) / 60_000} min restroom=${r.log.restroom} persisted=${r.persisted}")
         }
         // 되돌린 정차(재시작, 시연 끄기)가 아직 서 있는지 떠났는지는 기어를 알아야 정한다. 그때까지 여정과 엔진은 기다린다:
-        // 감지기·여정·엔진이 같은 판정을 쓴다 (서비스 닫힘 검증 N2·N3). 보통 1~2초, 길어도 StopDetector.RESTORE_WAIT_MS
+        // 감지기·여정·엔진이 같은 판정을 쓴다 (서비스 닫힘 검증 N2·N3). 보통 1~2초, 길어도 StopDetector.RESTORE_WAIT_MS(30초)
         val waiting = recorder.restorePending
         if (waiting) doorWhileWaiting = doorWhileWaiting || door
         // 자는 중 표시: 화장실 정차가 되거나 아침이 지나면 푼다 (엔진 입력을 만들기 전에)
