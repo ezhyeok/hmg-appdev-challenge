@@ -101,9 +101,17 @@ interface StopIndex {
 
 /** 후보까지의 실제 경로 거리·ETA·방향을 내비로 보정한다 (RouteOracle) */
 interface TripEstimator {
-    /** false면 내비에 묻지 않는다 (시연) */
+    /** false면 내비에 묻지 않는다 (내비를 방해한다고 확인되면 끄는 스위치. 시연은 CandidatePolicy가 아예 부르지 않는다) */
     var enabled: Boolean
-    suspend fun refine(c: StopCandidate, lat: Double, lon: Double, now: Long): StopCandidate
+
+    /**
+     * [from]에서 [c]까지 잰 경로 거리·ETA(내비 값)·방향을 채워 돌려준다. 모르면 null: 꺼져 있거나, 내비가 실패·시간 초과했거나,
+     * 실패 뒤 다시 묻기를 미루는 중일 때. null은 '방향이 틀렸다'가 아니라 '모름'이다.
+     * 부른 코루틴이 취소되면 CancellationException을 그대로 던진다 (실패로 세지 않는다).
+     */
+    suspend fun refine(c: StopCandidate, from: Fix): StopCandidate?
+
+    /** 캐시와 실패 기록을 비운다 (모드 전환) */
     fun clear()
 }
 
