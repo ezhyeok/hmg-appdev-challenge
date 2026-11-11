@@ -17,8 +17,8 @@ import org.junit.Test
 
 /**
  * 들르기(화면의 GoTo, 질문 수락)를 코어 끝까지: 내비에 넣는 중 표시, 실패 뒤 다시 시도, 성공한 곳을 엔진에 알리기.
- * 닫힘 검증(2026-11-12)의 서비스 D7·D9, UI N2. 엔진에 알리는 길(EngineAccepted)은 가짜(RecordingAccepted)로 본다:
- * 엔진의 noteAccepted가 들어오면 같은 호출이 엔진으로 간다.
+ * 닫힘 검증(2026-11-12)의 서비스 D7·D9, UI N2. 엔진은 실제 엔진이다: 알린 것(RecordingAccepted가 적고 CoachEngine.noteAccepted로
+ * 그대로 넘긴다)과 엔진이 그 뒤에 내는 추천(NEXT_ACCEPTED)·질문을 함께 본다.
  */
 class CoachCoreGoToTest {
 
@@ -127,8 +127,12 @@ class CoachCoreGoToTest {
         assertEquals("oksan", note.stopId)
         assertEquals("목적을 모르면 화장실이 있는 곳은 화장실", setOf(Purpose.RESTROOM), note.purposes)
         assertEquals("엔진 시각(코치 시각)으로 알린다", rig.clock.now(), note.now)
-        rig.run(10_000)
+        val asked = rig.voice.asked.size
+        rig.run(60_000)
         assertEquals("한 번만", 1, rig.accepted.notes.size)
+        assertEquals("엔진의 추천이 고른 곳이다", "oksan", rig.state.next?.stop?.id)
+        assertEquals(listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
+        assertEquals("그곳으로 가는 동안 다른 정차를 묻지 않는다: ${rig.voice.asked.drop(asked)}", asked, rig.voice.asked.size)
     }
 
     @Test

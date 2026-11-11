@@ -157,6 +157,7 @@ class CoachCoreUrgentTest {
         rig.run(60_000)
         assertEquals("고른 곳으로 가는 1분 동안 정차를 또 묻는다: ${rig.voice.asked.drop(asked)}", asked, rig.voice.asked.size)
         assertEquals("1분 뒤에도 고른 곳이 추천이다", second.id, rig.state.next?.stop?.id)
+        assertEquals("엔진이 아는 '들르기로 한 곳'이다", listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
         assertEquals("한 번만 알린다", 1, rig.accepted.notes.size)
     }
 
@@ -180,6 +181,7 @@ class CoachCoreUrgentTest {
         val asked = rig.voice.asked.size
         rig.run(90_000)
         assertEquals("길안내를 시작한 곳이 1분 30초 뒤에도 추천이다", chosen, rig.state.next?.stop?.id)
+        assertEquals(listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
         assertEquals("그곳으로 가는 중에 다른 정차를 묻는다: ${rig.voice.asked.drop(asked)}", asked, rig.voice.asked.size)
     }
 

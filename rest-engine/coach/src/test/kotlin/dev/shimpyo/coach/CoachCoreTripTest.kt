@@ -174,7 +174,7 @@ class CoachCoreTripTest {
     @Test
     fun aStopAcceptedBeforeAMidDriveRestartIsNotedToTheNewEngineOnce() = runTest {
         // 주행 중 재시작하면 새 엔진은 방금 수락한 정차를 모른다: 같은 곳을 다시 물을 수 있었다. 맥박이 이어받은 곳이 후보에 보이면
-        // 엔진에 '들르기로 한 곳'으로 다시 알린다 (EngineAccepted: 엔진의 noteAccepted가 들어오면 엔진이 그곳을 묻지 않는다)
+        // 엔진에 '들르기로 한 곳'으로 다시 알린다 (CoachEngine.noteAccepted): 엔진의 추천이 그곳이고 그곳을 다시 묻지 않는다
         val rig = resumedMidDrive(this, acceptedMinAgo = 3)
         rig.start()
         rig.runUntil(30_000) { rig.accepted.notes.isNotEmpty() } ?: error("다시 알리지 않았다: ${rig.log.lines.takeLast(10)}")
@@ -182,6 +182,9 @@ class CoachCoreTripTest {
         assertTrue("후보에 보인 틱에 알린다", rig.state.ahead.any { it.id == "ipjang" })
         rig.run(60_000)
         assertEquals("한 번만", 1, rig.accepted.notes.size)
+        assertEquals("새 엔진의 추천이 이어받은 곳이다", "ipjang", rig.state.next?.stop?.id)
+        assertEquals(listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
+        assertTrue("이미 들르기로 한 곳을 다시 묻지 않는다: ${rig.voice.asked}", rig.voice.asked.none { "입장" in it })
         assertEquals("맥박에는 처음 수락한 때가 그대로 남는다", wall - 10_000L - 3 * min, rig.trips.stored!!.accepted?.at)
     }
 

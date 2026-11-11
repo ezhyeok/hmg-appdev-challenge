@@ -169,7 +169,7 @@ class FakeInterpreter(var intent: VoiceIntent? = null, var people: List<Occupant
     override suspend fun occupants(text: String): List<Occupant>? = people
 }
 
-/** 엔진에 알린 '들르기로 한 곳'을 남긴다 (CoachEngine.noteAccepted가 들어오기 전의 가짜. 엔진에는 아무것도 하지 않는다) */
+/** 엔진에 알린 '들르기로 한 곳'을 적어 두고 엔진에 그대로 넘긴다 (앱과 같은 길: EngineAccepted.ENGINE) */
 class RecordingAccepted : EngineAccepted {
     data class Note(val stopId: String, val purposes: Set<Purpose>, val now: Long, val engine: CoachEngine)
 
@@ -177,6 +177,7 @@ class RecordingAccepted : EngineAccepted {
 
     override fun note(engine: CoachEngine, stop: StopCandidate, purposes: Set<Purpose>, now: Long) {
         notes += Note(stop.id, purposes, now, engine)
+        EngineAccepted.ENGINE.note(engine, stop, purposes, now)
     }
 }
 

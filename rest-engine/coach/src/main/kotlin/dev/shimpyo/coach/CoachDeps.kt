@@ -42,25 +42,27 @@ class CoachDeps(
     /** 파일 읽기·쓰기 (앱: Dispatchers.IO, 테스트: 테스트 디스패처) */
     val io: CoroutineDispatcher,
     val log: CoachLog = CoachLog.NONE,
-    /** 고른 정차를 엔진에 알리는 길. 기본값은 [EngineAccepted.PIN_ONLY] (엔진 API가 들어오면 바꾼다) */
-    val accepted: EngineAccepted = EngineAccepted.PIN_ONLY,
+    /** 고른 정차를 엔진에 알리는 길. 앱은 기본값([EngineAccepted.ENGINE])을 쓴다. 테스트는 알린 것을 적어 두는 것으로 바꾼다 */
+    val accepted: EngineAccepted = EngineAccepted.ENGINE,
 )
 
 /**
  * "운전자가 이 정차를 골랐고 내비 명령이 성공했다"를 엔진에 알리는 길 (서비스 닫힘 검증 D7, UI 닫힘 검증 9a).
  * 엔진이 묻지 않은 곳(급해 목록의 2순위, 계획 화면)을 골라도 엔진이 그곳을 '들르기로 한 곳'으로 알아야, 그곳으로 가는 동안
- * 다른 정차를 묻지 않는다. 코어는 성공한 들르기마다(질문 수락, 급해 목록, 계획 화면, 다시 시도) 엔진 보고 뒤에 한 번 부른다.
+ * 다른 정차를 묻지 않는다. 코어는 성공한 들르기마다(질문 수락, 급해 목록, 계획 화면, 다시 시도) 엔진 보고 뒤에 한 번 부르고,
+ * 주행 중 다시 떴을 때 맥박에 적어 둔 곳이 후보에 보이면 한 번 더 부른다 (TripSession.restoredAccepted).
  *
- * 엔진 쪽 API는 CoachEngine.noteAccepted(stop, purposes, now)다(엔진 담당이 만드는 중). 그 전까지 실제 구현은 [PIN_ONLY]:
- * 엔진에 알리지 않고, 고른 곳을 엔진 후보에 남기는 것(UrgentFlow의 고정)만 한다. 그래서 엔진이 스스로 물은 곳을 수락한 경우
- * (엔진이 이미 안다)와 급해 목록에서 고른 곳만 추천이 유지된다.
+ * 실제 구현([ENGINE])은 CoachEngine.noteAccepted 그대로다: 그곳이 추천(NEXT_ACCEPTED)이 되고, 같은 곳을 묻던 질문은 수락으로,
+ * 다른 곳을 묻던 화장실 질문은 벌점 없이 끝난다. 엔진은 그곳이 후보 목록에서 1분 넘게 빠지면 잊으므로, 경로 후보가 아닌 곳
+ * (급해 목록)은 코어가 후보에 계속 넣어 준다 (UrgentFlow의 고정). 따로 이름을 둔 것은 테스트가 "언제, 몇 번, 어떤 목적으로
+ * 알렸나"를 엔진 속을 보지 않고 확인하게 하려는 것이다 (fakes/RecordingAccepted: 적고 나서 엔진에 그대로 넘긴다).
  */
 fun interface EngineAccepted {
     fun note(engine: CoachEngine, stop: StopCandidate, purposes: Set<Purpose>, now: Long)
 
     companion object {
-        /** 엔진에 알리지 않는다 (CoachEngine.noteAccepted가 들어오기 전) */
-        val PIN_ONLY = EngineAccepted { _, _, _, _ -> }
+        /** 엔진에 그대로 알린다 */
+        val ENGINE = EngineAccepted { engine, stop, purposes, now -> engine.noteAccepted(stop, purposes, now) }
     }
 }
 
