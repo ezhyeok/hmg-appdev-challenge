@@ -241,11 +241,14 @@ class ContentActionsTest {
         assertEquals(listOf<UiCommand>(UiCommand.DescribeOccupants), rig.sent)
         rig.actions.describe(describeModel(VoiceState.LISTENING, ttsAvailable = true, sttAvailable = true, voiceGuidance = true))
         assertEquals(listOf(UiCommand.DescribeOccupants, UiCommand.StopVoice), rig.sent)
-        // 쓸 수 없으면 명령을 보내지 않고 이유를 알린다 (예전에는 눌러도 조용히 아무 일도 없었다)
+        // 음성 안내를 꺼도 보낸다: 코치가 질문을 화면에 보이고 듣는다
+        rig.actions.describe(describeModel(VoiceState.IDLE, ttsAvailable = true, sttAvailable = true, voiceGuidance = false))
+        assertEquals(listOf(UiCommand.DescribeOccupants, UiCommand.StopVoice, UiCommand.DescribeOccupants), rig.sent)
+        // 인식을 쓸 수 없으면 명령을 보내지 않고 이유를 알린다 (예전에는 눌러도 조용히 아무 일도 없었다)
         assertNull(rig.overlays.toast)
         rig.actions.describe(describeModel(VoiceState.IDLE, ttsAvailable = true, sttAvailable = false, voiceGuidance = true))
-        assertEquals(2, rig.sent.size)
-        assertEquals("지금은 음성 인식을 쓸 수 없어요", rig.overlays.toast?.message)
+        assertEquals(3, rig.sent.size)
+        assertEquals("지금은 음성 인식을 쓸 수 없어요. 화면에서 골라 주세요", rig.overlays.toast?.message)
     }
 
     @Test

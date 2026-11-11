@@ -61,20 +61,22 @@ data class DescribeModel(val label: String, val action: MicAction, val reason: S
 }
 
 /**
- * [말로 설정]은 코치가 "누가 함께 타나요?"라고 묻고(TTS) 듣는다(STT): 음성 안내가 켜져 있고 둘 다 돼야 한다.
- * 예전에는 안 될 때 눌러도 조용히 아무 일도 없었다 (닫힘 검증 UI-12). 묻거나 듣거나 해석하는 중에 누르면 멈춘다 (마이크와 같은 규칙).
+ * [말로 설정]은 코치가 "누가 함께 타나요?"라고 묻고 듣는다. 듣기(STT)만 되면 쓸 수 있다: 말하기가 꺼져 있으면(설정의 음성 안내,
+ * TTS 연결 실패) 코치가 질문을 말 대신 화면 알림으로 보이고 듣는다. 마이크와 같은 규칙이다(막는 기준은 [sttAvailable] 하나).
+ * 인식을 쓸 수 없으면 버튼이 이유를 말한다: 예전에는 눌러도 조용히 아무 일도 없었다 (닫힘 검증 UI-12).
+ * 묻거나 듣거나 해석하는 중에 누르면 멈춘다.
  */
+@Suppress("UNUSED_PARAMETER")
 fun describeModel(voice: VoiceState, ttsAvailable: Boolean, sttAvailable: Boolean, voiceGuidance: Boolean): DescribeModel = when {
     voice == VoiceState.LISTENING -> DescribeModel("듣는 중", MicAction.STOP)
     voice == VoiceState.SPEAKING -> DescribeModel("말하는 중", MicAction.STOP)
     voice == VoiceState.THINKING -> DescribeModel("생각하는 중", MicAction.STOP)
-    !sttAvailable -> DescribeModel(DESCRIBE_LABEL, MicAction.EXPLAIN, "지금은 음성 인식을 쓸 수 없어요")
-    !voiceGuidance -> DescribeModel(DESCRIBE_LABEL, MicAction.EXPLAIN, "설정에서 음성 안내를 켜면 말로 설정할 수 있어요")
-    !ttsAvailable -> DescribeModel(DESCRIBE_LABEL, MicAction.EXPLAIN, "지금은 음성 안내를 쓸 수 없어요")
+    !sttAvailable -> DescribeModel(DESCRIBE_LABEL, MicAction.EXPLAIN, DESCRIBE_NO_STT)
     else -> DescribeModel(DESCRIBE_LABEL, MicAction.LISTEN)
 }
 
 private const val DESCRIBE_LABEL = "말로 설정"
+private const val DESCRIBE_NO_STT = "지금은 음성 인식을 쓸 수 없어요. 화면에서 골라 주세요"
 
 fun micModel(state: CoachUiState, voiceGuidance: Boolean): MicModel =
     micModel(state.voice, state.ttsAvailable, state.sttAvailable, voiceGuidance)

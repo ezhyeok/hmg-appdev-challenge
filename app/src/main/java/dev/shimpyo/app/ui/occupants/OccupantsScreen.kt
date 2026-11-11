@@ -63,7 +63,7 @@ import kotlinx.coroutines.delay
  * 운전자 행은 항상 있고 지울 수 없다. 건강 관련 유형은 동의한 뒤에만 고를 수 있다.
  *
  * @param asleepIds 운전자가 '자는 중'이라고 알린 탑승자 (CoachUiState.asleepOccupantIds). 표시는 코치 상태를 따른다
- * @param describe [말로 설정] 버튼의 모양과 동작 (MicModel.describeModel: 쓸 수 없으면 이유를 보인다)
+ * @param describe [말로 설정] 버튼의 모양과 동작 (MicModel.describeModel: 음성 인식을 쓸 수 없으면 이유를 보인다)
  */
 @Composable
 fun OccupantsScreen(

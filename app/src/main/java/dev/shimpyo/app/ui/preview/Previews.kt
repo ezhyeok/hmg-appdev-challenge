@@ -148,9 +148,9 @@ private fun OccupantsFamilyPreview() = SampleFrame(Samples.family, Screen.OCCUPA
 @Composable
 private fun OccupantsNarrowPreview() = SampleFrame(Samples.family, Screen.OCCUPANTS)
 
-@Preview(name = "탑승자 · 말로 설정 불가 (음성 안내 끔)", widthDp = 840, heightDp = 1184)
+@Preview(name = "탑승자 · 말로 설정 불가 (음성 인식 불가)", widthDp = 840, heightDp = 1184)
 @Composable
-private fun OccupantsVoiceOffPreview() = SampleFrame(Samples.family, Screen.OCCUPANTS, voiceEnabled = false)
+private fun OccupantsNoSttPreview() = SampleFrame(Samples.family.copy(sttAvailable = false), Screen.OCCUPANTS)
 
 @Preview(name = "탑승자 · 추가 (동의 전)", widthDp = 840, heightDp = 1184)
 @Composable
