@@ -228,7 +228,18 @@ compact 세로 윈도에서 결과 카드는 `FitColumn`(줄을 빼는 판단은
 | `pleos.car.permission.CAR_WINDOWS`, `CONTROL_CAR_WINDOWS` | 창문 위치 조회·이동 (KitSelfTest만) | debug |
 | `pleos.car.permission.CAR_ENERGY` | 배터리 잔량 조회 (KitSelfTest만. 엔진의 `rangeKm`은 아직 채우지 않는다) | debug |
 
-`android.permission.INTERNET`은 뺐다. 앱·pleos-kit·엔진 어디에도 소켓을 여는 코드가 없고, 합쳐진 Manifest를 보면 Pleos SDK AAR(Vehicle, NaviHelper, TTS, STT, LLM, FusedLocation)도 선언하지 않는다(시스템 서비스에 바인딩한다. 경로 계산은 내비 앱이, 음성·LLM은 ON_DEVICE). 기기에서 음성·내비·LLM이 그대로 되는지는 통합 실행에서 확인한다(9장). 외부 API를 쓰게 되면 그때 다시 선언한다.
+SDK와 라이브러리의 Manifest에서 합쳐져 APK에 들어가는 것(앱 Manifest에는 없다. 2026-11-12 release 빌드의 합쳐진 Manifest로 확인):
+
+| 권한·컴포넌트 | 어디서 오나 |
+|---|---|
+| `android.permission.INTERNET` | Pleos TextToSpeech SDK 3.3.1의 Manifest |
+| `ai.pleos.playground.service.vehicle.VEHICLE_BINDING` | Pleos Vehicle SDK 2.3.2 (차량 서비스 바인딩) |
+| `ai.pleos.playground.service.location.fused.FUSED_LOCATION_BINDING` | Pleos FusedLocation SDK 1.1.3 |
+| `dev.shimpyo.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` | androidx.core (앱 안에서만 쓰는 서명 권한) |
+| 내보낸 리시버 `androidx.profileinstaller.ProfileInstallReceiver` (`android.permission.DUMP` 필요) | androidx.profileinstaller (Compose가 끌어온다) |
+| debug만: 내보낸 `androidx.compose.ui.tooling.PreviewActivity` | compose ui-tooling (`debugImplementation`) |
+
+`android.permission.INTERNET`은 앱 Manifest에서 뺐다: 앱·pleos-kit·엔진 어디에도 소켓을 여는 코드가 없다(경로 계산은 내비 앱이, 음성·LLM은 ON_DEVICE로 시스템 서비스가 한다). 그래도 TextToSpeech SDK가 자기 Manifest에 선언해 두어서 APK의 권한 목록에는 그대로 남는다. 그래서 이 변경으로 기기 동작은 달라지지 않는다. 앱 Manifest는 앱이 쓰는 것만 적고, SDK가 쓰는 것은 SDK Manifest가 가져온다. 앱이 외부 API를 쓰게 되면 그때 앱 Manifest에도 적는다.
 
 ## 5. CCP(로터리) (감사 #13)
 
@@ -321,7 +332,7 @@ compact 세로 윈도에서 결과 카드는 `FitColumn`(줄을 빼는 판단은
 17. 탑승자 화면: [평소 간격 · 자동] → 선택지 여섯 개가 행 아래에 펼쳐지고, 2시간을 고르면 행이 "평소 2시간마다", 요약이 "지금 기준: …"로 바뀌며 앱을 다시 켜도 남는다. 영아·반려견 행에는 버튼이 없다. 628×855 창에서 선택지가 잘리지 않고 줄바꿈된다. 아이 행 [자는 중]을 켜면 토글이 켜지고(코어 수정 뒤) 밤 시연에서 게이지 이유가 "… 자는 중".
 18. 음성 안내를 끄고 마이크로 "얼마나 남았어": 대답이 머리 아래에 몇 초 떴다 사라진다(코어 수정 뒤). 주행 중 급해 버튼을 가리지 않는다. 탑승자 화면 [말로 설정]은 사선 마이크 + 이유 한 줄, 누르면 토스트.
 19. 계획 화면을 열어 둔 채 D로 바꾸기, 다른 화면으로 가기 → logcat에 계획을 다시 세우는 줄이 멈춘다. 계획 화면으로 돌아오면 다시 세운다.
-20. 제출용(release) APK: `adb shell am start -n dev.shimpyo.app/.MainActivity --ez selftest true`와 `--ez verify true`는 아무 일도 하지 않고, `--es demo holiday`는 시연을 켠다. `--es demo 아무말`은 시연을 끈다. `adb shell dumpsys package dev.shimpyo.app | grep permission`에 좌석·창문·조명 제어·에너지·INTERNET이 없다.
-21. INTERNET 없이(release) 음성 질문과 대답(TTS·STT), 길안내 중 경유지 추가, requestTrip 보정이 그대로 되는지. 안 되면 Manifest와 `ReleaseSurfaceTest`의 표에 되돌린다.
+20. 제출용(release) APK: `adb shell am start -n dev.shimpyo.app/.MainActivity --ez selftest true`와 `--ez verify true`는 아무 일도 하지 않고, `--es demo holiday`는 시연을 켠다. `--es demo 아무말`은 시연을 끈다. `adb shell dumpsys package dev.shimpyo.app | grep permission`에 좌석·창문·조명 제어·에너지 권한이 없다(INTERNET은 TextToSpeech SDK가 선언해 그대로 있다).
+21. release APK에서 음성 질문과 대답(TTS·STT), 길안내 중 경유지 추가, requestTrip 보정, 외기 전환이 예전처럼 되는지(권한을 줄인 뒤의 회귀 확인).
 22. debug APK: `run-app.ps1 -SelfTest`가 예전처럼 kit 점검을 돌린다(앱 담당의 debug 전용 점검 코드와 함께).
 23. 음성 "화장실 급해"로 열린 급해 화면에서 창 분할·크기 변경 → 화면이 그대로 이어지고, 닫은 뒤 다시 열리지 않는다.

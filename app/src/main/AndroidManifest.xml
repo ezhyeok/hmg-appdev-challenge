@@ -7,7 +7,8 @@
       쉼표(제품)가 쓰는 권한만 둔다 (앱 보안 가이드: 필요한 권한만 요청). 권한마다 쓰는 곳은 ReleaseSurfaceTest의 표가 기준이고,
       그 시험이 이 목록과 어긋나면 실패한다. 개발용 점검(KitSelfTest)만 쓰는 좌석·창문·조명 제어·에너지 권한은
       app/src/debug/AndroidManifest.xml에 있어 제출용(release) APK에는 들어가지 않는다 (닫힘 검증 UI-N1).
-      네트워크(INTERNET)는 선언하지 않는다: 앱은 소켓을 열지 않고, Pleos SDK는 시스템 서비스에 바인딩한다(경로 계산은 내비 앱이 한다).
+      네트워크(INTERNET)는 앱이 선언하지 않는다: 앱 코드는 소켓을 열지 않는다(경로 계산은 내비 앱이 한다). 다만 Pleos TextToSpeech
+      SDK(3.3.1)의 Manifest가 INTERNET을 선언하고 있어서 합쳐진 Manifest(APK)에는 들어간다. SDK가 쓰는 것이므로 막지 않는다.
     -->
     <!-- Vehicle SDK 조회: 문 열림(화장실 정차 판정), 방향지시등, 공조 상태(환기 권유), 조향각·브레이크·크루즈(운전 패턴) -->
     <uses-permission android:name="pleos.car.permission.CAR_DOORS" />

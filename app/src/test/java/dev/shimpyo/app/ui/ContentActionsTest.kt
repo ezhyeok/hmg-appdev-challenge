@@ -2,6 +2,7 @@ package dev.shimpyo.app.ui
 
 import dev.shimpyo.app.ui.components.OverlayState
 import dev.shimpyo.app.ui.components.describeModel
+import dev.shimpyo.app.ui.components.micModel
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.UiCommand
 import dev.shimpyo.coach.VoiceState
@@ -121,6 +122,60 @@ class ContentActionsTest {
         // 화면은 닫혔지만 들르기는 진행 중이다: 다른 화면의 넣기 버튼도 계속 막는다
         assertNull(picked.ui.pickingId)
         assertEquals("jukam", picked.ui.goToSentId)
+    }
+
+    // ------------------------------------------------------------ 급해 요청 (UI 감사 #7·#8)
+
+    @Test
+    fun theUrgentButtonSendsOneRequestAndRetryReplacesIt() {
+        // 급해 버튼을 한 프레임 안에 두 번 눌러도 요청은 하나다
+        val rig = Rig()
+        rig.actions.requestUrgent()
+        rig.actions.requestUrgent()
+        val first = (rig.sent.single() as UiCommand.Urgent).requestId
+        assertTrue("번호 0은 쓰지 않는다 (번호를 돌려주지 않는 옛 코치의 값)", first != 0L)
+        assertEquals(first, rig.ui.urgentRequested)
+
+        // [다시 시도]: 끝난 앞 요청을 코치에서도 정리하고 닫은 번호에 넣은 뒤 새 번호로 보낸다
+        rig.actions.requestUrgent(replacing = first)
+        val second = (rig.sent.last() as UiCommand.Urgent).requestId
+        assertEquals(listOf(UiCommand.Urgent(first), UiCommand.DismissUrgent(first), UiCommand.Urgent(second)), rig.sent)
+        assertTrue(second != first)
+        assertEquals(second, rig.ui.urgentRequested)
+        assertTrue(first in rig.ui.dismissedUrgent)
+    }
+
+    // ------------------------------------------------------------ 질문·마이크·화면 이동 (UI 감사 #12)
+
+    @Test
+    fun answersMicAndDismissSendTheirCommands() {
+        val rig = Rig()
+        val p = Prompt("q1", PromptKind.LAST_CHANCE, "들를까요?", oksan, Long.MAX_VALUE)
+        rig.actions.answer(p, true)
+        rig.actions.answer(p, false)
+        rig.actions.dismissGoTo()
+        assertEquals(listOf(UiCommand.Answer("q1", true), UiCommand.Answer("q1", false), UiCommand.DismissGoToResult), rig.sent)
+
+        // 마이크: 쉬는 중이면 듣기, 말하거나 듣는 중이면 멈추기, 쓸 수 없으면 명령 없이 이유만 (예전에는 누를 때마다 듣기를 쌓았다)
+        val mic = Rig()
+        mic.actions.mic(micModel(VoiceState.IDLE, ttsAvailable = true, sttAvailable = true, voiceGuidance = true))
+        mic.actions.mic(micModel(VoiceState.SPEAKING, ttsAvailable = true, sttAvailable = true, voiceGuidance = true))
+        mic.actions.mic(micModel(VoiceState.LISTENING, ttsAvailable = true, sttAvailable = true, voiceGuidance = true))
+        assertEquals(listOf(UiCommand.Listen, UiCommand.StopVoice, UiCommand.StopVoice), mic.sent)
+        mic.actions.mic(micModel(VoiceState.IDLE, ttsAvailable = true, sttAvailable = false, voiceGuidance = true))
+        assertEquals(3, mic.sent.size)
+        assertEquals("지금은 음성 인식을 쓸 수 없어요", mic.overlays.toast?.message)
+    }
+
+    @Test
+    fun theDemoPanelReturnsToTheScreenItWasOpenedFrom() {
+        val rig = Rig(ui = ContentState(Screen.HISTORY))
+        rig.actions.open(Screen.DEMO)
+        assertEquals(Screen.DEMO, rig.ui.screen)
+        assertEquals(Screen.HISTORY, rig.ui.demoReturn)
+        rig.actions.open(Screen.PLAN)
+        assertEquals(Screen.PLAN, rig.ui.screen)
+        assertTrue("화면을 옮기는 것만으로는 코치에 아무것도 보내지 않는다", rig.sent.isEmpty())
     }
 
     // ------------------------------------------------------------ 계획 화면 (R-F12)
