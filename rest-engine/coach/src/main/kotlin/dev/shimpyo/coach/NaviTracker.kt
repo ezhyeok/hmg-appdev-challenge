@@ -64,6 +64,8 @@ class NaviTracker(
     private var fastUntil = Long.MIN_VALUE
     private var prevRemainM: Double? = null
     private var prevRemainOdometerM = 0.0
+    /** 내비가 서 있다 (NaviPoll.naviFrozen): TBT를 경로 조회만큼만 묻는다 */
+    private var naviFrozen = false
     private var lastRequestAt: Long? = null
     private val failures = HashMap<String, Int>()
 
@@ -173,6 +175,9 @@ class NaviTracker(
             newEpoch(prev, status, dest, remain, odoAt, "rerouted (remain ${prevRemainM?.toInt()} -> ${remain!!.toInt()} m)")
             return
         }
+        val frozen = NaviPoll.naviFrozen(prevRemainM, prevRemainOdometerM, remain, odoAt, naviFrozen)
+        if (frozen != naviFrozen) log.i(if (frozen) "navi frozen: tbt at the route pace" else "navi moving again: tbt every 5 s")
+        naviFrozen = frozen
         prevRemainM = remain
         prevRemainOdometerM = odoAt
         publish(
@@ -191,6 +196,7 @@ class NaviTracker(
         val epoch = prev.epoch + 1
         log.i("navi epoch $epoch: $why")
         routeChangePending = false
+        naviFrozen = false
         // 경로 시작을 봤는지: 처음 조회부터 길안내 중이면(앱이 길안내 중간에 켜짐) 출발지를 모른다
         congestion.start(remain, originKnown = prev.route != null)
         prevRemainM = remain
@@ -220,6 +226,7 @@ class NaviTracker(
         routeChangePending = false
         congestion.clear()
         prevRemainM = null
+        naviFrozen = false
         tbtForced = false
         lastTbtAt = null
         tbtRetryAt = null
@@ -257,6 +264,7 @@ class NaviTracker(
             speedKnown = speedKnown(),
             trusted = s.odometerTrusted,
             afterReset = now < fastUntil,
+            naviFrozen = naviFrozen,
         )
         return last + interval
     }
