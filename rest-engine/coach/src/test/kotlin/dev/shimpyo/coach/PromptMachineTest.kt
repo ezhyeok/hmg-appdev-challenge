@@ -4,6 +4,7 @@ import dev.shimpyo.coach.PromptEffect.Ask
 import dev.shimpyo.coach.PromptEffect.CancelVoice
 import dev.shimpyo.coach.PromptEffect.Forward
 import dev.shimpyo.coach.PromptEffect.FreshAir
+import dev.shimpyo.coach.PromptEffect.Notice
 import dev.shimpyo.coach.PromptEffect.PublishGoToResult
 import dev.shimpyo.coach.PromptEffect.Report
 import dev.shimpyo.coach.PromptEffect.ScheduleExpiry
@@ -116,8 +117,8 @@ class PromptMachineTest {
         Row("Idle × 정차 중 환기 → 띄운다", idle, EngineTick(freshAir, null, true), PromptState.Asking::class, showEffects(freshAir)),
         Row("Idle × 안내(INFO) → 말하고 엔진에 전달됐다고 알린다 (카드·마이크 없음)", idle, EngineTick(info, null, false),
             PromptState.Idle::class, listOf(Speak(info.speech), Report(info.id, true))),
-        Row("Idle × 안내, 음성 끔 → 말하지 않고 엔진 자리만 비운다", idle, EngineTick(info, null, false),
-            PromptState.Idle::class, listOf(Report(info.id, true)), voice = false),
+        Row("Idle × 안내, 음성 끔 → 말 대신 화면 알림으로 낸다 (리뷰 R-F4)", idle, EngineTick(info, null, false),
+            PromptState.Idle::class, listOf(Notice(info.speech), Report(info.id, true)), voice = false),
         Row("Idle × 정차 중 엔진의 급해 결과 → 띄운다 (서 있어도 쓸모 있다)", idle, EngineTick(urgent, null, true), PromptState.Asking::class, showEffects(urgent)),
         Row("Idle × 버튼 → 무시", idle, Tapped(key(p1), true), PromptState.Idle::class, emptyList()),
         Row("Idle × 늦은 음성 대답 → 답은 버리고 다른 요청만 전한다", idle, Heard(key(p1), YesNo.YES, VoiceIntent.UrgentRestroom),
@@ -721,6 +722,19 @@ class PromptMachineTest {
         assertTrue(all.toString(), all.none { it is Ask || it is Speak })
         assertTrue(all.contains(FreshAir(announce = false)))
         assertTrue("카드는 보인다", all.contains(Show(shown(urgent, 3))))
+    }
+
+    @Test
+    fun withVoiceOffAnInfoIsShownOnceAndTheCardStays() {
+        // 음성 안내를 꺼도 마이크로 물을 수 있다. 예전에는 그 답(안내)이 소리로도 화면으로도 나가지 않았다
+        val r = Rig(voice = false)
+        r.tick(p1)
+        assertEquals(listOf(Notice(info.speech), Report(info.id, true)), r.tick(info))
+        assertEquals("카드는 그대로 버튼을 기다린다", key(p1), r.m.current!!.key)
+        assertEquals("한 번만", emptyList<PromptEffect>(), r.tick(info))
+        // 들르기 결과는 결과 카드가 보이므로 알림을 따로 내지 않는다
+        r.on(GoTo(jukam))
+        assertTrue(r.on(GoToFinished(1, GoToOutcome.WAYPOINT_ADDED)).none { it is Notice || it is Speak })
     }
 
     // ---------------------------------------------------------------- 화면이 쓰는 값

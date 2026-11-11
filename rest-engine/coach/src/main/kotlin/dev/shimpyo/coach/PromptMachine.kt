@@ -66,7 +66,8 @@ sealed interface PromptEvent {
     /**
      * 카드의 음성 작업(Ask) 결과. 작업이 끝나면 한 번 보낸다 (못 들었으면 UNKNOWN). 음성 작업이 끝났다는 뜻이기도 하다.
      * 마이크 버튼으로 들은 대답(VoiceIntent.Accept/Decline)은 이것이 아니라 [Tapped]로 넣는다.
-     * [other]: 같은 말 안의 다른 요청 (IntentParser.parse(text, occupants, activePromptId = null)). 예: "아니 화장실 급해"
+     * [answer]·[other]: 그 말을 대답 하나로 읽은 것 (IntentParser.replyTo). other는 대답과 다른, 분명한 요청일 때만 있다.
+     * 예: "아니 화장실 급해" → NO + UrgentRestroom. "아니 안 급해", "응 휴게소 들르자"는 대답 하나다 (리뷰 R-F3)
      */
     data class Heard(val promptId: String, val answer: YesNo, val other: VoiceIntent? = null) : PromptEvent
     /** 화면 버튼 (UiCommand.Answer), 마이크 버튼으로 들은 수락·거절 */
@@ -96,6 +97,11 @@ sealed interface PromptEffect {
     data object CancelVoice : PromptEffect
     /** 대답을 받지 않는 말 (안내, 들르기 결과) */
     data class Speak(val text: String) : PromptEffect
+    /**
+     * 말 대신 화면에 잠깐 보일 알림 (CoachUiState.notice). 말할 수 없을 때(음성 안내 끔, TTS 없음)의 안내(INFO)다: 음성 안내를 꺼도
+     * 마이크로 물을 수 있는데, 예전에는 "얼마나 남았어"의 답이 소리로도 화면으로도 나가지 않았다 (리뷰 R-F4)
+     */
+    data class Notice(val text: String) : PromptEffect
     /** 이 실제 시각에 Expired(promptId)를 보낸다. 같은 id로 다시 오면 앞의 것을 바꾼다 */
     data class ScheduleExpiry(val promptId: String, val atElapsedMs: Long) : PromptEffect
     /** engine.onPromptResult(promptId, accept). promptId는 엔진이 준 원래 id */
@@ -121,7 +127,7 @@ sealed interface PromptEffect {
  *    급해 결과도 엔진의 질문(URGENT_RESULT)이다: 코어가 급해를 엔진에 알리면 엔진이 1등 장소로 묻는다 (core.md 5장).
  * 2. P로 서면 주행 질문(PromptRules)은 거둔다. 이 세대에 한 번이라도 띄운 주행 질문은 출발해도 다시 띄우지 않는다.
  * 3. 안내(INFO)는 말만 하고 카드·마이크를 쓰지 않는다. 묻던 음성은 멈추고(대답이 질문보다 지금 더 맞다) 카드는 버튼 대기로 둔다.
- *    엔진의 질문 자리를 비우도록 바로 전달됐다고 알린다(Report true).
+ *    엔진의 질문 자리를 비우도록 바로 전달됐다고 알린다(Report true). 말할 수 없으면 화면 알림(Notice)으로 낸다.
  * 4. 대답은 지금 카드의 key에만 반영한다. key는 띄울 때마다 새로 만든다. 대답·만료·정차로 닫은 질문은 엔진이 계속 내도 다시 띄우지
  *    않는다. 대답하면 Idle이 되므로 음성 '응'과 버튼이 함께 와도 두 번째는 무시된다(구조 리뷰 D7).
  * 5. 수락: 장소가 있으면 들르기를 실행하고, 내비 명령이 성공했을 때만 엔진에 수락을 알린다. 실패하면 GoToResult(FAILED)를 올리고
@@ -130,7 +136,7 @@ sealed interface PromptEffect {
  *    내비 명령은 한 번에 하나다. 결과가 오지 않으면 [GO_TO_WATCHDOG_MS] 뒤 FAILED로 끝낸다. 결과는 [GO_TO_RESULT_TTL_MS] 뒤 거둔다.
  * 6. 카드 수명은 실제 시간 [ENGINE_CARD_MS]다. 음성이 대답 없이 끝나면 적어도 [MIN_TAP_MS]는 누를 수 있게 늘리되
  *    수명 + [MIN_TAP_MS]를 넘지 않는다 (엔진 수명이 먼저 끝날 수 있다).
- * 7. 음성을 끄면 Ask·Speak를 내지 않는다(카드만).
+ * 7. 음성을 끄면 Ask·Speak를 내지 않는다(카드, 그리고 안내는 화면 알림).
  * 8. Reset: 음성을 멈추고 카드를 내리고 세대를 올린다. 이미 보낸 내비 명령의 결과는 알리되 옛 엔진에 보고하지 않고 새 세계의
  *    카드도 건드리지 않는다.
  */
@@ -409,14 +415,17 @@ class PromptMachine {
         if (set.size > REMEMBER_MAX) set.remove(set.first())
     }
 
-    /** 안내: 카드 질문을 묻던 음성은 멈추고(대답이 지금 더 맞다) 카드는 버튼 대기로 둔다. 다음 철회가 이 안내를 끊지 않는다 */
+    /**
+     * 안내: 카드 질문을 묻던 음성은 멈추고(대답이 지금 더 맞다) 카드는 버튼 대기로 둔다. 다음 철회가 이 안내를 끊지 않는다.
+     * 말할 수 없으면 화면 알림으로 낸다 (사용자가 물은 것의 답이라 어디로든 나가야 한다)
+     */
     private fun info(text: String, ctx: PromptContext, out: Effects) {
         val card = current
         if (card != null && state is PromptState.Asking && ctx.speak) {
             out += PromptEffect.CancelVoice
             voiceEnded(card, ctx, out)
         }
-        announce(text, ctx, out)
+        out += if (ctx.speak) PromptEffect.Speak(text) else PromptEffect.Notice(text)
     }
 
     private fun announce(text: String, ctx: PromptContext, out: Effects) {

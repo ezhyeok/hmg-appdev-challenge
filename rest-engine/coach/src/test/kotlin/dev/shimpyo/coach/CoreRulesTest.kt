@@ -114,6 +114,17 @@ class CoreRulesTest {
         assertEquals(setOf(OccupantType.PREGNANT, OccupantType.OAB, OccupantType.IBS), OccupantType.entries.filter(HealthConsent::isHealth).toSet())
     }
 
+    @Test
+    fun spokenOccupantsKeepThePassengersWhenConsentLeavesNobodyNew() {
+        val pregnant = Occupant("p0", OccupantType.PREGNANT, label = "임신부")
+        val elder = Occupant("p1", OccupantType.ELDERLY, label = "어르신")
+        // 리뷰 R-F9: 동의 없이 "임산부 한 명" → 걸러 내면 운전자뿐이다. 그대로 적용하면 타고 있던 사람이 지워진다
+        assertEquals(HealthConsent.Spoken(apply = null, consentNeeded = true), HealthConsent.spoken(listOf(DRIVER, pregnant), consent = false))
+        assertEquals("남는 사람이 있으면 그 사람들로 맞춘다", HealthConsent.Spoken(listOf(DRIVER, elder), consentNeeded = true), HealthConsent.spoken(listOf(DRIVER, pregnant, elder), consent = false))
+        assertEquals("동의했으면 그대로", HealthConsent.Spoken(listOf(DRIVER, pregnant), consentNeeded = false), HealthConsent.spoken(listOf(DRIVER, pregnant), consent = true))
+        assertEquals("건강 유형이 없으면 동의와 무관하다", HealthConsent.Spoken(listOf(DRIVER, KID), consentNeeded = false), HealthConsent.spoken(listOf(DRIVER, KID), consent = false))
+    }
+
     // ------------------------------------------------------------ 고른 정차의 목적 (서비스 닫힘 검증 D7)
 
     @Test

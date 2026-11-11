@@ -126,6 +126,20 @@ object HealthConsent {
 
     /** 동의가 없으면 건강 유형 탑승자를 뺀 목록 */
     fun allowed(list: List<Occupant>, consent: Boolean): List<Occupant> = if (consent) list else list.filterNot { isHealth(it.type) }
+
+    /**
+     * 말로 들은 탑승자 목록([heard]: 운전자가 맨 앞)에 동의 규칙을 적용한 결과.
+     * [apply]: 탑승자로 넣을 목록. 동의가 없어 걸러 내고 나면 운전자밖에 남지 않을 때는 null: 지금 탑승자를 그대로 둔다
+     * (예전에는 "임산부 한 명"이 타고 있던 아이를 지우고 "로 맞췄어요"라고 말했다, 리뷰 R-F9).
+     * [consentNeeded]: 동의가 없어 뺀 사람이 있다 (동의 안내를 한다)
+     */
+    data class Spoken(val apply: List<Occupant>?, val consentNeeded: Boolean)
+
+    fun spoken(heard: List<Occupant>, consent: Boolean): Spoken {
+        val allowed = allowed(heard, consent)
+        val dropped = allowed.size < heard.size
+        return Spoken(allowed.takeUnless { dropped && it.size <= 1 }, dropped)
+    }
 }
 
 object CoreRules {

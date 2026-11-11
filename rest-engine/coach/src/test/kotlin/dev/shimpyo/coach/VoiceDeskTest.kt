@@ -15,7 +15,7 @@ import org.junit.Test
 
 /**
  * 음성 작업 책상 (VoiceDesk): 무엇이 돌고 있는지, 무엇을 취소하는지, 결과를 몇 번 돌려주는지. 코어 없이 가짜 음성으로 돌린다.
- * `currentBehavior_*`는 CoachCore에서 옮겨 온 그대로의 동작이다: 다음 커밋에서 뒤집는다.
+ * 닫힘 검증(2026-11-12)의 리뷰 R-F8(세계 전환)·R-F11(실패해도 결과 한 번)을 여기서 규칙으로 지킨다.
  */
 class VoiceDeskTest {
     private val log = RecordingLog()
@@ -169,16 +169,68 @@ class VoiceDeskTest {
         assertFalse(d.describing)
     }
 
-    // ------------------------------------------------------------ 옮겨 온 그대로 (다음 커밋에서 뒤집는다)
+    // ------------------------------------------------------------ 결과는 정확히 한 번 (리뷰 R-F11)
 
     @Test
-    fun currentBehavior_aFailedListenDescribeOrInterpretReportsNothing() = runTest {
+    fun aFailedListenDescribeOrInterpretStillReportsOnce() = runTest {
+        // 예전에는 실패한 작업이 아무 결과도 돌려주지 않았다: 해석기가 예외를 던지면 마이크 표시가 '생각하는 중'에 남았다
         val d = desk(BrokenVoice())
         val results = mutableListOf<String>()
         d.listen { results += "listen:$it" }
         d.describe("누가 함께 타나요?") { results += "describe:$it" }
         d.interpret<String?>("interpret", failed = null, done = { results += "interpret:$it" }) { error("llm crashed") }
         pass(1_000)
-        assertTrue("실패한 작업은 결과를 돌려주지 않는다 (리뷰 R-F11: 마이크가 '생각하는 중'에 남는다): $results", results.isEmpty())
+        assertEquals(listOf("describe:null", "interpret:null", "listen:null"), results.sorted())
+        assertTrue(log.lines.any { "interpret failed" in it })
+        pass(10_000)
+        assertEquals("한 번만", 3, results.size)
+    }
+
+    @Test
+    fun aSuccessfulWorkReportsItsResultExactlyOnce() = runTest {
+        val d = desk(FakeVoice(answer = { "아이 하나" }).also { it.listens += "졸려" })
+        val results = mutableListOf<String>()
+        d.listen { results += "listen:$it" }
+        d.describe("누가 함께 타나요?") { results += "describe:$it" }
+        d.interpret("interpret", failed = "실패", done = { results += "interpret:$it" }) { "해석" }
+        pass(10_000)
+        assertEquals(listOf("describe:아이 하나", "interpret:해석", "listen:졸려"), results.sorted())
+    }
+
+    // ------------------------------------------------------------ 탑승자 말하기 (UI 닫힘 검증 #12)
+
+    @Test
+    fun describingWithoutAQuestionOnlyListens() = runTest {
+        // 음성 안내를 껐으면 묻는 말 없이 듣기만 한다
+        val voice = FakeVoice().also { it.listens += "일곱 살 아이 하나" }
+        val d = desk(voice)
+        val heard = mutableListOf<String?>()
+        d.describe(null) { heard += it }
+        assertTrue(d.describing)
+        pass(2_000)
+        assertEquals(listOf<String?>("일곱 살 아이 하나"), heard)
+        assertTrue("말하지 않는다", voice.asked.isEmpty() && voice.said.isEmpty())
+    }
+
+    // ------------------------------------------------------------ 세계 전환 (리뷰 R-F8)
+
+    @Test
+    fun aWorldChangeCancelsEveryVoiceWorkSoNoResultReachesTheNewWorld() = runTest {
+        // 예전에는 세계 전환이 카드의 묻기·듣기만 취소해서, 시연 중에 시작한 탑승자 말하기·해석의 결과가 시연을 끈 뒤 실제 세계에 적용됐다
+        val voice = FakeVoice(answer = { "할머니랑 강아지" }, speakMs = 3_000)
+        val d = desk(voice)
+        val results = mutableListOf<String>()
+        d.ask("p1#1", "들를까요?", listen = true) { results += "ask" }
+        d.listen { results += "listen" }
+        d.describe("누가 함께 타나요?") { results += "describe" }
+        d.interpret("interpret", failed = null, done = { results += "interpret" }) { delay(2_000) }
+        d.say("옥산휴게소로 안내할게요")
+        pass(500)
+        val stops = voice.stops
+        d.worldChanged()
+        assertEquals(stops + 1, voice.stops)
+        assertFalse(d.busy)
+        pass(10_000)
+        assertTrue("지난 세계의 작업은 결과를 돌려주지 않는다: $results", results.isEmpty())
     }
 }

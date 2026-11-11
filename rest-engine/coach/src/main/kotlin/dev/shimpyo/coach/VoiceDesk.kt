@@ -10,8 +10,10 @@ import kotlinx.coroutines.launch
  * 코치의 음성 작업을 모두 든다: 카드의 묻기, 마이크 버튼 듣기, 탑승자 말하기, LLM 해석, 대답 없는 말. 코어는 "무엇을 말하고
  * 들을지"만 정하고, 어떤 작업이 돌고 있는지·무엇을 취소할지는 여기서 본다. 코어 스레드에서만 부른다.
  *
- * 작업은 코어의 효과 스코프에서 돌고, 결과는 [done]으로 한 번 돌려준다. [done]은 효과 코루틴 안에서 불리므로 우편함에 메시지를
- * 넣는 일만 해야 한다(코어 상태를 직접 바꾸지 않는다). 취소된 작업은 결과를 돌려주지 않는다: 취소한 쪽이 뒷일을 안다.
+ * 작업은 코어의 효과 스코프에서 돌고, 결과는 done으로 정확히 한 번 돌려준다(실패해도). done은 효과 코루틴 안에서 불리므로
+ * 우편함에 메시지를 넣는 일만 해야 한다(코어 상태를 직접 바꾸지 않는다). 취소된 작업은 결과를 돌려주지 않는다: 취소한 쪽이 뒷일을 안다.
+ * 세계가 바뀌면([worldChanged]) 모든 작업을 취소한다. 그래도 이미 우편함에 든 결과가 있을 수 있어서, 코어는 결과에 세계 세대를
+ * 실어 보내고 세대가 다른 결과를 버린다 (리뷰 R-F8: 시연 중에 물은 탑승자가 시연을 끈 뒤 실제 설정에 저장됐다).
  */
 class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachLog.NONE) {
     /** 효과를 띄우는 곳 (CoachCore.run의 supervisorScope). run 전에는 null */
@@ -71,9 +73,11 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
         listenJob = launch("listen", failed = null, done = done) { voice.listen() }
     }
 
-    /** 탑승자 말하기: [question]을 묻고 대답을 듣는다 */
-    fun describe(question: String, done: (String?) -> Unit) {
-        describeJob = launch("describe", failed = null, done = done) { voice.ask(question, listenMs = DESCRIBE_LISTEN_MS) }
+    /** 탑승자 말하기: [question]을 묻고 대답을 듣는다. question이 null이면(말할 수 없다) 묻지 않고 듣기만 한다 */
+    fun describe(question: String?, done: (String?) -> Unit) {
+        describeJob = launch("describe", failed = null, done = done) {
+            if (question != null) voice.ask(question, listenMs = DESCRIBE_LISTEN_MS) else voice.listen(DESCRIBE_LISTEN_MS)
+        }
     }
 
     /** 규칙으로 못 알아들은 말의 해석 (LLM). [failed]: 해석이 실패했을 때의 결과 */
@@ -111,9 +115,17 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
         return key
     }
 
+    /** 세계·엔진이 바뀌었다: 지난 세계에서 시작한 말·듣기·해석을 모두 멈춘다 (결과가 새 세계에 적용되지 않게) */
+    fun worldChanged() {
+        stopAll()
+    }
+
     // ------------------------------------------------------------ 띄우기
 
-    /** 음성 작업 하나. 끝나면 [done]으로 결과를 돌려준다. 취소됐으면 돌려주지 않는다 */
+    /**
+     * 음성 작업 하나. 끝나면 [done]으로 결과를 정확히 한 번 돌려준다: 실패해도 [failed]를 돌려준다. 예전에는 듣기·해석이 실패하면
+     * 아무 결과도 오지 않아 마이크 표시가 '생각하는 중'에 남았다 (리뷰 R-F11). 취소됐을 때만 돌려주지 않는다
+     */
     private fun <T> launch(name: String, failed: T, done: (T) -> Unit, block: suspend () -> T): Job {
         val s = checkNotNull(scope) { "CoachCore.run 전" }
         return s.launch {
@@ -123,7 +135,6 @@ class VoiceDesk(private val voice: VoicePort, private val log: CoachLog = CoachL
                 throw c
             } catch (x: Exception) {
                 log.w("$name failed: ${x.message ?: x.javaClass.simpleName}")
-                if (name != "ask") return@launch
                 failed
             }
             ensureActive()
