@@ -139,15 +139,15 @@ fun ShimpyoContent(
         }
     }
 
-    // 급해: 요청 번호로 코치의 진행 상태를 짝짓는다 (UrgentModel)
-    var ackExpired by remember { mutableStateOf(false) }
+    // 급해: 요청 번호로 코치의 진행 상태를 짝짓는다 (UrgentModel). 답 기다림 시간 초과는 그 번호에만 붙인다:
+    // Boolean 하나로 두면 [다시 시도]로 새 번호를 보낸 첫 프레임에 앞 요청의 '초과'가 그대로 보인다
+    var ackExpiredFor by remember { mutableStateOf<Long?>(null) }
     LaunchedEffect(ui.urgentRequested) {
-        ackExpired = false
-        if (ui.urgentRequested != null) {
-            delay(URGENT_ACK_TIMEOUT_MS)
-            ackExpired = true
-        }
+        val id = ui.urgentRequested ?: return@LaunchedEffect
+        delay(URGENT_ACK_TIMEOUT_MS)
+        ackExpiredFor = id
     }
+    val ackExpired = ui.urgentRequested != null && ackExpiredFor == ui.urgentRequested
     val urgent = urgentView(ui.urgentRequested, ui.urgentDismissed, state, ackExpired, ui.pickingId)
     val urgentVisible = urgent != null
     LaunchedEffect(state.urgentRequestId, state.urgentState, state.urgent == null) {
