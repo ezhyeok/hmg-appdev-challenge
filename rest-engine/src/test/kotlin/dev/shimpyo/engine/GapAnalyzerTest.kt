@@ -111,7 +111,11 @@ class GapAnalyzerTest {
     fun noReachableOpportunityOrNoOccupantsMeansNoLastChance() {
         val ctx = route()
         val list = opps(ctx, stop("a", 20_000.0))
-        assertNull(gap.analyze(list, ctx, deadlineMin = 5.0, sensitive = false, preferredMaxGapMin = null))
+        // 마감(5분) 안에 닿는 기회가 없어도, a 뒤가 목적지까지 168분 공백이면 a가 아직 들를 수 있는 마지막 기회다.
+        // 예전 기대(null)가 결함이었다: 마감이 지난 뒤 게이지가 NOW가 될 때까지 긴 공백 앞에서 말이 없었다 (감사 O1, AuditGapTest)
+        val passed = gap.analyze(list, ctx, deadlineMin = 5.0, sensitive = false, preferredMaxGapMin = null)
+        assertEquals("a", passed?.opp?.stop?.id)
+        assertEquals(GapAnalyzer.Trigger.GAUGE, passed?.trigger)
         assertNull(gap.analyze(emptyList(), ctx, deadlineMin = 50.0, sensitive = true, preferredMaxGapMin = 30))
         assertNull(gap.analyze(list, ctx, deadlineMin = null, sensitive = true, preferredMaxGapMin = 15), "탑승자가 없으면 판단하지 않는다")
     }

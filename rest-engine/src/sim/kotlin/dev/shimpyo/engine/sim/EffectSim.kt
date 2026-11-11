@@ -82,6 +82,8 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
         val lcCongestion: Int,
         val lcGap: Int,
         val lcNow: Int,
+        /** 탑승자의 '화장실 가고 싶어'에 엔진이 바로 답한 횟수 (엔진이 먼저 건 질문이 아니다) */
+        val needAnswers: Int,
     )
 
     val occupantSets = listOf(
@@ -176,6 +178,7 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
         var lcCongestion = 0
         var lcGap = 0
         var lcNow = 0
+        var needAnswers = 0
 
         val acceptRng = Random(s.acceptSeed)
         val engine = if (policy.engine) {
@@ -234,7 +237,9 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
             log(t, x, "PROMPT ${p.kind} → ${p.stop?.name} : ${p.speech}")
             when (p.kind) {
                 PromptKind.LAST_CHANCE, PromptKind.REST_SUGGESTION -> {
-                    if (p.kind == PromptKind.LAST_CHANCE) {
+                    if (p.kind == PromptKind.LAST_CHANCE && intent is VoiceIntent.OccupantNeed) {
+                        needAnswers++ // 필요를 말한 그 update의 답: 엔진이 먼저 묻는 질문 수에 넣지 않는다
+                    } else if (p.kind == PromptKind.LAST_CHANCE) {
                         lcPrompts++
                         // 어떤 규칙의 질문인지 문구 틀로 나눈다 (진단용)
                         when {
@@ -395,6 +400,7 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
             lcCongestion = lcCongestion,
             lcGap = lcGap,
             lcNow = lcNow,
+            needAnswers = needAnswers,
         )
     }
 
@@ -490,6 +496,7 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
                     "gaugeNow" to DoubleArray(n) { r[it].lcNow.toDouble() }.average(),
                 ),
                 "restSuggestion" to DoubleArray(n) { r[it].restPrompts.toDouble() }.average(),
+                "needAnswers" to DoubleArray(n) { r[it].needAnswers.toDouble() }.average(),
                 "acceptedStops" to DoubleArray(n) { r[it].acceptedStops.toDouble() }.average(),
                 "promptsWhileParked" to DoubleArray(n) { r[it].promptsWhileParked.toDouble() }.average(),
             ),
@@ -596,6 +603,8 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
         "tripMin" to "출발부터 부산 도착까지 (정차 포함)",
         "stretchOver2hShare" to "15분 이상 쉬지 않고 이어 달린 시간이 2시간을 넘은 적이 있는 여정의 비율. 2시간을 넘긴 뒤 '다음' 휴게소에 서므로 " +
             "규칙대로 쉬어도 조금은 넘는다 → stretchOver2h30Share(2시간 30분)와 longestStretchMin도 함께 본다",
+        "enginePromptsPerTrip" to "엔진이 먼저 건 질문 수(마지막 기회는 규칙별로 나눈다). needAnswers는 탑승자가 필요를 말한 순간 엔진이 바로 답한 " +
+            "다음 화장실 안내라 따로 센다(답에도 시뮬레이션 운전자는 같은 확률로 '응'한다)",
         "ci95" to "비율은 윌슨 95% 구간, 평균은 ±1.96·표준오차",
     )
 

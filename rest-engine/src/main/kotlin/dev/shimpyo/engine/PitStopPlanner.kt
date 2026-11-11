@@ -10,7 +10,7 @@ import kotlin.math.roundToInt
  * 경로 앞 화장실 기회 o_1..o_n(거리순)과 출발점 0, 끝점 T(목적지, 없으면 마지막 후보)를 두고 동적 계획법을 푼다.
  *
  * - 상태: (마지막으로 선 곳 i, 주유했는지 f, 식사했는지 a). 상태 수 4(n + 1), 전이 O(n) → 전체 O(n²).
- * - 구간 상한: 첫 구간은 지금 상태의 판단 마감(누군가 필요해질 확률 0.3)과 피로 게이지 중 짧은 쪽,
+ * - 구간 상한: 첫 구간은 지금 상태의 판단 마감(가장 급한 사람의 필요 확률 0.3)과 피로 게이지 중 짧은 쪽,
  *   정차 뒤에는 min(모두 방금 다녀온 상태의 판단 마감, 그 시각에서 시작하는 2시간 휴식 리듬). 걷기·카시트 2시간 상한 포함.
  *   넘친 시간은 '위반 초'로 센다 (불가능해도 가장 덜 어기는 계획을 낸다).
  * - 비용(사전식): 위반 초 → 정차 수 → 선호 감점 → 정차·우회·진출입 시간 (진출입 손실 5분이 정차마다 붙어 묶음 정차가 유리하다).
@@ -20,6 +20,10 @@ import kotlin.math.roundToInt
  *   수유(영아 간격의 절반이 지났을 때), 반려동물. 정차 시간 = 목적별 시간의 최댓값.
  * - 같은 비용이면 먼저 찾은 해(앞쪽 후보)를 유지하므로 결정적이다.
  * 정차 시각의 식사 시간대 판정은 그 상태까지의 최선 경로 누적 정차 시간을 쓴다 (근사).
+ * 주유 위반: 주유하지 않은 채 '주행가능거리 − 여유'를 넘어 달린 거리를 구간마다 한 번씩만 센다 (그 구간에서 새로 넘은 거리).
+ * 예전에는 넘은 뒤의 정차마다 출발점부터 넘은 거리 전체를 다시 더해, 주유할 곳이 없으면 한계 전에만 서려다 화장실 계획이 틀어졌다.
+ * 메모: 위반 초 중 주유 몫과 화장실·휴식 몫을 따로 쌓아, 주유할 곳이 없을 때 '화장실 사이가 먼 구간'이라고 하지 않는다
+ * (PLAN_FUEL_SHORT. 예전에는 모든 위반이 PLAN_GAP이었다, 감사 L1).
  */
 internal class PitStopPlanner(private val config: CoachConfig, private val texts: CoachTexts) {
 
@@ -52,6 +56,8 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
 
     private class Label(
         val violS: Double,
+        /** violS 중 주유 몫 */
+        val fuelViolS: Double,
         val stops: Int,
         val penalty: Double,
         val dwellS: Double,
@@ -90,7 +96,7 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
 
         // labels[node][f * 2 + a]
         val labels = Array(n + 1) { arrayOfNulls<Label>(4) }
-        labels[0][(if (fuelNeeded) 0 else 1) * 2] = Label(0.0, 0, 0.0, 0.0, -1, -1, 0.0, emptySet(), 0.0)
+        labels[0][(if (fuelNeeded) 0 else 1) * 2] = Label(0.0, 0.0, 0, 0.0, 0.0, -1, -1, 0.0, emptySet(), 0.0)
         var terminal: Label? = null
 
         for (i in 0..n) {
@@ -99,6 +105,7 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
                 val f = st / 2
                 val a = st % 2
                 val arrI = if (i == 0) 0.0 else opps[i - 1].arriveS
+                val distI = if (i == 0) 0.0 else opps[i - 1].distanceM
                 val departWall = wallNow + ((arrI + from.accDwellS) * 1000).toLong()
                 val legMax = if (i == 0) needs.firstLegMaxS else minOf(needs.restroomFullS, needs.fatigueFullS(departWall))
 
@@ -107,10 +114,8 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
                     if (hasDest && o.arriveS >= route.destS) continue
                     if (cut && o.distanceM > route.horizonM) continue
                     val legS = maxOf(0.0, o.arriveS - arrI) + o.stop.detourS
-                    var viol = maxOf(0.0, legS - legMax)
-                    if (f == 0 && fuelLimitM != null && o.distanceM > fuelLimitM) {
-                        viol += (o.distanceM - fuelLimitM) / route.vFreeMps
-                    }
+                    val fuelViol = if (f == 0 && fuelLimitM != null) beyond(distI, o.distanceM, fuelLimitM) / route.vFreeMps else 0.0
+                    val viol = maxOf(0.0, legS - legMax) + fuelViol
                     val arrivalWall = wallNow + ((o.arriveS + from.accDwellS) * 1000).toLong()
                     val purposes = EnumSet.of(Purpose.RESTROOM)
                     if (legS + (if (i == 0) needs.drivenNowS else 0.0) >= needs.restLabelS) purposes += Purpose.REST
@@ -135,7 +140,7 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
                     val dwellS = dwellMin(purposes) * 60.0
                     val extra = dwellS + o.stop.detourS + config.stopOverheadMin * 60.0
                     val cand = Label(
-                        from.violS + viol, from.stops + 1, from.penalty + penalty, from.dwellS + extra,
+                        from.violS + viol, from.fuelViolS + fuelViol, from.stops + 1, from.penalty + penalty, from.dwellS + extra,
                         i, st, from.accDwellS + extra, purposes, dwellS,
                     )
                     val idx = nf * 2 + na
@@ -143,13 +148,13 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
                 }
 
                 // 끝점
-                var viol = maxOf(0.0, horizonS - arrI - legMax)
-                if (f == 0 && fuelLimitM != null && horizonM > fuelLimitM) viol += (horizonM - fuelLimitM) / route.vFreeMps
+                val fuelViol = if (f == 0 && fuelLimitM != null) beyond(distI, horizonM, fuelLimitM) / route.vFreeMps else 0.0
+                val viol = maxOf(0.0, horizonS - arrI - legMax) + fuelViol
                 var penalty = 0.0
                 if (a == 0 && mealPossible &&
                     mealCrossed(local, wallNow, wallNow + ((horizonS + from.accDwellS) * 1000).toLong())
                 ) penalty += MEAL_MISS_PENALTY
-                val term = Label(from.violS + viol, from.stops, from.penalty + penalty, from.dwellS, i, st, from.accDwellS, emptySet(), 0.0)
+                val term = Label(from.violS + viol, from.fuelViolS + fuelViol, from.stops, from.penalty + penalty, from.dwellS, i, st, from.accDwellS, emptySet(), 0.0)
                 if (better(term, terminal)) terminal = term
             }
         }
@@ -178,12 +183,14 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
         // '바로 들르기'로 안내한다 (2026-11-11 에뮬레이터: 휴게소에 서 있는데 '화장실 사이가 먼 구간이 있어요'라고 했다)
         val unavoidableS = maxOf(0.0, opps[0].arriveS + opps[0].stop.detourS - needs.firstLegMaxS)
         val first = stops.firstOrNull()
+        val restViolS = end.violS - end.fuelViolS
         when {
-            end.violS <= 0.5 -> Unit
-            unavoidableS > 0.5 && end.violS <= unavoidableS + 0.5 && first != null && first.stop.id == opps[0].stop.id ->
+            restViolS <= 0.5 -> Unit
+            unavoidableS > 0.5 && restViolS <= unavoidableS + 0.5 && first != null && first.stop.id == opps[0].stop.id ->
                 notes += Reason("PLAN_NOW", texts.planNow(first.stop.name))
             else -> notes += Reason("PLAN_GAP", texts.planGapTooLong())
         }
+        if (end.fuelViolS > 0.5) notes += Reason("PLAN_FUEL_SHORT", texts.planFuelShort())
         if (stops.isEmpty() && end.violS <= 0.5) notes += Reason("PLAN_NONE_NEEDED", texts.planNoneNeeded(hasDest && !cut))
         stops.firstOrNull { Purpose.MEAL in it.purposes }?.let { notes += Reason("PLAN_MEAL", texts.planMeal(it.stop.name)) }
         stops.firstOrNull { Purpose.FUEL in it.purposes }?.let { notes += Reason("PLAN_FUEL", texts.planFuel(it.stop.name)) }
@@ -192,6 +199,9 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
         else if (cut) notes += Reason("PLAN_PARTIAL", texts.planPartial((route.horizonM / 1000.0).roundToInt()))
         return PitStopPlan(stops, totalMin, notes)
     }
+
+    /** [fromM, toM] 구간 중 limitM 너머의 길이 */
+    private fun beyond(fromM: Double, toM: Double, limitM: Double): Double = maxOf(0.0, toM - maxOf(fromM, limitM))
 
     fun dwellMin(purposes: Set<Purpose>): Int {
         var m = 0

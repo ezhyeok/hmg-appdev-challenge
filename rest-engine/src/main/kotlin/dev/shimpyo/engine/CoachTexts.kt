@@ -98,6 +98,22 @@ open class CoachTexts {
 
     open fun mealNone(): String = "경로 앞에서 식사할 수 있는 곳을 아직 찾지 못했어요."
 
+    /** "아이가 화장실 가고 싶대"에 대한 응답: "다음 화장실은 3.5km 앞 가휴게소예요. 들를까요?" */
+    open fun restroomRequested(stop: String, distanceM: Double): String =
+        "다음 화장실은 ${distance(distanceM)} 앞 $stop${copula(stop)}. 들를까요?"
+
+    /** 수유·반려견 요청에 대한 응답 */
+    open fun careStopSuggestion(stop: String, distanceM: Double): String =
+        "${distance(distanceM)} 앞 ${stop}에서 잠깐 쉬어 갈 수 있어요. 들를까요?"
+
+    open fun restroomRequestedNone(): String = "경로 앞에서 들를 수 있는 곳을 아직 찾지 못했어요."
+
+    /** 주유 요청에 대한 응답 */
+    open fun fuelSuggestion(stop: String, distanceM: Double): String =
+        "${distance(distanceM)} 앞 ${stop}에서 주유할 수 있어요. 들를까요?"
+
+    open fun fuelNone(): String = "경로 앞에서 주유할 수 있는 곳을 아직 찾지 못했어요."
+
     /**
      * 상태 확인. 졸림 자기보고가 카메라 없는 앱에서 가장 믿을 만한 신호다 (ai-science.md 1장).
      * byStyle: 운전 패턴 변화 때문에 묻는지, 아니면 운전 시간·시간대 때문에 묻는지
@@ -220,6 +236,7 @@ open class CoachTexts {
         if (hasDestination) "목적지까지 쉬지 않고 가도 돼요" else "앞의 후보까지는 쉬지 않고 가도 돼요"
     open fun planMeal(stop: String): String = "식사 시간에 맞춰 ${stop}에서 식사해요"
     open fun planFuel(stop: String): String = "${stop}에서 주유해요"
+    open fun planFuelShort(): String = "남은 주행가능거리 안에 경로 위 주유할 곳이 없어요. 가까운 주유소를 따로 찾아 주세요"
     open fun planNoDestination(): String = "목적지가 없어 앞의 후보까지만 계획했어요"
     open fun planPartial(km: Int): String = "앞 ${km}km 안의 휴게소까지만 계획했어요"
     open fun planSleepyTime(): String = "도착 전에 졸음이 오기 쉬운 시간에 들어가요. 쉬는 곳에서 커피와 짧은 낮잠을 계획해 보세요"

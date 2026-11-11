@@ -80,7 +80,10 @@ internal fun restroomLevel(minutes: Int, c: CoachConfig): Level = when {
  *
  * - 게이지(화면) = 탑승자 중 '필요 확률 0.5까지 남은 분'이 가장 짧은 사람의 값 (SPEC 4.1). 연료계처럼 1분에 1분씩 준다.
  *   필요가 시작돼도 말없이 참는 경우가 많아(배뇨의 65%는 요의 없이, AI §3-A) '아직 말이 없다'를 증거로 쓰지 않는다.
- * - 판단(마지막 기회·피트스톱) = 탑승자끼리 독립으로 보고 '누군가 필요해질 확률' 1 − Π S_i(t_i + Δ)가 0.3에 닿는 Δ (AI §8-1, §8-2).
+ * - 판단(마지막 기회·피트스톱) = 같은 곡선의 더 이른 지점: 탑승자마다 '필요 확률 0.3까지 남은 분' 중 가장 짧은 값.
+ *   게이지와 같은 사람·같은 곡선이라 게이지와 마감의 차이는 그 사람의 Q(0.5) − Q(0.3)(어른 약 38분, 7살 아이 약 26분)로
+ *   탑승 인원과 상관없이 일정하다. 예전에는 '누군가 필요해질 확률' 1 − Π S_i로 계산해 사람이 많을수록 마감이 게이지보다
+ *   훨씬 일러졌다 (어른 2명: 게이지 66분 OK일 때 마감, 8명: 102분일 때. 감사 O6).
  * - 정차 간 상한: 어르신·임신부 걷기 2시간, 영아 카시트 2시간은 확률과 상관없이 문턱의 상한으로 건다 (AI §9-1).
  * - 음성으로 필요를 알린 사람은 바로 0(NOW).
  */
@@ -93,6 +96,12 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         /** 마지막 화장실 (엔진 시각) */
         var lastRestroom: Long = lastRestroom
             internal set
+
+        /** 지금 반영한 프로필의 마지막 화장실 값 (벽시계, 없으면 null). 바뀌었는지 보려고 둔다 */
+        internal var profileValue: Long? = null
+
+        /** 엔진이 마지막으로 기록한 화장실 정차 (엔진 시각). 없으면 NONE */
+        internal var stopAt: Long = NONE
 
         /** 음성으로 필요를 알린 시각. 없으면 NONE */
         var voicedAt: Long = NONE
@@ -155,19 +164,29 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         else -> Double.POSITIVE_INFINITY
     }
 
-    /** 프로필을 반영한다. 같은 id는 시계를 이어 가고, 새 탑승자는 프로필의 마지막 화장실(없으면 출발)부터 잰다 */
+    /**
+     * 프로필을 반영한다. 새 탑승자는 프로필의 마지막 화장실(없으면 출발)부터 잰다.
+     * 같은 id는 시계를 이어 가되, 프로필의 마지막 화장실 값이 바뀌었으면 사용자가 고친 것으로 보고 그 값을 따른다
+     * (출발 뒤 "출발 전에 화장실 다녀오셨어요?"에 '아니'라고 답해 더 이른 시각이 오는 경우, README 1장).
+     * 단 그 뒤 엔진이 화장실 정차를 기록했으면 정차가 이긴다. 같은 값을 다시 넣으면 아무것도 바꾸지 않는다.
+     * 예전에는 앞으로만 옮겨서 더 이른 정정을 무시했다(감사 F1).
+     */
     fun sync(profile: TripProfile, clock: EngineClock, memory: PersonalMemory) {
         val old = ArrayList(list)
         list.clear()
         for (o in profile.occupants) {
-            val profileLast = profile.lastRestroomAt[o.id]?.let(clock::monoAt)
+            val raw = profile.lastRestroomAt[o.id]
+            val profileLast = clock.monoAt(raw ?: profile.tripStart)
             val prev = old.firstOrNull { it.id == o.id }
             val t = if (prev != null) {
                 prev.occupant = o
-                if (profileLast != null && profileLast > prev.lastRestroom) prev.lastRestroom = profileLast
+                if (raw != prev.profileValue) {
+                    prev.profileValue = raw
+                    prev.lastRestroom = if (prev.stopAt != NONE) maxOf(prev.stopAt, profileLast) else profileLast
+                }
                 prev
             } else {
-                Tracked(o, profileLast ?: clock.monoAt(profile.tripStart))
+                Tracked(o, profileLast).also { it.profileValue = raw }
             }
             list += t
         }
@@ -207,37 +226,20 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
     }
 
     /**
-     * 판단용 마감 (분): 누군가 필요해질 확률 1 − Π S_i(e_i + Δ)가 p에 닿는 Δ. 상한·음성 요청도 반영한다.
+     * 판단용 마감 (분): 탑승자마다 필요 확률이 p에 닿을 때까지 남은 시간(정차 간 상한 포함) 중 가장 짧은 것. 음성 요청이 있으면 0.
+     * 화면 게이지(같은 사람의 p = 0.5)보다 이르고, 차이는 그 사람의 곡선만으로 정해진다 (클래스 설명).
      * fromReset이면 모두 방금 화장실에 다녀온 상태(e_i = 0)로 계산한다 (피트스톱의 정차 뒤 구간). 탑승자가 없으면 null.
      */
-    fun groupDeadlineMin(mono: Long, p: Double, fromReset: Boolean = false): Double? {
+    fun deadlineMin(mono: Long, p: Double, fromReset: Boolean = false): Double? {
         if (list.isEmpty()) return null
-        var hi = Double.POSITIVE_INFINITY
+        var best = Double.POSITIVE_INFINITY
         for (t in list) {
-            val e = if (fromReset) 0.0 else elapsedMin(t, mono)
             if (!fromReset && t.voiced) return 0.0
-            val single = minOf(t.posterior.quantile(p), t.capMin) - e
-            if (single < hi) hi = single
-        }
-        if (hi <= 0.0) return 0.0
-        // 단조 증가하는 P(Δ)에서 이분법. 무리 전체 확률은 각자 확률 이상이므로 답은 [0, 개인 최솟값]에 있다
-        var lo = 0.0
-        var up = hi
-        if (groupNeedProb(mono, up, fromReset) <= p) return up
-        repeat(40) {
-            val mid = (lo + up) / 2
-            if (groupNeedProb(mono, mid, fromReset) < p) lo = mid else up = mid
-        }
-        return lo
-    }
-
-    private fun groupNeedProb(mono: Long, deltaMin: Double, fromReset: Boolean): Double {
-        var surv = 1.0
-        for (t in list) {
             val e = if (fromReset) 0.0 else elapsedMin(t, mono)
-            surv *= t.posterior.survival(e + deltaMin)
+            val single = minOf(t.posterior.quantile(p), t.capMin) - e
+            if (single < best) best = single
         }
-        return 1.0 - surv
+        return maxOf(0.0, best)
     }
 
     /** 음성 요청 유지 시간이 지나면 푼다 (정차 판정을 놓쳤을 때 NOW에 갇히지 않게) */
@@ -267,6 +269,7 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
                 }
             }
             if (at > t.lastRestroom) t.lastRestroom = at
+            if (at > t.stopAt) t.stopAt = at
             t.voicedAt = NONE
         }
         val mem = memory.copy(restroomIntervalsMin = exact, restroomSuggestedMin = sugg, restroomCensoredMin = censored)
@@ -276,7 +279,9 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
 
     /**
      * 음성 요청("아이가 화장실 가고 싶대", "화장실 급해"). 그 사람을 NOW로 올리고 경과 시간을 사건으로 남긴다.
-     * 누구인지 모르면 목적에 맞는 탑승자 중 가장 급한 사람으로 본다 (RESTROOM: 영아·반려견 제외, FEEDING: 영아, PET: 반려견).
+     * 누구인지 모르면 목적에 맞는 탑승자 중 가장 급한 사람으로 본다 (RESTROOM: 말할 수 있는 사람, FEEDING: 영아, PET: 반려견).
+     * 맞는 사람이 없으면 아무에게도 남기지 않는다: 반려견만 설정했는데 운전자가 "화장실 급해"라고 하면 그건 목록에 없는
+     * 운전자의 필요다. 예전에는 반려견의 기록으로 남아 반려견 게이지를 계속 줄였다(감사 O3).
      */
     fun onVoiced(occupantId: String?, purpose: Purpose, mono: Long, memory: PersonalMemory): PersonalMemory {
         val t = resolve(occupantId, purpose, mono) ?: return memory
@@ -297,10 +302,8 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         return when (purpose) {
             Purpose.FEEDING -> mostConstrained(mono) { it.occupant.type == OccupantType.INFANT }
             Purpose.PET -> mostConstrained(mono) { it.occupant.type == OccupantType.DOG }
-            // "화장실 급해"는 말할 수 있는 사람의 요청: 영아·반려견은 다른 사람이 없을 때만
+            // "화장실 급해"는 말할 수 있는 사람의 요청 (영아·반려견이 아니다)
             else -> mostConstrained(mono) { it.occupant.type != OccupantType.DOG && it.occupant.type != OccupantType.INFANT }
-                ?: mostConstrained(mono) { it.occupant.type != OccupantType.DOG }
-                ?: mostConstrained(mono)
         }
     }
 

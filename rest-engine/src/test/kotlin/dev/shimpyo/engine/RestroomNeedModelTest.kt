@@ -148,29 +148,32 @@ class RestroomNeedModelTest {
     fun groupDeadlineUsesDecisionProbability() {
         val (one, _) = model(listOf(adult()))
         val q03 = one.tracked.single().posterior.quantile(0.3)
-        approx(q03, one.groupDeadlineMin(t0, 0.3)!!, 1e-6, "한 사람이면 Q(0.3) − 경과")
-        approx(q03 - 20, one.groupDeadlineMin(t0 + 20 * MIN, 0.3)!!, 1e-6)
+        approx(q03, one.deadlineMin(t0, 0.3)!!, 1e-6, "한 사람이면 Q(0.3) − 경과")
+        approx(q03 - 20, one.deadlineMin(t0 + 20 * MIN, 0.3)!!, 1e-6)
         assertTrue(q03 < 150.0, "판단(0.3)은 화면 게이지(0.5)보다 이르다")
 
+        // 여럿이면 가장 급한 사람의 0.3 지점 (게이지를 정하는 사람과 같은 곡선). 예전 '누군가 필요해질 확률'은 인원이 늘수록
+        // 게이지와 멀어졌다: 어른 2명이면 게이지 66분 OK일 때 마감이 지났다 (감사 O6, AuditOccupantsTest)
         val (two, _) = model(listOf(child("a", 5), child("b", 5)))
         val single = two.tracked.first().posterior.quantile(0.3)
-        val group = two.groupDeadlineMin(t0, 0.3)!!
-        assertTrue(group < single - 1, "둘 중 누군가 필요해질 확률이 더 빨리 0.3에 닿는다: $group < $single")
-        val s = two.tracked.first().posterior.survival(group)
-        approx(0.7, s * s, 1e-6)
+        approx(single, two.deadlineMin(t0, 0.3)!!, 1e-6, "같은 두 아이면 한 아이의 Q(0.3)")
+        val (mixed, _) = model(listOf(adult(), child("kid", 5)), last = mapOf("me" to t0 - 100 * MIN))
+        val kid = mixed.tracked.single { it.id == "kid" }.posterior.quantile(0.3)
+        val me = mixed.tracked.single { it.id == "me" }.posterior.quantile(0.3) - 100
+        approx(minOf(kid, me), mixed.deadlineMin(t0, 0.3)!!, 1e-6, "각자 남은 시간 중 짧은 쪽")
 
         val (capped, _) = model(listOf(infant()))
-        approx(120.0, capped.groupDeadlineMin(t0, 0.3)!!, 1e-6, "카시트 상한이 확률보다 먼저")
-        assertEquals(0.0, model(listOf(adult())).first.groupDeadlineMin(t0 + 20 * 60 * MIN, 0.3))
-        assertNull(model(emptyList()).first.groupDeadlineMin(t0, 0.3))
+        approx(120.0, capped.deadlineMin(t0, 0.3)!!, 1e-6, "카시트 상한이 확률보다 먼저")
+        assertEquals(0.0, model(listOf(adult())).first.deadlineMin(t0 + 20 * 60 * MIN, 0.3))
+        assertNull(model(emptyList()).first.deadlineMin(t0, 0.3))
     }
 
     @Test
     fun groupDeadlineFromResetIgnoresElapsedAndVoice() {
         val (m, _) = model(listOf(adult(), child("kid", 8)))
         m.onVoiced("kid", Purpose.RESTROOM, t0 + 50 * MIN, PersonalMemory())
-        assertEquals(0.0, m.groupDeadlineMin(t0 + 50 * MIN, 0.3))
-        val reset = m.groupDeadlineMin(t0 + 50 * MIN, 0.3, fromReset = true)!!
+        assertEquals(0.0, m.deadlineMin(t0 + 50 * MIN, 0.3))
+        val reset = m.deadlineMin(t0 + 50 * MIN, 0.3, fromReset = true)!!
         assertTrue(reset > 50.0, "방금 다녀온 상태로 계산: $reset")
     }
 

@@ -4,6 +4,7 @@ import dev.shimpyo.engine.EngineMath.NONE
 import java.time.Instant
 import java.time.ZonedDateTime
 import java.util.EnumSet
+import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.roundToInt
 import kotlin.random.Random
@@ -17,7 +18,8 @@ import kotlin.random.Random
  * 흐름 (update 한 번):
  * 1. 단조 시계를 진행하고 표본을 운전 패턴 분석기·조용한 때 추적기에 넣는다.
  * 2. [StopTracker]가 기어·문으로 정차를 판정 → 화장실 시계(P 3분 + 문)·휴식 리듬(P 15분)을 0으로, 관측 간격을 기억에 남긴다.
- * 3. 음성 의도 처리 (수락·거절, "화장실 급해", "아이가 화장실", "졸려", "쉬고 싶어", "배고파", "얼마나 남았어").
+ * 3. 음성 의도 처리 (수락·거절, "화장실 급해", "아이가 화장실", "졸려", "쉬고 싶어", "배고파", "주유", "얼마나 남았어").
+ *    사용자가 말한 것에는 바로 답한다(조용한 때·30초·쉼을 받지 않는다). 답이 둘이면 하나씩 차례로.
  * 4. 화장실 게이지([RestroomNeedModel]), 운전 패턴([DrivingStyleAnalyzer]), 피로 게이지([FatigueModel]).
  * 5. 경로 앞 화장실 기회와 도착 시간([RouteContext]) → 마지막 기회([GapAnalyzer]), 급해 순위([UrgentRanker]).
  * 6. 다음 추천과 질문 후보 → [PromptPolicy]가 지금 물을 하나를 고른다. 공조 제안은 따로 낸다.
@@ -27,6 +29,8 @@ import kotlin.random.Random
  * 피로 질문 사다리: SOON(또는 운전 패턴 변화 지속) → CHECK_IN "혹시 졸리세요?" → "응"이면 졸림으로 보고 강한 휴식 권유,
  * "아니"면 운전 패턴 편차를 20분 동안 피로에 넣지 않는다. NOW(2시간 리듬·졸림 곡선) → REST_SUGGESTION.
  * 후보([CoachInput.candidates])는 매 update마다 지금 위치 기준 거리로 넘긴다.
+ * 입력은 들어오는 곳에서 한 번 정리한다([InputSanitizer]: NaN·무한대 → 모름). 앱에 내보내는 추천·질문의 정차 후보에는
+ * 한 경로([withEta])로 엔진이 계산한 도착 시간을 채운다(내비 ETA가 있으면 그대로).
  * 새 여정: [setProfile]에 다른 tripStart를 넘기면 주행 상태(피로, 기준선, 정차, 질문)를 새로 시작한다.
  *
  * @param random 톰프슨 샘플링용 난수. 테스트에서는 시드를 고정한 Random을 넣는다.
@@ -54,26 +58,55 @@ class CoachEngine(
     private var needs = RestroomNeedModel(config)
     private var style = DrivingStyleAnalyzer(config)
     private var fatigue = FatigueModel(config, local)
-    private var policy = PromptPolicy(config, random)
+    // 질문 id는 엔진 인스턴스에 하나: 새 여정(새 PromptPolicy)에도 이어 쓴다
+    private val promptIds = PromptIds.forNewEngine()
+    private var policy = PromptPolicy(config, random, promptIds)
     private var quiet = QuietTracker(config)
 
     private class Accepted(val stopId: String, var stop: StopCandidate, val purposes: Set<Purpose>, val kind: PromptKind, val atMono: Long) {
         var missingSince: Long = NONE
     }
 
+    /**
+     * 사용자 말에 대한 응답 하나. 물을 때까지 남는다(버리지 않는다). 처음 내놓을 때만 '새 응답'이라 활성 질문을 끊고 바로 묻고,
+     * 앞서 밀렸으면 지금 질문이 끝난 뒤에 묻는다 (PromptPolicy.Candidate.fresh)
+     */
+    private class Pending {
+        var on = false
+            private set
+        var offered = false
+        var purpose: Purpose = Purpose.RESTROOM
+            private set
+
+        fun request(p: Purpose = Purpose.RESTROOM) {
+            on = true
+            offered = false
+            purpose = p
+        }
+
+        fun clear() {
+            on = false
+            offered = false
+        }
+    }
+
     private var accepted: Accepted? = null
     private var restWantedAt = NONE
-    private var restPromptPending = false
     private var mealWantedAt = NONE
-    private var mealPromptPending = false
+    private val restAnswer = Pending()
+    private val mealAnswer = Pending()
+    private val howLongAnswer = Pending()
+    private val needAnswer = Pending()
+    private val fuelAnswer = Pending()
     private var styleMuteUntil = NONE
-    private var lastSpeedKph: Float? = null
     private var cruiseOn = false
 
     private val restroomOpps = ArrayList<Opportunity>()
     private val restOpps = ArrayList<Opportunity>()
     private val mealOpps = ArrayList<Opportunity>()
-    private val promptCands = ArrayList<PromptPolicy.Candidate>(6)
+    private val fuelOpps = ArrayList<Opportunity>()
+    private val promptCands = ArrayList<PromptPolicy.Candidate>(8)
+    private val promptOwners = ArrayList<Pending?>(8)
     private var currentCandidates: List<StopCandidate> = emptyList()
     private val distanceOfId: (String) -> Double? = { id ->
         var d: Double? = null
@@ -86,7 +119,9 @@ class CoachEngine(
     }
 
     /** 새 신호를 반영하고 게이지·추천·질문을 돌려준다 */
+    @Suppress("NAME_SHADOWING")
     fun update(input: CoachInput): CoachOutput {
+        val input = InputSanitizer.clean(input)
         val firstUpdate = !clock.started
         val dtMs = clock.advance(input.now)
         if (firstUpdate) {
@@ -104,13 +139,21 @@ class CoachEngine(
             quiet.onSample(s)
             s.cruiseActive?.let { cruiseOn = it }
         }
-        val speed = input.speedKph ?: lastSampleSpeed(samples) ?: lastSpeedKph
-        if (speed != null) lastSpeedKph = speed
+        val speed = currentSpeed(input)
         fatigue.monotony = cruiseOn && speed != null && speed >= config.monotonyMinKph
+        // 달린다는 것이 확인됐는지: 기어 D·R·N, 또는 기어를 모르면 이번에 잰 차속이 3km/h를 넘을 때.
+        // 앱이 막 켜져 기어 신호가 오기 전(UNKNOWN, 차속 모름)에 묻던 것(2026-11-11 에뮬레이터)과, 기어를 모른 채 서 있던
+        // 한 시간을 운전으로 세던 것(감사 S1·S2)을 함께 막는다
+        val movementKnown = when (input.gear) {
+            Gear.DRIVE, Gear.REVERSE, Gear.NEUTRAL -> true
+            Gear.PARK -> false
+            Gear.UNKNOWN -> speed != null && speed > StopTracker.MOVING_KPH
+        }
 
         // 2. 정차
         val ev = stops.update(mono, input.gear, speed, input.doorOpened)
-        fatigue.advance(dtMs, !stops.parked, input.now, mono)
+        val moving = !stops.parked && movementKnown
+        fatigue.advance(dtMs, moving, input.now, mono)
         if (ev.restroomStopAt != NONE) {
             val acc = accepted
             val suggested = acc != null && (acc.kind == PromptKind.LAST_CHANCE || acc.kind == PromptKind.REST_SUGGESTION)
@@ -121,7 +164,7 @@ class CoachEngine(
             fatigue.onRest(mono)
             style.resetScore()
             restWantedAt = NONE
-            restPromptPending = false
+            restAnswer.clear()
             accepted = null
         }
         needs.tick(mono)
@@ -129,18 +172,21 @@ class CoachEngine(
 
         // 3. 음성 의도
         var urgentRequested = false
-        var howLong = false
         if (input.intent != null) policy.noteInteraction(mono)
         when (val intent = input.intent) {
             null -> {}
             is VoiceIntent.Accept -> applyResult(intent.promptId, true, mono)
             is VoiceIntent.Decline -> applyResult(intent.promptId, false, mono)
             is VoiceIntent.OccupantNeed -> when (intent.purpose) {
-                Purpose.RESTROOM, Purpose.FEEDING, Purpose.PET ->
+                // "아이가 화장실 가고 싶대": 그 사람을 NOW로 올리고, 바로 다음 들를 곳을 답한다.
+                // 예전에는 게이지만 올리고 엔진 질문이 30초 뒤에야 나왔다(그 사이 2km 안으로 들어온 휴게소는 건너뛰었다, 감사 V1)
+                Purpose.RESTROOM, Purpose.FEEDING, Purpose.PET -> {
                     memory = needs.onVoiced(intent.occupantId, intent.purpose, mono, memory)
+                    needAnswer.request(intent.purpose)
+                }
                 Purpose.REST -> requestRest(mono)
                 Purpose.MEAL -> requestMeal(mono)
-                Purpose.FUEL -> {}
+                Purpose.FUEL -> fuelAnswer.request(Purpose.FUEL) // 예전에는 아무 답도 없었다(감사 V2)
             }
             VoiceIntent.UrgentRestroom -> {
                 memory = needs.onVoiced(null, Purpose.RESTROOM, mono, memory)
@@ -152,7 +198,7 @@ class CoachEngine(
                 requestRest(mono)
             }
             VoiceIntent.Hungry -> requestMeal(mono)
-            VoiceIntent.HowLong -> howLong = true
+            VoiceIntent.HowLong -> howLongAnswer.request()
         }
         if (restWantedAt != NONE && mono - restWantedAt > WANT_HOLD_MS) restWantedAt = NONE
         if (mealWantedAt != NONE && mono - mealWantedAt > WANT_HOLD_MS) mealWantedAt = NONE
@@ -167,7 +213,7 @@ class CoachEngine(
         // 5. 경로 앞 기회
         route.prepare(input.route, speed)
         route.opportunities(input.candidates, restroomOpps, RouteContext::isRestroomOpportunity)
-        val deadline = needs.groupDeadlineMin(mono, config.restroomDecisionProbability)
+        val deadline = needs.deadlineMin(mono, config.restroomDecisionProbability)
         val lastChance = gap.analyze(restroomOpps, route, deadline, needs.sensitive, needs.preferredMaxGapMin())
         trackAccepted(mono)
 
@@ -180,8 +226,8 @@ class CoachEngine(
 
         val deviation = styleOut.deviation ?: 0.0
         val wantsRest = restWantedAt != NONE || fatigueGauge.level >= Level.SOON
-        val restTarget = if (wantsRest || restPromptPending) pickRestTarget(input.candidates, fatigueGauge) else null
-        val mealTarget = if (mealWantedAt != NONE || mealPromptPending) pickMealTarget(input.candidates) else null
+        val restTarget = if (wantsRest || restAnswer.on) pickRestTarget(input.candidates, fatigueGauge) else null
+        val mealTarget = if (mealWantedAt != NONE || mealAnswer.on) pickMealTarget(input.candidates) else null
         val nowRestroom = if (restroom.level == Level.NOW && lastChance == null && accepted == null && urgentList == null) {
             restroomOpps.firstOrNull { it.distanceM >= config.askWindowNearM }
         } else null
@@ -192,69 +238,119 @@ class CoachEngine(
 
         // 7. 질문 (사용자 응답 먼저, 그다음 엔진이 먼저 거는 질문을 우선순위 순으로)
         promptCands.clear()
+        promptOwners.clear()
         if (urgentRequested) {
             val top = urgentList?.firstOrNull()
-            promptCands += if (top != null) {
-                PromptPolicy.Candidate(
-                    PromptKind.URGENT_RESULT, texts.urgentResult(top.stop.name, (top.totalTimeS / 60.0).roundToInt()),
-                    top.stop, null, restroom.level, userInitiated = true, purposes = purposesFor(top.stop, Purpose.RESTROOM, ctx),
+            addCand(
+                if (top != null) {
+                    ask(
+                        PromptKind.URGENT_RESULT, texts.urgentResult(top.stop.name, (top.totalTimeS / 60.0).roundToInt()),
+                        top.stop, null, restroom.level, user = true, purposes = purposesFor(top.stop, Purpose.RESTROOM, ctx),
+                    )
+                } else {
+                    ask(PromptKind.INFO, texts.urgentNone(), user = true)
+                },
+                null,
+            )
+        }
+        if (needAnswer.on) {
+            if (moving) {
+                // 아직 안전하게 들를 수 있는 가장 가까운 화장실 기회. 그곳이 마지막 기회이기도 하면 그 이유(정체·공백)로 답한다
+                val t = restroomOpps.firstOrNull { it.distanceM >= config.askWindowNearM }
+                val p = needAnswer.purpose
+                addCand(
+                    if (t != null) {
+                        val lc = lastChance?.takeIf { it.opp.stop.id == t.stop.id }
+                        val speech = when {
+                            lc != null -> lastChanceSpeech(lc)
+                            p == Purpose.RESTROOM -> texts.restroomRequested(t.stop.name, t.distanceM)
+                            else -> texts.careStopSuggestion(t.stop.name, t.distanceM)
+                        }
+                        ask(
+                            PromptKind.LAST_CHANCE, speech, t.stop, t.distanceM, restroom.level, user = true,
+                            fresh = !needAnswer.offered, purposes = purposesFor(t.stop, p, ctx),
+                        )
+                    } else {
+                        ask(PromptKind.INFO, texts.restroomRequestedNone(), user = true, fresh = !needAnswer.offered)
+                    },
+                    needAnswer,
                 )
             } else {
-                PromptPolicy.Candidate(PromptKind.INFO, texts.urgentNone(), userInitiated = true)
+                needAnswer.clear() // 이미 서 있다(또는 아직 움직이는지 모른다): 앞쪽 정차를 물을 때가 아니다
             }
         }
-        if (restPromptPending) {
-            restPromptPending = false
+        if (restAnswer.on) {
             val t = restTarget
             val speech = if (fatigue.sleepyVoiced) texts.restSuggestionSleepy(t?.stop?.name, t?.distanceM, canSwapDriver())
             else texts.restSuggestionWanted(t?.stop?.name, t?.distanceM)
-            promptCands += PromptPolicy.Candidate(
-                PromptKind.REST_SUGGESTION, speech, t?.stop, t?.distanceM, fatigueGauge.level, userInitiated = true,
-                purposes = t?.let { purposesFor(it.stop, Purpose.REST, ctx) } ?: setOf(Purpose.REST),
+            addCand(
+                ask(
+                    PromptKind.REST_SUGGESTION, speech, t?.stop, t?.distanceM, fatigueGauge.level, user = true, fresh = !restAnswer.offered,
+                    purposes = t?.let { purposesFor(it.stop, Purpose.REST, ctx) } ?: setOf(Purpose.REST),
+                ),
+                restAnswer,
             )
         }
-        if (mealPromptPending) {
-            mealPromptPending = false
+        if (mealAnswer.on) {
             val t = mealTarget
-            promptCands += if (t != null) {
-                PromptPolicy.Candidate(
-                    PromptKind.REST_SUGGESTION, texts.mealSuggestion(t.stop.name, t.distanceM), t.stop, t.distanceM,
-                    fatigueGauge.level, userInitiated = true, purposes = purposesFor(t.stop, Purpose.MEAL, ctx),
-                )
-            } else {
-                PromptPolicy.Candidate(PromptKind.INFO, texts.mealNone(), userInitiated = true)
-            }
+            addCand(
+                if (t != null) {
+                    ask(
+                        PromptKind.REST_SUGGESTION, texts.mealSuggestion(t.stop.name, t.distanceM), t.stop, t.distanceM,
+                        fatigueGauge.level, user = true, fresh = !mealAnswer.offered, purposes = purposesFor(t.stop, Purpose.MEAL, ctx),
+                    )
+                } else {
+                    ask(PromptKind.INFO, texts.mealNone(), user = true, fresh = !mealAnswer.offered)
+                },
+                mealAnswer,
+            )
         }
-        if (howLong) {
+        if (fuelAnswer.on) {
+            val t = pickFuelTarget(input.candidates)
+            addCand(
+                if (t != null) {
+                    ask(
+                        PromptKind.REST_SUGGESTION, texts.fuelSuggestion(t.stop.name, t.distanceM), t.stop, t.distanceM,
+                        fatigueGauge.level, user = true, fresh = !fuelAnswer.offered, purposes = purposesFor(t.stop, Purpose.FUEL, ctx),
+                    )
+                } else {
+                    ask(PromptKind.INFO, texts.fuelNone(), user = true, fresh = !fuelAnswer.offered)
+                },
+                fuelAnswer,
+            )
+        }
+        if (howLongAnswer.on) {
             val who = restroom.drivenBy?.let { id -> needs.tracked.firstOrNull { it.id == id } }
                 ?.takeIf { needs.tracked.size > 1 }?.let { texts.occupantName(it.occupant) }
             val nextOpp = restroomOpps.firstOrNull()
-            promptCands += PromptPolicy.Candidate(
-                PromptKind.INFO,
-                texts.howLong(restroom.minutes, who, fatigueGauge.minutes, nextOpp?.stop?.name, nextOpp?.distanceM),
-                userInitiated = true,
+            addCand(
+                ask(
+                    PromptKind.INFO,
+                    texts.howLong(restroom.minutes, who, fatigueGauge.minutes, nextOpp?.stop?.name, nextOpp?.distanceM),
+                    user = true, fresh = !howLongAnswer.offered,
+                ),
+                howLongAnswer,
             )
         }
         // 기어 P로 서 있는 동안에는 앞쪽 정차를 묻지 않는다 (이미 서 있다. 휴식은 15분, 화장실 시계는 3분 뒤에야 되돌아간다).
-        // 달린다는 것이 확인돼야 묻는다: 앱이 막 켜져 기어 신호가 오기 전(UNKNOWN, 차속 모름)에 묻던 것을 막는다
-        // (2026-11-11 에뮬레이터: P로 서 있는데 시작 첫 초에 '혹시 졸리세요?'가 나왔다)
-        val movementKnown = when (input.gear) {
-            Gear.DRIVE, Gear.REVERSE, Gear.NEUTRAL -> true
-            Gear.PARK -> false
-            Gear.UNKNOWN -> speed != null && speed > StopTracker.MOVING_KPH
-        }
-        val moving = !stops.parked && movementKnown
+        // 달린다는 것이 확인돼야 묻는다 (movementKnown)
         if (accepted == null && moving) {
             if (lastChance != null) {
-                promptCands += PromptPolicy.Candidate(
-                    PromptKind.LAST_CHANCE, lastChanceSpeech(lastChance), lastChance.opp.withEta(), lastChance.opp.distanceM,
-                    restroom.level, purposes = purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx),
+                addCand(
+                    ask(
+                        PromptKind.LAST_CHANCE, lastChanceSpeech(lastChance), lastChance.opp.stop, lastChance.opp.distanceM,
+                        restroom.level, purposes = purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx),
+                    ),
+                    null,
                 )
             } else if (nowRestroom != null) {
-                promptCands += PromptPolicy.Candidate(
-                    PromptKind.LAST_CHANCE, texts.restroomNowSuggestion(nowRestroom.stop.name, nowRestroom.distanceM),
-                    nowRestroom.withEta(), nowRestroom.distanceM, Level.NOW,
-                    purposes = purposesFor(nowRestroom.stop, Purpose.RESTROOM, ctx),
+                addCand(
+                    ask(
+                        PromptKind.LAST_CHANCE, texts.restroomNowSuggestion(nowRestroom.stop.name, nowRestroom.distanceM),
+                        nowRestroom.stop, nowRestroom.distanceM, Level.NOW,
+                        purposes = purposesFor(nowRestroom.stop, Purpose.RESTROOM, ctx),
+                    ),
+                    null,
                 )
             }
             if (fatigueGauge.level == Level.NOW) {
@@ -266,9 +362,12 @@ class CoachEngine(
                     t != null -> texts.restSuggestion(drove, t.stop.name, t.distanceM)
                     else -> texts.restSuggestionNoStop(drove)
                 }
-                promptCands += PromptPolicy.Candidate(
-                    PromptKind.REST_SUGGESTION, speech, t?.withEta(), t?.distanceM, fatigueGauge.level,
-                    purposes = t?.let { purposesFor(it.stop, Purpose.REST, ctx) } ?: setOf(Purpose.REST),
+                addCand(
+                    ask(
+                        PromptKind.REST_SUGGESTION, speech, t?.stop, t?.distanceM, fatigueGauge.level,
+                        purposes = t?.let { purposesFor(it.stop, Purpose.REST, ctx) } ?: setOf(Purpose.REST),
+                    ),
+                    null,
                 )
             }
         }
@@ -279,15 +378,21 @@ class CoachEngine(
                 fat.sleepyCurveMin <= fat.rhythmMin -> texts.checkInBodyClock()
                 else -> texts.checkIn(floor(fatigue.drivingMin).toInt(), byStyle = false)
             }
-            promptCands += PromptPolicy.Candidate(PromptKind.CHECK_IN, speech, level = fatigueGauge.level)
+            addCand(ask(PromptKind.CHECK_IN, speech, level = fatigueGauge.level), null)
         }
         val freshAir = fat.recircMin >= config.recirculationFreshAirMin &&
             (needs.humanCount >= config.freshAirMinOccupants || fatigueGauge.level >= Level.SOON)
         if (freshAir && !input.cabinAutoAllowed) {
             // 환기는 편의 기능: 피로 단계를 싣지 않는다 (피로가 올라도 60분 쉼·시간당 상한을 그대로 받는다)
-            promptCands += PromptPolicy.Candidate(PromptKind.FRESH_AIR, texts.freshAir(fat.recircMin), level = Level.OK)
+            addCand(ask(PromptKind.FRESH_AIR, texts.freshAir(fat.recircMin), level = Level.OK), null)
         }
         val prompt = policy.decide(promptCands, input.now, mono, isQuiet(input, speed), distanceOfId, memory)
+        // 물은 사용자 응답은 내리고, 못 물은 응답은 다음에 '밀린 응답'으로 남긴다
+        val issued = policy.lastIssued
+        for (i in promptCands.indices) {
+            val owner = promptOwners[i] ?: continue
+            if (promptCands[i] === issued) owner.clear() else owner.offered = true
+        }
 
         // 8. 공조 (피로와 별개인 편의 기능. 앱은 사용자가 허용했을 때만 실행하고, 외기는 1~2분 뒤 되돌린다)
         val coolDown = !freshAir && fatigueGauge.level >= Level.SOON && input.cabin.hvacOn == true &&
@@ -317,19 +422,23 @@ class CoachEngine(
     }
 
     /** 급해 모드: 후보를 총 소요 시간 순으로 정렬해 돌려준다 (상태를 바꾸지 않는다) */
+    @Suppress("NAME_SHADOWING")
     fun urgent(input: CoachInput): List<RankedStop> {
+        val input = InputSanitizer.clean(input)
         ensureStarted(input.now)
-        val speed = input.speedKph ?: lastSampleSpeed(input.samples) ?: lastSpeedKph
+        val speed = currentSpeed(input)
         return ranker.rank(
             input.candidates, input.now, local, needs.has(OccupantType.INFANT), speed, config.urgentMaxResults,
         )
     }
 
     /** 피트스톱 계획: 경로 앞 후보로 정차 계획을 만든다 (상태를 바꾸지 않는다) */
+    @Suppress("NAME_SHADOWING")
     fun plan(input: CoachInput): PitStopPlan {
+        val input = InputSanitizer.clean(input)
         ensureStarted(input.now)
         val mono = clock.peek(input.now)
-        val speed = input.speedKph ?: lastSampleSpeed(input.samples) ?: lastSpeedKph
+        val speed = currentSpeed(input)
         val ctx = RouteContext(config)
         ctx.prepare(input.route, speed)
         val opps = ArrayList<Opportunity>()
@@ -340,7 +449,7 @@ class CoachEngine(
             input.now, mono, style.deviation, style.persistent,
             styleMuteUntil != NONE && mono < styleMuteUntil, profile.driverSleepHours, texts,
         )
-        val restroomFirstS = needs.groupDeadlineMin(mono, p)?.let { it * 60.0 } ?: Double.POSITIVE_INFINITY
+        val restroomFirstS = needs.deadlineMin(mono, p)?.let { it * 60.0 } ?: Double.POSITIVE_INFINITY
         val fatigueFirstS = (fe.gauge.minutes ?: 0) * 60.0
         val sleep = profile.driverSleepHours
         val awakeNow = fatigue.awakeHours(mono)
@@ -359,7 +468,7 @@ class CoachEngine(
         }
         val n = PitStopPlanner.Needs(
             firstLegMaxS = minOf(restroomFirstS, fatigueFirstS),
-            restroomFullS = (needs.groupDeadlineMin(mono, p, fromReset = true) ?: Double.POSITIVE_INFINITY) * 60.0,
+            restroomFullS = (needs.deadlineMin(mono, p, fromReset = true) ?: Double.POSITIVE_INFINITY) * 60.0,
             fatigueFullS = { wall ->
                 val awake = if (fatigue.wakeMono == NONE) 0.0 else awakeNow + (wall - input.now) / 3_600_000.0
                 fatigue.fullRhythmWallMin(wall, awake, sleep) * 60.0
@@ -391,13 +500,16 @@ class CoachEngine(
             needs = RestroomNeedModel(config)
             style = DrivingStyleAnalyzer(config)
             fatigue = FatigueModel(config, local)
-            policy = PromptPolicy(config, random)
+            policy = PromptPolicy(config, random, promptIds)
             quiet = QuietTracker(config)
             accepted = null
             restWantedAt = NONE
-            restPromptPending = false
             mealWantedAt = NONE
-            mealPromptPending = false
+            restAnswer.clear()
+            mealAnswer.clear()
+            howLongAnswer.clear()
+            needAnswer.clear()
+            fuelAnswer.clear()
             styleMuteUntil = NONE
         }
         if (clock.started) {
@@ -428,7 +540,10 @@ class CoachEngine(
 
     private fun syncProfile() {
         needs.sync(profile, clock, memory)
-        fatigue.wakeMono = clock.monoAt(profile.driverWakeAt ?: defaultWakeAt(profile.tripStart))
+        // 기상 시각이 지금보다 뒤면 있을 수 없는 값이다(새벽 3시 출발에 오늘 날짜로 만든 '7시'). 그대로 두면 '방금 일어남'이 되어
+        // 새벽 졸림 곡선이 꺼지므로 기본값을 쓴다 (감사 T4)
+        val wake = profile.driverWakeAt?.takeIf { it <= clock.wall } ?: defaultWakeAt(profile.tripStart)
+        fatigue.wakeMono = clock.monoAt(wake)
     }
 
     /** 기상 시각을 모르면: 그날 07:00. 04~07시 출발은 출발 1시간 전, 00~04시 출발은 전날 07:00 */
@@ -474,12 +589,12 @@ class CoachEngine(
 
     private fun requestRest(mono: Long) {
         restWantedAt = mono
-        restPromptPending = true
+        restAnswer.request(Purpose.REST)
     }
 
     private fun requestMeal(mono: Long) {
         mealWantedAt = mono
-        mealPromptPending = true
+        mealAnswer.request(Purpose.MEAL)
     }
 
     /**
@@ -504,8 +619,34 @@ class CoachEngine(
         if (mono - a.atMono > ACCEPT_HOLD_MS) accepted = null
     }
 
-    /** 후보에 내비 ETA가 없으면 엔진이 정체를 반영해 계산한 도착 시간을 채운다 (화면의 '몇 분 뒤'가 정체를 반영하게) */
-    private fun Opportunity.withEta(): StopCandidate = if (stop.etaS != null) stop else stop.copy(etaS = arriveS)
+    /**
+     * 앱에 내보내는 정차 후보(추천·질문)에 도착 시간을 채우는 한 경로. 내비 ETA가 있으면 그대로, 없으면 엔진이 정체를 반영해
+     * 계산한 이번 도착 시간(RouteContext.arrivalOf). 추천·질문은 모두 [rec]·[ask]로 만들어 이 경로를 빠뜨리지 않는다.
+     * 예전에는 몇 곳만 채워서 수락한 곳·"쉬고 싶어" 답·NOW 추천 카드에는 도착 시간이 없었다(감사 R22).
+     */
+    private fun withEta(stop: StopCandidate): StopCandidate {
+        if (stop.etaS != null) return stop
+        val a = route.arrivalOf(stop)
+        return if (a.isFinite()) stop.copy(etaS = a) else stop
+    }
+
+    private fun rec(stop: StopCandidate, purposes: Set<Purpose>, reasons: List<Reason>) = Recommendation(withEta(stop), purposes, reasons)
+
+    private fun ask(
+        kind: PromptKind,
+        speech: String,
+        stop: StopCandidate? = null,
+        distanceM: Double? = null,
+        level: Level = Level.OK,
+        user: Boolean = false,
+        fresh: Boolean = true,
+        purposes: Set<Purpose> = emptySet(),
+    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh)
+
+    private fun addCand(c: PromptPolicy.Candidate, owner: Pending?) {
+        promptCands += c
+        promptOwners += owner
+    }
 
     private fun recommend(
         ctx: PurposeContext,
@@ -519,37 +660,29 @@ class CoachEngine(
         speed: Float?,
     ): Recommendation? {
         accepted?.let { a ->
-            return Recommendation(a.stop, a.purposes, listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())))
+            return rec(a.stop, a.purposes, listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())))
         }
         urgentList?.firstOrNull()?.let { r ->
-            return Recommendation(r.stop, purposesFor(r.stop, Purpose.RESTROOM, ctx), r.why)
+            return rec(r.stop, purposesFor(r.stop, Purpose.RESTROOM, ctx), r.why)
         }
         if (ctx.restroom == Level.NOW) {
             val best = ranker.rank(candidates, ctx.wallNow, local, needs.has(OccupantType.INFANT), speed, 1).firstOrNull()
-            val stop = best?.stop ?: nowRestroom?.withEta()
+            val stop = best?.stop ?: nowRestroom?.stop
             if (stop != null) {
-                return Recommendation(
+                return rec(
                     stop, purposesFor(stop, Purpose.RESTROOM, ctx),
                     listOf(Reason("NEXT_NEAREST_RESTROOM", texts.reasonNextNearestRestroom())),
                 )
             }
         }
         if (lastChance != null) {
-            return Recommendation(
-                lastChance.opp.withEta(), purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx), listOf(lastChanceReason(lastChance)),
-            )
+            return rec(lastChance.opp.stop, purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx), listOf(lastChanceReason(lastChance)))
         }
         if (wantsRest && restTarget != null) {
-            return Recommendation(
-                restTarget.withEta(), purposesFor(restTarget.stop, Purpose.REST, ctx),
-                listOf(Reason("NEXT_REST", texts.reasonNextRest())),
-            )
+            return rec(restTarget.stop, purposesFor(restTarget.stop, Purpose.REST, ctx), listOf(Reason("NEXT_REST", texts.reasonNextRest())))
         }
         if (mealWantedAt != NONE && mealTarget != null) {
-            return Recommendation(
-                mealTarget.withEta(), purposesFor(mealTarget.stop, Purpose.MEAL, ctx),
-                listOf(Reason("NEXT_MEAL", texts.reasonNextMeal())),
-            )
+            return rec(mealTarget.stop, purposesFor(mealTarget.stop, Purpose.MEAL, ctx), listOf(Reason("NEXT_MEAL", texts.reasonNextMeal())))
         }
         return null
     }
@@ -595,6 +728,11 @@ class CoachEngine(
         return mealOpps.firstOrNull { it.distanceM >= config.askWindowNearM }
     }
 
+    private fun pickFuelTarget(candidates: List<StopCandidate>): Opportunity? {
+        route.opportunities(candidates, fuelOpps, RouteContext::isFuelOpportunity)
+        return fuelOpps.firstOrNull { it.distanceM >= config.askWindowNearM }
+    }
+
     private fun lastChanceSpeech(lc: GapAnalyzer.LastChance): String = when (lc.trigger) {
         GapAnalyzer.Trigger.CONGESTION -> texts.lastChanceCongestion(lc.opp.stop.name, (lc.congestionS / 60.0).roundToInt())
         else -> texts.lastChanceGap(lc.opp.stop.name, (lc.gapS / 60.0).roundToInt())
@@ -625,8 +763,19 @@ class CoachEngine(
         return config.mealWindows.any { m in it }
     }
 
-    private fun lastSampleSpeed(samples: List<DrivingSample>): Float? {
-        for (i in samples.indices.reversed()) samples[i].speedKph?.let { return it }
+    /**
+     * 이번 update의 차속: 입력 차속, 없으면 이번에 쌓인 표본 중 잰 지 [SPEED_MAX_AGE_MS] 안의 마지막 값. 앞 update의 값은 들고 있지 않는다.
+     * 앱은 매 update(약 1초)마다 차속을 넣으므로 비어 있으면 신호가 끊긴 것이다. 예전에는 마지막 차속을 끝없이 들고 있어
+     * 기어·차속이 끊긴 뒤에도 '시속 100km로 달리는 중'으로 보고 질문하고 정차를 못 봤다(감사 S3).
+     */
+    private fun currentSpeed(input: CoachInput): Float? {
+        input.speedKph?.let { return it }
+        val samples = input.samples
+        for (i in samples.indices.reversed()) {
+            val s = samples[i]
+            val v = s.speedKph ?: continue
+            if (abs(input.now - s.t) <= SPEED_MAX_AGE_MS) return v
+        }
         return null
     }
 
@@ -641,5 +790,10 @@ class CoachEngine(
         const val EARLY_DEPARTURE_FROM_MIN = 4 * 60
         /** NOW일 때 휴게소·졸음쉼터가 가장 가까운 곳보다 이만큼 안쪽으로 늦으면 그쪽을 고른다 (초) */
         const val NEAR_ENOUGH_S = 5 * 60.0
+        /**
+         * 표본 차속을 이번 차속으로 쓰는 최대 나이 (ms). 표본은 update(약 1초) 사이에 쌓이므로 보통 1초 안이다.
+         * 5초는 엔진의 가장 짧은 시간 규칙(제동 뒤 10초 조용히)보다 짧아, 늦게 온 표본이 판단을 바꿀 수 있는 시간을 그 아래로 묶는다
+         */
+        const val SPEED_MAX_AGE_MS = 5_000L
     }
 }

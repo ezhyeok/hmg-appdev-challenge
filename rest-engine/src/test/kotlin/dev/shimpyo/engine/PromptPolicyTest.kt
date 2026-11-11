@@ -101,8 +101,10 @@ class PromptPolicyTest {
 
     @Test
     fun atMostThreeEnginePromptsPerHourExceptNowLevel() {
+        // 상한은 같거나 높은 우선순위 질문만 센다(감사 P9): 높은 질문 셋 뒤의 낮은 질문은 막힌다.
+        // 예전 순서(상태 확인·환기·휴식 뒤 마지막 기회가 막힘)는 낮은 질문이 핵심 질문을 막는 결함이라 AuditPromptPolicyTest로 옮겼다
         val p = policy()
-        val kinds = listOf(PromptKind.CHECK_IN, PromptKind.FRESH_AIR, PromptKind.REST_SUGGESTION, PromptKind.LAST_CHANCE)
+        val kinds = listOf(PromptKind.LAST_CHANCE, PromptKind.REST_SUGGESTION, PromptKind.CHECK_IN, PromptKind.FRESH_AIR)
         var issued = 0
         var t = t0
         for (k in kinds) {

@@ -69,7 +69,7 @@ internal object Curves {
             series[name] = obj(
                 "priorMedianMin" to m.priorMedianMin(o),
                 "gauge50Min" to tr.thresholdMin,
-                "decision30Min" to m.groupDeadlineMin(t0, config.restroomDecisionProbability, fromReset = true),
+                "decision30Min" to m.deadlineMin(t0, config.restroomDecisionProbability, fromReset = true),
                 "quantile50UncappedMin" to tr.posterior.quantile(0.5),
                 "quantile30UncappedMin" to tr.posterior.quantile(0.3),
                 "capMin" to cap,
@@ -149,7 +149,7 @@ internal object Curves {
                 "n" to n,
                 "posteriorMedianMin" to tr.posterior.quantile(0.5),
                 "gaugeAt60MinShown" to m.gauge(t0 + 60 * MIN, dev.shimpyo.engine.CoachTexts()).minutes,
-                "decision30Min" to m.groupDeadlineMin(t0, config.restroomDecisionProbability, fromReset = true),
+                "decision30Min" to m.deadlineMin(t0, config.restroomDecisionProbability, fromReset = true),
                 "a" to tr.posterior.a,
             )
         }

@@ -10,7 +10,17 @@ internal class Opportunity(val stop: StopCandidate, val distanceM: Double, val a
  *   도착(d) = (d − 앞쪽 정체 길이) / v + 앞쪽 정체 통과 시간
  * v는 내비의 남은 거리·시간에서 정체 몫을 뺀 값(정체 밖 평균 속도). 모르면 현재 속도(30km/h 이상일 때),
  * 그것도 없으면 고속도로 평균 속도.
- * 후보에 etaS가 있으면 내비가 교통을 반영해 계산한 값으로 보고 그대로 쓴다.
+ *
+ * 정체 목록 정리: 내비는 한 정체를 여러 항목으로 쪼개고, 같은 구간을 겹쳐 보내거나 목적지 너머까지 보낼 수 있다.
+ * 그래서 항목을 [0, 목적지]로 자르고 합집합으로 만든다(겹친 곳은 가장 느린 항목의 속도로 한 번만 센다).
+ * 예전에는 겹친 항목을 더하고(+20분), 목적지 너머 정체까지 세서 자유 속도가 틀어졌다(감사 R11, R12).
+ *
+ * 후보 도착 시간: etaS(내비가 교통을 반영해 계산한 값)가 있으면 그것, 없으면 위 식. 그리고 경로 거리순으로
+ * 엔진이 '뒤 후보에 먼저 닿는다'고 지어내지 않게 한다 (감사 R13: 20km 후보는 내비 40분인데 25km 후보가 엔진 계산 15분).
+ * - 엔진 계산 후보: 더 가까운 후보들의 지연(도착 − 엔진 계산) 중 가장 큰 것만큼 늦춘다. 앞에서 내비만 아는 정체는 뒤에도 있다.
+ * - 내비 ETA 후보: 더 가까운 내비 ETA보다 이르면 그만큼 올린다(내비 값끼리 어긋나면 한쪽이 늦게 온 값이다). 그 밖에는 그대로 믿는다.
+ *   앞 후보의 엔진 계산이 뒤 내비 ETA보다 늦은 경우는 두는데, 내비가 더 빠르다는 뜻이라 엔진 쪽이 보수적일 뿐이다(닿지 못한다고 보는 쪽).
+ * 같은 거리의 후보끼리는 서로 묶지 않는다.
  */
 internal class RouteContext(private val config: CoachConfig) {
     private var jamCap = 8
@@ -22,6 +32,12 @@ internal class RouteContext(private val config: CoachConfig) {
         private set
     var jamDur = DoubleArray(jamCap)
         private set
+
+    // 정체 합집합을 만들 때 쓰는 작업 배열 (재사용)
+    private var rawS = DoubleArray(8)
+    private var rawE = DoubleArray(8)
+    private var rawPace = DoubleArray(8)
+    private var cuts = DoubleArray(16)
 
     /** 정체 밖 자유 속도 (m/s) */
     var vFreeMps = config.highwayAvgSpeedKph / 3.6
@@ -37,53 +53,51 @@ internal class RouteContext(private val config: CoachConfig) {
     var destS = Double.NaN
         private set
 
-    fun prepare(route: RouteState?, speedKph: Float?) {
-        jamN = 0
-        var jamLen = 0.0
-        var jamTime = 0.0
-        if (route != null) {
-            for (c in route.congestion) {
-                if (c.lengthM <= 0.0 || c.durationS <= 0.0) continue
-                var start = c.startDistanceM
-                var len = c.lengthM
-                var dur = c.durationS
-                if (start + len <= 0.0) continue // 이미 지나온 정체
-                if (start < 0.0) { // 정체 안에 있다: 남은 부분만
-                    val frac = (start + len) / len
-                    dur *= frac
-                    len = start + len
-                    start = 0.0
-                }
-                addJam(start, start + len, dur)
-                jamLen += len
-                jamTime += dur
-            }
-        }
-        sortJams()
+    // 후보 도착 시간 색인 (prepare마다 비운다)
+    private var idxCands: List<StopCandidate> = emptyList()
+    private var idxArr = DoubleArray(16)
+    private var idxDist = DoubleArray(16)
+    private var order = IntArray(16)
 
-        var v = Double.NaN
+    fun prepare(route: RouteState?, speedKph: Float?) {
+        idxCands = emptyList()
         val rd = route?.remainDistanceM
         val rt = route?.remainTimeS
-        if (rd != null && rt != null && rd > 0.0 && rt > 0.0) {
-            val freeLen = rd - jamLen
-            val freeTime = rt - jamTime
+        destM = if (rd != null && rd.isFinite() && rd > 0.0) rd else Double.NaN
+        destS = if (rt != null && rt.isFinite() && rt > 0.0) rt else Double.NaN
+        buildJams(route?.congestion.orEmpty())
+        var jamLen = 0.0
+        var jamTime = 0.0
+        for (i in 0 until jamN) {
+            jamLen += jamEnd[i] - jamStart[i]
+            jamTime += jamDur[i]
+        }
+
+        var v = Double.NaN
+        if (!destM.isNaN() && !destS.isNaN()) {
+            val freeLen = destM - jamLen
+            val freeTime = destS - jamTime
             if (freeLen > 0.0 && freeTime > 0.0) v = freeLen / freeTime
-            if (v.isNaN() || v < MIN_V || v > MAX_V) v = rd / rt
+            if (v.isNaN() || v < MIN_V || v > MAX_V) v = destM / destS
         }
         if (v.isNaN() || v < MIN_V || v > MAX_V) {
             v = if (speedKph != null && speedKph >= 30f) speedKph / 3.6 else config.highwayAvgSpeedKph / 3.6
         }
         vFreeMps = v.coerceIn(MIN_V, MAX_V)
-        destM = if (rd != null && rd > 0.0) rd else Double.NaN
-        destS = if (rt != null && rt > 0.0) rt else Double.NaN
         val h = route?.candidatesUntilM
-        horizonM = if (h != null && h >= 0.0 && (destM.isNaN() || h < destM)) h else Double.NaN
+        horizonM = if (h != null && h.isFinite() && h >= 0.0 && (destM.isNaN() || h < destM)) h else Double.NaN
     }
+
+    /** 후보 목록이 빠짐없다고 볼 수 있는 경로 거리 끝: 자른 곳(horizonM), 아니면 목적지. 둘 다 모르면 무한대 */
+    val knownEndM: Double
+        get() = when {
+            !horizonM.isNaN() -> horizonM
+            !destM.isNaN() -> destM
+            else -> Double.POSITIVE_INFINITY
+        }
 
     fun distanceOf(c: StopCandidate): Double =
         c.routeDistanceM ?: c.straightDistanceM?.let { it * config.roadFactor } ?: Double.NaN
-
-    fun arrivalS(c: StopCandidate, distanceM: Double): Double = c.etaS ?: arrivalAtDistance(distanceM)
 
     fun arrivalAtDistance(d: Double): Double {
         var lenBefore = 0.0
@@ -99,25 +113,166 @@ internal class RouteContext(private val config: CoachConfig) {
         return (d - lenBefore) / vFreeMps + timeBefore
     }
 
+    /**
+     * 기회 o 뒤 거리 d까지의 도착 시간 (아래 한계). o에 붙은 지연(내비 ETA)이 그 뒤에도 이어진다고 본다.
+     * 후보 목록을 자른 곳(horizon) 같은 '기회는 아니지만 거기까지는 없다'는 지점에 쓴다.
+     */
+    fun arrivalAfter(o: Opportunity, d: Double): Double {
+        val est = arrivalAtDistance(d)
+        return maxOf(est, o.arriveS + (est - arrivalAtDistance(o.distanceM)))
+    }
+
     /** 목적지 도착 시간 (초). 내비 값이 없으면 NaN */
     val destinationS: Double get() = destS
+
+    /**
+     * 이번 후보 목록의 도착 시간을 계산해 둔다 (경로 거리순으로 단조). [opportunities]·[arrivalOf]가 쓰고,
+     * 처음 부를 때 저절로 계산된다. [prepare]하면 비운다.
+     */
+    fun index(candidates: List<StopCandidate>) {
+        idxCands = candidates
+        val n = candidates.size
+        if (idxArr.size < n) {
+            val cap = maxOf(n, idxArr.size * 2)
+            idxArr = DoubleArray(cap)
+            idxDist = DoubleArray(cap)
+            order = IntArray(cap)
+        }
+        var m = 0
+        for (i in 0 until n) {
+            val c = candidates[i]
+            val d = distanceOf(c)
+            idxDist[i] = d
+            if (d.isNaN() || d <= 0.0) {
+                idxArr[i] = Double.NaN
+                continue
+            }
+            idxArr[i] = c.etaS ?: arrivalAtDistance(d)
+            // 진행 반대 방향(유턴) 후보의 거리는 경로를 따라간 거리가 아니라 단조 조건에 넣지 않는다
+            if (c.directionOk != false) order[m++] = i
+        }
+        // 경로 거리순 (같으면 id순) — 결정적. 후보는 수십 개라 삽입 정렬
+        for (a in 1 until m) {
+            val x = order[a]
+            var b = a - 1
+            while (b >= 0 && before(candidates, x, order[b])) {
+                order[b + 1] = order[b]
+                b--
+            }
+            order[b + 1] = x
+        }
+        // 더 가까운 내비 ETA 중 가장 늦은 것과, 더 가까운 후보들의 가장 큰 지연(도착 − 엔진 계산). 같은 거리 후보끼리는 서로 묶지 않는다
+        var maxNavi = Double.NEGATIVE_INFINITY
+        var maxDelay = 0.0
+        var k = 0
+        while (k < m) {
+            var g = k
+            while (g < m && idxDist[order[g]] == idxDist[order[k]]) g++
+            val est = arrivalAtDistance(idxDist[order[k]])
+            for (x in k until g) {
+                val i = order[x]
+                val own = idxArr[i]
+                idxArr[i] = if (candidates[i].etaS != null) maxOf(own, maxNavi) else maxOf(own, est + maxDelay)
+            }
+            for (x in k until g) {
+                val i = order[x]
+                val a = idxArr[i]
+                if (candidates[i].etaS != null && a > maxNavi) maxNavi = a
+                if (a - est > maxDelay) maxDelay = a - est
+            }
+            k = g
+        }
+    }
+
+    private fun before(cands: List<StopCandidate>, x: Int, y: Int): Boolean {
+        val dx = idxDist[x]
+        val dy = idxDist[y]
+        if (dx != dy) return dx < dy
+        return cands[x].id < cands[y].id
+    }
+
+    /**
+     * 이번 후보의 도착 시간 (초). 지금 목록에 같은 후보(같은 객체, 없으면 같은 id)가 없거나 거리를 모르면 NaN.
+     * 앱에 내보내는 추천·질문의 etaS를 이것 하나로 채운다.
+     */
+    fun arrivalOf(c: StopCandidate): Double {
+        val list = idxCands
+        for (i in list.indices) if (list[i] === c) return idxArr[i]
+        for (i in list.indices) if (list[i].id == c.id) return idxArr[i]
+        return Double.NaN
+    }
 
     /**
      * 후보를 거리순으로 out에 채운다 (out은 재사용 리스트).
      * 거리를 모르거나 이미 지나친(0 이하) 후보, filter를 통과하지 못한 후보는 뺀다.
      */
     fun opportunities(candidates: List<StopCandidate>, out: ArrayList<Opportunity>, filter: (StopCandidate) -> Boolean) {
+        if (candidates !== idxCands) index(candidates)
         out.clear()
         for (i in candidates.indices) {
             val c = candidates[i]
             if (!filter(c)) continue
-            val d = distanceOf(c)
+            val d = idxDist[i]
             if (d.isNaN() || d <= 0.0) continue
-            out += Opportunity(c, d, arrivalS(c, d))
+            out += Opportunity(c, d, idxArr[i])
         }
         // 거리순 (같으면 id순) — 결정적
         out.sortWith(OPP_ORDER)
     }
+
+    /**
+     * 정체 항목 → 겹치지 않는 구간 목록 (jamStart/jamEnd/jamDur, 시작순).
+     * 값이 이상한 항목(길이·시간 0 이하, NaN·무한대)은 빼고, [0, 목적지]로 자른 뒤, 겹친 곳은 가장 느린 속도(초/m)로 한 번만 센다.
+     * 이어진 같은 속도 구간은 하나로 합친다.
+     */
+    private fun buildJams(items: List<CongestionSegment>) {
+        jamN = 0
+        var r = 0
+        for (c in items) {
+            val start = c.startDistanceM
+            val len = c.lengthM
+            val dur = c.durationS
+            if (!start.isFinite() || !len.isFinite() || !dur.isFinite() || len <= 0.0 || dur <= 0.0) continue
+            val s = maxOf(start, 0.0) // 정체 안에 있다: 남은 부분만
+            var e = start + len
+            if (!destM.isNaN()) e = minOf(e, destM) // 목적지 너머는 경로가 아니다
+            if (e <= s) continue // 이미 지나온 정체
+            if (r == rawS.size) {
+                rawS = rawS.copyOf(r * 2)
+                rawE = rawE.copyOf(r * 2)
+                rawPace = rawPace.copyOf(r * 2)
+            }
+            rawS[r] = s
+            rawE[r] = e
+            rawPace[r] = dur / len
+            r++
+        }
+        if (r == 0) return
+        if (cuts.size < 2 * r) cuts = DoubleArray(4 * r)
+        for (i in 0 until r) {
+            cuts[2 * i] = rawS[i]
+            cuts[2 * i + 1] = rawE[i]
+        }
+        java.util.Arrays.sort(cuts, 0, 2 * r)
+        var u = 0 // 겹치지 않는 경계만 남긴다
+        for (i in 0 until 2 * r) if (u == 0 || cuts[i] > cuts[u - 1]) cuts[u++] = cuts[i]
+        for (k in 0 until u - 1) {
+            val a = cuts[k]
+            val b = cuts[k + 1]
+            var pace = 0.0
+            for (i in 0 until r) if (rawS[i] <= a && rawE[i] >= b && rawPace[i] > pace) pace = rawPace[i]
+            if (pace <= 0.0) continue // 정체 사이 빈 구간
+            val last = jamN - 1
+            if (last >= 0 && jamEnd[last] == a && samePace(jamDur[last] / (jamEnd[last] - jamStart[last]), pace)) {
+                jamDur[last] += pace * (b - a)
+                jamEnd[last] = b
+            } else {
+                addJam(a, b, pace * (b - a))
+            }
+        }
+    }
+
+    private fun samePace(p: Double, q: Double): Boolean = kotlin.math.abs(p - q) <= 1e-9 * maxOf(p, q)
 
     private fun addJam(s: Double, e: Double, dur: Double) {
         if (jamN == jamCap) {
@@ -130,24 +285,6 @@ internal class RouteContext(private val config: CoachConfig) {
         jamEnd[jamN] = e
         jamDur[jamN] = dur
         jamN++
-    }
-
-    private fun sortJams() {
-        for (i in 1 until jamN) {
-            val s = jamStart[i]
-            val e = jamEnd[i]
-            val d = jamDur[i]
-            var j = i - 1
-            while (j >= 0 && jamStart[j] > s) {
-                jamStart[j + 1] = jamStart[j]
-                jamEnd[j + 1] = jamEnd[j]
-                jamDur[j + 1] = jamDur[j]
-                j--
-            }
-            jamStart[j + 1] = s
-            jamEnd[j + 1] = e
-            jamDur[j + 1] = d
-        }
     }
 
     companion object {
@@ -172,5 +309,9 @@ internal class RouteContext(private val config: CoachConfig) {
 
         fun isMealOpportunity(c: StopCandidate): Boolean =
             c.facilities.food && c.parkable && c.openNow != false && c.directionOk != false
+
+        /** 주유·충전할 수 있는 곳 */
+        fun isFuelOpportunity(c: StopCandidate): Boolean =
+            (c.facilities.fuel || c.facilities.evCharger) && c.parkable && c.openNow != false && c.directionOk != false
     }
 }
