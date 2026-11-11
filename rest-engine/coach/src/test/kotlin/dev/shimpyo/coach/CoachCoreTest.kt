@@ -143,7 +143,7 @@ class CoachCoreTest {
 
         // 화면에 떠 있는 동안 위치가 바뀌면 10초 안에 다시 찾는다 (UI 감사 #9)
         rig.fix(37.5045, 127.0490, 70f)
-        rig.run(UrgentSession.REFRESH_MS)
+        rig.run(UrgentFlow.REFRESH_MS)
         assertTrue("지난 위치의 결과가 그대로가 아니다", rig.state.urgent != first)
     }
 
@@ -171,7 +171,7 @@ class CoachCoreTest {
         rig.drive(30f)
         rig.start()
         rig.command(UiCommand.Urgent(9L))
-        rig.run(UrgentSession.LOCATE_MS + 1_000)
+        rig.run(UrgentFlow.LOCATE_MS + 1_000)
         assertEquals(UrgentState.NO_LOCATION, rig.state.urgentState)
         assertTrue(rig.voice.said.any { "위치" in it })
     }
@@ -232,14 +232,14 @@ class CoachCoreTest {
         rig.run(2_000)
         assertEquals("stop", rig.state.demo)
         assertEquals("시연 탑승자", listOf("driver", "kid"), rig.state.occupants.map { it.id })
-        assertEquals(CandidatePolicy.DEMO, rig.gates.request.policy)
-        assertFalse(rig.gates.naviFallback)
+        assertEquals(CandidatePolicy.DEMO, rig.loopInputs.request.policy)
+        assertFalse(rig.loopInputs.naviFallback)
         rig.command(UiCommand.Demo(null))
         rig.run(1_000)
         assertNull(rig.state.demo)
         assertEquals("실제 탑승자", listOf("driver"), rig.state.occupants.map { it.id })
-        assertEquals(CandidatePolicy.REAL, rig.gates.request.policy)
-        assertTrue(rig.gates.naviFallback)
+        assertEquals(CandidatePolicy.REAL, rig.loopInputs.request.policy)
+        assertTrue(rig.loopInputs.naviFallback)
         assertEquals("시연 탑승자를 설정에 쓰지 않았다", 0, rig.settings.occupantWrites)
     }
 
@@ -253,13 +253,13 @@ class CoachCoreTest {
         val before = checkNotNull(rig.state.fatigue?.minutes)
         rig.command(UiCommand.Demo("holiday"))
         rig.run(30_000)
-        assertTrue("시연 위치", rig.gates.request.pos!!.lat < 37.0)
+        assertTrue("시연 위치", rig.loopInputs.request.pos!!.lat < 37.0)
         rig.command(UiCommand.Demo(null))
         rig.run(2_000)
         // 실제 엔진을 옆에 두었다가 되돌린다 (파일에서 연속 주행 0으로 다시 만들면 피로 게이지가 처음으로 돌아갔다, 서비스 감사 D10)
         val after = checkNotNull(rig.state.fatigue?.minutes)
         assertTrue("피로가 이어진다: 시연 전 $before, 뒤 $after", after <= before && after >= before - 3)
-        val pos = rig.gates.request.pos!!
+        val pos = rig.loopInputs.request.pos!!
         assertEquals("시연을 끄면 실제 위치 (구조 리뷰 D3)", 37.40, pos.lat, 1e-6)
         assertEquals(127.10, pos.lon, 1e-6)
     }
@@ -333,7 +333,7 @@ class CoachCoreTest {
         rig.run(2 * 60_000L)
         val times = rig.timedMemory.saveTimes
         assertEquals("두 번째 변화는 1분을 기다려 저장 ($times)", 2, times.size)
-        assertTrue("저장 간격 ${times[1] - times[0]}ms", times[1] - times[0] >= CoachCore.MEMORY_EVERY_MS)
+        assertTrue("저장 간격 ${times[1] - times[0]}ms", times[1] - times[0] >= MemorySaver.EVERY_MS)
         assertEquals("두 사람의 간격이 모두 저장됐다", setOf("kid", "grandma"), memory.stored.restroomIntervalsMin.keys)
     }
 
@@ -488,7 +488,7 @@ class CoachCoreTest {
         rig.run(10_000)
         rig.state.goToResult?.let { seen += it.at }
         assertEquals("두 결과 (${rig.navi.commands})", 2, seen.distinct().size)
-        rig.run(CoachCore.GO_TO_RESULT_TTL_MS)
+        rig.run(PromptMachine.GO_TO_RESULT_TTL_MS)
         assertNull("오래된 결과는 거둔다", rig.state.goToResult)
     }
 }

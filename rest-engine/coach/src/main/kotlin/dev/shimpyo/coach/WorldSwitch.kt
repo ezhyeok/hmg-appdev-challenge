@@ -63,7 +63,7 @@ class WorldSwitch(
     private val memory: MemoryPort,
     private val tripStore: TripStorePort,
     /** 실제 시각 (epoch ms) */
-    private val wall: CoachClock,
+    private val wall: WallClock,
     private val elapsed: ElapsedClock,
     private val rules: TripRules = TripRules(),
 ) {

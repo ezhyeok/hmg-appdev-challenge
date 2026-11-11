@@ -38,9 +38,9 @@ data class TripAnchor(
 }
 
 /**
- * 지금 정차(기어 P) 상태. 정차 감지기(prompt 트랙의 StopDetector/StopRecorder)가 만들고, TripSession이 맥박에 담아
+ * 지금 정차(기어 P) 상태. 정차 감지기(StopDetector.parkState)가 만들고, TripSession이 맥박에 담아
  * 재시작 뒤 감지기와 엔진에 되돌린다 (서비스 감사 D12: 정차 중 재시작하면 정차가 사라지고 화장실 시계가 안 돌아갔다).
- * 병합 메모: prompt 트랙의 정차 상태 타입과 합친다. 필요한 것은 [since]·[doorSeen] 둘뿐이다.
+ * 감지기와 여정이 이 타입 하나를 함께 쓴다.
  */
 data class ParkState(
     /** P로 바꾼 시각 (코치 시각) */

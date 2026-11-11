@@ -1,17 +1,21 @@
 package dev.shimpyo.coach
 
 import dev.shimpyo.engine.Gear
-import dev.shimpyo.engine.RankedStop
+import dev.shimpyo.engine.Occupant
+import dev.shimpyo.engine.OccupantType
+import dev.shimpyo.engine.PersonalMemory
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 
 /*
  * CoachCore가 쓰는 작은 순수 규칙들. 코어(액터) 밖에서 단위 테스트로 지킨다 (CoreRulesTest).
  * 시각은 모두 실제 경과 시간(ElapsedClock)이다: 시연 전환을 넘어 이어지는 값이라 코치 시각(시연이면 가상)과 섞지 않는다.
+ * 급해 요청은 UrgentFlow.kt, 음성 작업은 VoiceDesk.kt, 계획 갱신은 PlanKeeper.kt.
  */
 
 /**
  * 외기 전환(환기)의 문과 되돌리기 (서비스 감사 D16, rest-engine README '앱 연동 메모').
+ * - 전환은 한 번에 하나다 ([begin]이 false면 앞의 전환이 아직 끝나지 않았다).
  * - 자동 환기는 마지막 시도 뒤 [GAP_MS](10분) 안에는 다시 하지 않는다. 경과 시간으로 잰다: 예전에는 코치 시각이라
  *   시연을 끈 뒤 자동 환기가 몇 시간씩 막혔다(서비스 감사 D3·D8).
  * - 우리가 바꾼 외기는 [REVERT_MS](1분 30초) 뒤 내기로 되돌린다(엔진 README: 1~2분 뒤). 그 사이 사람이 이미 내기로 돌렸으면
@@ -19,6 +23,9 @@ import dev.shimpyo.engine.StopKind
  */
 class FreshAirGate {
     private var lastAttemptMs: Long? = null
+    /** 외기 전환 명령을 보내고 결과를 기다리는 중 */
+    var busy = false
+        private set
     /** 되돌릴 실제 시각. 우리가 외기로 바꾼 뒤에만 있다 */
     var revertAtMs: Long? = null
         private set
@@ -31,14 +38,18 @@ class FreshAirGate {
         return nowMs - last >= GAP_MS
     }
 
-    /** 외기 전환을 보냈다 (자동이든 질문 수락이든) */
-    fun attempted(nowMs: Long) {
+    /** 외기 전환을 보낸다 (자동이든 질문 수락이든). 앞의 전환이 끝나지 않았으면 false: 보내지 않는다 */
+    fun begin(nowMs: Long): Boolean {
+        if (busy) return false
+        busy = true
         lastAttemptMs = nowMs
+        return true
     }
 
-    /** 외기로 바뀐 것을 확인했다 */
-    fun switched(nowMs: Long) {
-        revertAtMs = nowMs + REVERT_MS
+    /** 전환이 끝났다. [switched]: 외기로 바뀐 것을 확인했다 (되돌리기를 예약한다) */
+    fun finished(nowMs: Long, switched: Boolean) {
+        busy = false
+        if (switched) revertAtMs = nowMs + REVERT_MS
     }
 
     /** 지금 내기로 되돌려야 하는지. true를 돌려주면 되돌리기 예약을 지운다 (한 번만) */
@@ -57,76 +68,74 @@ class FreshAirGate {
 }
 
 /**
- * 급해 요청 하나의 진행 (UI 감사 #7·#8·#9, 서비스 감사 D7). 코어가 들고 명령·틱마다 [advance]한다.
- * LOCATING(위치 기다림) → SEARCHING(정차 후보 표 기다림) → READY / NO_RESULT. 위치가 [LOCATE_MS] 안에 없으면 NO_LOCATION.
- * 결과는 화면에 떠 있는 동안 [REFRESH_MS]마다 다시 찾는다 (예전에는 한 번 찾고 끝이라 지나친 곳이 남았다, UI #9).
- * NO_LOCATION에서도 위치가 생기면 이어서 찾는다 (화면을 닫지 않았으면 기다린 보람이 있다).
+ * 학습 상태(memory.json)를 언제 저장할지. 쓰기 자체는 코어가 IO 효과로 한다.
+ * - 바뀌었을 때만, 한 번에 하나, [EVERY_MS](1분)에 한 번까지. 시연 세계는 저장할 것이 없다(WorldSwitch.memoryToSave가 null)
+ * - 시연을 켜기 직전의 저장(WorldChange.saveMemory)은 간격을 기다리지 않는다 ([started]만 부른다)
  */
-class UrgentSession(val requestId: Long, val startedAtMs: Long) {
-    var state: UrgentState = UrgentState.LOCATING
-        private set
-    var results: List<RankedStop> = emptyList()
-        private set
-    /** 찾은 가까운 화장실 (엔진 후보에 더한다: 엔진이 같은 목록으로 급해 질문을 만들고, 수락한 곳을 추적한다) */
-    var near: List<StopCandidate> = emptyList()
-        private set
-    private var searchedAtMs: Long? = null
-    /** 엔진에 급해를 알렸는지 (첫 결과 때 한 번) */
-    var engineTold = false
-        private set
+class MemorySaver {
+    private var saved: PersonalMemory? = null
+    private var saving = false
+    private var lastStartMs: Long? = null
 
-    /** 이번 틱에 할 일 */
-    enum class Step { NONE, SEARCH, NO_LOCATION }
-
-    /** [hasPosition]: 위치를 아는지, [dataLoaded]: 정차 후보 표를 읽었는지 */
-    fun next(nowMs: Long, hasPosition: Boolean, dataLoaded: Boolean): Step {
-        if (!hasPosition) {
-            if (state == UrgentState.LOCATING && nowMs - startedAtMs >= LOCATE_MS) {
-                state = UrgentState.NO_LOCATION
-                return Step.NO_LOCATION
-            }
-            return Step.NONE
-        }
-        if (!dataLoaded) {
-            state = if (nowMs - startedAtMs >= SEARCH_MS) UrgentState.NO_RESULT else UrgentState.SEARCHING
-            return Step.NONE
-        }
-        val last = searchedAtMs
-        return if (last == null || nowMs - last >= REFRESH_MS) Step.SEARCH else Step.NONE
+    /** 시작할 때 파일에서 읽은 것 (파일과 같으니 다시 쓰지 않는다) */
+    fun loaded(memory: PersonalMemory) {
+        saved = memory
     }
 
-    /** 찾은 결과. 처음이면 true를 돌려준다 (엔진에 알릴 때) */
-    fun found(nowMs: Long, near: List<StopCandidate>, ranked: List<RankedStop>): Boolean {
-        this.near = near
-        results = ranked
-        searchedAtMs = nowMs
-        state = if (ranked.isEmpty()) UrgentState.NO_RESULT else UrgentState.READY
-        val first = !engineTold
-        engineTold = true
-        return first
+    /** 기록 지우기: 파일이 비었다. 다음 변화는 다시 쓴다 */
+    fun cleared() {
+        saved = null
     }
 
-    /** 다음 틱에 바로 다시 찾는다 ("화장실 급해"를 또 말했다) */
-    fun searchAgain() {
-        searchedAtMs = null
+    /** 지금 자동 저장할 것. [current]: 지금 세계의 학습 상태 (저장하지 않는 세계면 null). 간격 안이면 묻지 않는다 */
+    fun due(nowMs: Long, current: () -> MemorySave?): MemorySave? {
+        val last = lastStartMs
+        if (saving || (last != null && nowMs - last < EVERY_MS)) return null
+        return current()?.takeIf { it.memory != saved }
     }
+
+    fun started(nowMs: Long) {
+        saving = true
+        lastStartMs = nowMs
+    }
+
+    fun finished(memory: PersonalMemory, ok: Boolean) {
+        saving = false
+        if (ok) saved = memory
+    }
+
+    /** 서비스가 끝날 때 마지막으로 쓸 것 (바뀌지 않았으면 null) */
+    fun atShutdown(current: MemorySave?): MemorySave? = current?.takeIf { it.memory != saved }
 
     companion object {
-        /** 위치를 기다리는 시간. 화면의 응답 기다림(8초)과 맞춘다 */
-        const val LOCATE_MS = 8_000L
-        /** 정차 후보 표를 기다리는 시간 (보통 1초 안에 읽힌다. 표가 깨졌으면 끝내 안 읽힌다) */
-        const val SEARCH_MS = 15_000L
-        /** 결과를 다시 찾는 간격 */
-        const val REFRESH_MS = 10_000L
-        const val RADIUS_M = 5_000.0
-        const val MAX = 15
-        val KINDS = setOf(StopKind.HIGHWAY_REST_AREA, StopKind.DROWSY_SHELTER, StopKind.PUBLIC_RESTROOM, StopKind.GAS_STATION, StopKind.PUBLIC_PARKING)
+        const val EVERY_MS = 60_000L
     }
+}
+
+/**
+ * 건강 관련 탑승자 유형(임신, 과민성 방광·장)은 따로 동의한 경우에만 둔다 (개인정보 보호법 제23조 민감정보).
+ * 화면(app Labels.isHealth)도 같은 세 유형을 쓴다.
+ */
+object HealthConsent {
+    val TYPES: Set<OccupantType> = setOf(OccupantType.PREGNANT, OccupantType.OAB, OccupantType.IBS)
+
+    fun isHealth(type: OccupantType): Boolean = type in TYPES
+
+    /** 동의가 없으면 건강 유형 탑승자를 뺀 목록 */
+    fun allowed(list: List<Occupant>, consent: Boolean): List<Occupant> = if (consent) list else list.filterNot { isHealth(it.type) }
 }
 
 object CoreRules {
     /** 이보다 느리면 방위를 믿지 않는다 (km/h) */
     const val SLOW_KPH = 10f
+
+    /**
+     * 차를 세우고 화장실을 쓸 수 있는 시설 종류. 급해 검색(UrgentFlow)과 정차 기록의 장소 이름(StopRecorder)이 같은 것을 쓴다
+     * (기타 시설 이름으로 정차지를 부르지 않는다). 계획 후보는 휴게소·졸음쉼터만이다(CandidateTuning.PLANNED_KINDS)
+     */
+    val PARKABLE_KINDS: Set<StopKind> = setOf(
+        StopKind.HIGHWAY_REST_AREA, StopKind.DROWSY_SHELTER, StopKind.PUBLIC_RESTROOM, StopKind.GAS_STATION, StopKind.PUBLIC_PARKING,
+    )
 
     /**
      * 정차 후보 검색에 넘길 위치. 실제 위치이고 차가 서 있거나(P) 느리면 방위를 null로 둔다(0.0이나 오래된 방위로 앞뒤가

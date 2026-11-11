@@ -5,11 +5,11 @@ import dev.shimpyo.coach.CandidateProvider
 import dev.shimpyo.coach.CoachClock
 import dev.shimpyo.coach.CoachCore
 import dev.shimpyo.coach.CoachDeps
-import dev.shimpyo.coach.CoachGates
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.ElapsedClock
 import dev.shimpyo.coach.Fix
 import dev.shimpyo.coach.IntentInterpreter
+import dev.shimpyo.coach.LoopInputs
 import dev.shimpyo.coach.MemoryPort
 import dev.shimpyo.coach.NaviPort
 import dev.shimpyo.coach.NaviTracker
@@ -204,10 +204,10 @@ class CoreRig(
     val hub = SignalHub()
     val odometer = Odometer(clock)
     val positions = PositionTracker(clock) { PositionTracker.isMoving(hub.speedKph, hub.gear == Gear.PARK) }
-    val gates = CoachGates()
+    val loopInputs = LoopInputs()
     val fakeNavi = FakeNaviPort(clock)
     val navi = CommandNavi(fakeNavi)
-    val tracker = NaviTracker(navi, odometer, { hub.speedKph != null }, clock, log, positions.naviFallback { gates.naviFallback })
+    val tracker = NaviTracker(navi, odometer, { hub.speedKph != null }, clock, log, positions.naviFallback { loopInputs.naviFallback })
     val oracle = RouteOracle(navi, clock, log)
     val stops: StopIndex = PromptFakes.Stops(stopRows)
     val candidates = CandidateProvider(stops, oracle, odometer, clock, log)
@@ -218,7 +218,7 @@ class CoreRig(
         CoachDeps(
             wall = clock, elapsed = clock, hub = hub, odometer = odometer, positions = positions, navi = navi, tracker = tracker,
             candidates = candidates, oracle = oracle, stops = stops, voice = voice, interpreter = interpreter, cabin = cabin,
-            history = history, memory = timedMemory, settings = settings, trips = trips, engines = seededEngines(), ui = ui, gates = gates,
+            history = history, memory = timedMemory, settings = settings, trips = trips, engines = seededEngines(), ui = ui, loopInputs = loopInputs,
             io = StandardTestDispatcher(test.testScheduler), log = log,
         ),
     )
@@ -228,7 +228,7 @@ class CoreRig(
     fun start() {
         test.backgroundScope.launch { core.run() }
         test.backgroundScope.launch { tracker.run() }
-        test.backgroundScope.launch { candidates.run { gates.request } }
+        test.backgroundScope.launch { candidates.run { loopInputs.request } }
         test.runCurrent()
     }
 

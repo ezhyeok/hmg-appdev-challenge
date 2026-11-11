@@ -1,8 +1,12 @@
 package dev.shimpyo.coach
 
+import dev.shimpyo.coach.fakes.DRIVER
+import dev.shimpyo.coach.fakes.KID
 import dev.shimpyo.coach.fakes.PromptFakes
 import dev.shimpyo.engine.Gear
-import dev.shimpyo.engine.RankedStop
+import dev.shimpyo.engine.Occupant
+import dev.shimpyo.engine.OccupantType
+import dev.shimpyo.engine.PersonalMemory
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -10,7 +14,7 @@ import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** CoachCore의 작은 순수 규칙 (CoreRules.kt) */
+/** CoachCore의 작은 순수 규칙 (CoreRules.kt). 급해는 UrgentFlowTest, 계획은 PlanKeeperTest, 음성 작업은 VoiceDeskTest */
 class CoreRulesTest {
 
     // ------------------------------------------------------------ 환기 (서비스 감사 D16)
@@ -19,7 +23,8 @@ class CoreRulesTest {
     fun autoFreshAirWaitsTenMinutesAfterTheLastAttempt() {
         val g = FreshAirGate()
         assertTrue(g.autoAllowed(0L, recirculation = true))
-        g.attempted(0L)
+        assertTrue(g.begin(0L))
+        g.finished(1_000L, switched = false)
         assertFalse(g.autoAllowed(FreshAirGate.GAP_MS - 1, recirculation = true))
         assertTrue(g.autoAllowed(FreshAirGate.GAP_MS, recirculation = true))
         assertFalse("이미 외기면 할 일이 없다", g.autoAllowed(FreshAirGate.GAP_MS, recirculation = false))
@@ -30,50 +35,79 @@ class CoreRulesTest {
     fun ourFreshAirIsRevertedOnceAfterNinetySecondsUnlessSomeoneAlreadyDid() {
         val g = FreshAirGate()
         assertFalse("바꾼 적이 없으면 되돌리지 않는다", g.takeRevert(1_000_000L, recirculation = false))
-        g.switched(0L)
+        g.begin(0L)
+        g.finished(0L, switched = true)
         assertFalse(g.takeRevert(FreshAirGate.REVERT_MS - 1, recirculation = false))
         assertTrue(g.takeRevert(FreshAirGate.REVERT_MS, recirculation = false))
         assertFalse("한 번만", g.takeRevert(FreshAirGate.REVERT_MS + 1_000, recirculation = false))
-        g.switched(0L)
+        g.begin(0L)
+        g.finished(0L, switched = true)
         assertFalse("사람이 이미 내기로 돌렸다", g.takeRevert(FreshAirGate.REVERT_MS, recirculation = true))
         assertNull(g.revertAtMs)
     }
 
-    // ------------------------------------------------------------ 급해 (UI 감사 #7·#8·#9)
+    @Test
+    fun oneFreshAirSwitchAtATime() {
+        val g = FreshAirGate()
+        assertTrue(g.begin(0L))
+        assertTrue(g.busy)
+        assertFalse("앞의 전환이 끝나기 전에는 또 보내지 않는다", g.begin(1_000L))
+        g.finished(2_000L, switched = false)
+        assertFalse(g.busy)
+        assertNull("바뀌지 않았으면 되돌릴 것도 없다", g.revertAtMs)
+        assertTrue(g.begin(3_000L))
+    }
+
+    // ------------------------------------------------------------ 학습 저장
 
     @Test
-    fun urgentWaitsForALocationThenGivesUpWithNoLocationButStillSearchesIfOneArrives() {
-        val u = UrgentSession(1L, startedAtMs = 0L)
-        assertEquals(UrgentSession.Step.NONE, u.next(1_000, hasPosition = false, dataLoaded = true))
-        assertEquals(UrgentState.LOCATING, u.state)
-        assertEquals(UrgentSession.Step.NO_LOCATION, u.next(UrgentSession.LOCATE_MS, hasPosition = false, dataLoaded = true))
-        assertEquals(UrgentState.NO_LOCATION, u.state)
-        assertEquals("한 번만 알린다", UrgentSession.Step.NONE, u.next(UrgentSession.LOCATE_MS + 1_000, hasPosition = false, dataLoaded = true))
-        assertEquals("늦게라도 위치가 생기면 찾는다", UrgentSession.Step.SEARCH, u.next(20_000, hasPosition = true, dataLoaded = true))
+    fun learningIsSavedWhenChangedOneAtATimeAndAtMostOnceAMinute() {
+        val loaded = PersonalMemory()
+        val changed = PersonalMemory(restroomIntervalsMin = mapOf("kid" to listOf(80.0)))
+        val more = PersonalMemory(restroomIntervalsMin = mapOf("kid" to listOf(80.0, 90.0)))
+        val s = MemorySaver()
+        s.loaded(loaded)
+        assertNull("읽은 그대로면 쓰지 않는다", s.due(0L) { MemorySave(loaded, 0L) })
+        assertNull("저장하지 않는 세계(시연)", s.due(0L) { null })
+        val first = s.due(1_000L) { MemorySave(changed, 0L) }
+        assertEquals("바뀌면 바로", changed, first?.memory)
+        s.started(1_000L)
+        assertNull("쓰는 중에는 또 쓰지 않는다", s.due(2_000L) { MemorySave(more, 0L) })
+        s.finished(changed, ok = true)
+        var asked = false
+        assertNull("1분 안에는 다시 쓰지 않는다 (지금 상태를 묻지도 않는다)", s.due(1_000L + MemorySaver.EVERY_MS - 1) { asked = true; MemorySave(more, 0L) })
+        assertFalse(asked)
+        assertEquals(more, s.due(1_000L + MemorySaver.EVERY_MS) { MemorySave(more, 0L) }?.memory)
     }
 
     @Test
-    fun urgentWaitsForTheStopTableAndGivesUpIfItNeverLoads() {
-        val u = UrgentSession(1L, startedAtMs = 0L)
-        assertEquals(UrgentSession.Step.NONE, u.next(1_000, hasPosition = true, dataLoaded = false))
-        assertEquals(UrgentState.SEARCHING, u.state)
-        u.next(UrgentSession.SEARCH_MS, hasPosition = true, dataLoaded = false)
-        assertEquals(UrgentState.NO_RESULT, u.state)
+    fun aFailedOrClearedSaveIsWrittenAgainAndShutdownWritesWhatIsLeft() {
+        val m = PersonalMemory(restroomIntervalsMin = mapOf("kid" to listOf(80.0)))
+        val s = MemorySaver()
+        s.loaded(PersonalMemory())
+        s.started(0L)
+        s.finished(m, ok = false)
+        assertEquals("실패한 저장은 다음 주기에 다시", m, s.due(MemorySaver.EVERY_MS) { MemorySave(m, 0L) }?.memory)
+        assertEquals("끝날 때 바뀐 것이 남아 있으면 쓴다", m, s.atShutdown(MemorySave(m, 0L))?.memory)
+        s.started(MemorySaver.EVERY_MS)
+        s.finished(m, ok = true)
+        assertNull("이미 쓴 것은 끝날 때 다시 쓰지 않는다", s.atShutdown(MemorySave(m, 0L)))
+        assertNull(s.atShutdown(null))
+        s.cleared()
+        assertEquals("기록을 지운 뒤에는 같은 내용도 다시 쓴다 (파일이 비었다)", m, s.atShutdown(MemorySave(m, 1L))?.memory)
     }
 
+    // ------------------------------------------------------------ 건강 정보 동의
+
     @Test
-    fun urgentSearchesAgainEveryTenSecondsAndTellsTheEngineOnlyOnce() {
-        val u = UrgentSession(1L, startedAtMs = 0L)
-        val s = PromptFakes.stop("wc")
-        assertEquals(UrgentSession.Step.SEARCH, u.next(0, true, true))
-        assertTrue("처음이면 엔진에 알린다", u.found(0, listOf(s), listOf(RankedStop(s, 60.0, emptyList()))))
-        assertEquals(UrgentState.READY, u.state)
-        assertEquals(UrgentSession.Step.NONE, u.next(UrgentSession.REFRESH_MS - 1, true, true))
-        assertEquals(UrgentSession.Step.SEARCH, u.next(UrgentSession.REFRESH_MS, true, true))
-        assertFalse(u.found(UrgentSession.REFRESH_MS, emptyList(), emptyList()))
-        assertEquals(UrgentState.NO_RESULT, u.state)
-        u.searchAgain()
-        assertEquals("다시 말하면 바로", UrgentSession.Step.SEARCH, u.next(UrgentSession.REFRESH_MS + 1, true, true))
+    fun healthTypeOccupantsNeedConsent() {
+        val pregnant = Occupant("p", OccupantType.PREGNANT)
+        val oab = Occupant("o", OccupantType.OAB)
+        val ibs = Occupant("i", OccupantType.IBS)
+        val all = listOf(DRIVER, KID, pregnant, oab, ibs)
+        assertEquals(listOf(DRIVER, KID), HealthConsent.allowed(all, consent = false))
+        assertSame("동의했으면 그대로", all, HealthConsent.allowed(all, consent = true))
+        assertEquals(setOf(OccupantType.PREGNANT, OccupantType.OAB, OccupantType.IBS), OccupantType.entries.filter(HealthConsent::isHealth).toSet())
     }
 
     // ------------------------------------------------------------ 검색 위치 (데이터 감사 #10)
