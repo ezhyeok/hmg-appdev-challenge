@@ -128,6 +128,30 @@ class AuditVoiceTest {
     }
 
     @Test
+    fun anUnansweredAnswerGivenWhileParkedDoesNotSilenceTheQuestionAfterDeparture() {
+        // 서 있는 동안 답한 "다음 화장실은 …"에 대답이 없었다 (앱은 정차 중에 주행 질문 카드를 거두기도 한다). 달리다 대답 없이 지나간
+        // 답은 '그곳은 됐다'로 보고 그곳을 지날 때까지 다시 묻지 않지만, 서 있을 때의 무응답을 그렇게 보면 출발한 뒤에도 가장 가까운
+        // 화장실을 묻지 못한다(아이는 여전히 화장실이 필요하다). 서 있을 때의 무응답에는 쉼을 걸지 않는다
+        val e = familyEngine()
+        val first = assertNotNull(e.sayParked(VoiceIntent.OccupantNeed("kid", Purpose.RESTROOM)).prompt)
+        assertEquals("a", first.stop?.id)
+        var t = start + SEC
+        val parked = (0 until 70).map { t += SEC; e.update(CoachInput(now = t, gear = Gear.PARK, speedKph = 0f, route = route, candidates = cands)) }
+        assertEquals(null, parked.last().prompt, "45초 뒤 답은 내려갔다")
+        val driving = (0 until 40).map { t += SEC; e.update(CoachInput(now = t, gear = Gear.DRIVE, speedKph = 100f, route = route, candidates = cands)) }
+        val again = assertNotNull(driving.firstNotNullOfOrNull { it.prompt }, "출발하면 가까운 화장실을 묻는다")
+        assertEquals("a", again.stop?.id)
+        assertTrue(again.id != first.id && !again.userRequested)
+
+        // 대조: 달리다 받은 답에 대답이 없으면 그곳(가휴게소)은 다시 묻지 않는다
+        val d = familyEngine()
+        val asked = assertNotNull(d.say(VoiceIntent.OccupantNeed("kid", Purpose.RESTROOM)).prompt)
+        var u = start + SEC
+        val later = (0 until 110).map { u += SEC; d.update(CoachInput(now = u, gear = Gear.DRIVE, speedKph = 100f, route = route, candidates = cands)) }
+        assertTrue(later.none { it.prompt != null && it.prompt?.id != asked.id }, later.firstNotNullOfOrNull { it.prompt?.takeIf { p -> p.id != asked.id } }.toString())
+    }
+
+    @Test
     fun enginePromptsAreNotMarkedAsUserRequested() {
         val e = CoachEngine(
             profile = TripProfile(listOf(adult("driver"), child("kid", 5)), tripStart = start, lastRestroomAt = mapOf("kid" to start - 30 * MIN)),

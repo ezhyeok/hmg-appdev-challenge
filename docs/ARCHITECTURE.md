@@ -23,7 +23,7 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
               Pleos Connect SDK (Vehicle, NaviHelper, TTS, STT, FusedLocation, LLM) + AAOS Car API
 ```
 
-- **rest-engine**: "언제 무엇을 권할지"를 정하는 엔진. 입력(신호·경로·후보·의도) → 출력(게이지·추천·질문). JVM 테스트 373개.
+- **rest-engine**: "언제 무엇을 권할지"를 정하는 엔진. 입력(신호·경로·후보·의도) → 출력(게이지·추천·질문). JVM 테스트 374개.
 - **rest-engine/coach**: 엔진을 차에서 돌리는 실행 계층. 안드로이드에 의존하지 않고 바깥은 모두 포트(`Ports.kt`) 뒤에 있어서, 서비스 전체 흐름
   (귀성길 시연 → 질문 → '응' → 내비 경유지)을 가짜 포트와 가상 시간으로 JVM에서 끝까지 돌린다(`CoachCoreTest`). 부품별 설계는
   `docs/design/coach-layer/`(navi, candidates, prompt, world, data, core, ui).

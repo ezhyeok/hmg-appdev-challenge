@@ -49,6 +49,11 @@ internal class PromptPolicy(
         val reasons: List<Reason> = emptyList(),
         /** 여럿이 타서 앞당겨진 마지막 기회인지 (GapAnalyzer.LastChance.groupDriven). 수락해서 그곳에 서면 누구의 사건으로도 배우지 않는다 */
         val groupDriven: Boolean = false,
+        /**
+         * 대답 없이 내려갔을 때 쉼을 걸지 (거절은 언제나 건다). 서 있는 동안(또는 움직이는지 모를 때) 답한 "다음 화장실은 …"은 false:
+         * 달리다 대답 없이 지나간 답은 '그곳은 됐다'로 보지만, 서 있을 때의 무응답을 그렇게 보면 출발한 뒤 그곳을 묻지 못한다
+         */
+        val cooldownOnExpiry: Boolean = true,
     )
 
     class Issued internal constructor(
@@ -61,6 +66,7 @@ internal class PromptPolicy(
         val purposes: Set<Purpose>,
         val reasons: List<Reason> = emptyList(),
         val groupDriven: Boolean = false,
+        val cooldownOnExpiry: Boolean = true,
     ) {
         val kind: PromptKind get() = prompt.kind
         var answered: Boolean = false
@@ -266,7 +272,7 @@ internal class PromptPolicy(
 
     private fun dropUnanswered(a: Issued, mono: Long) {
         active = null
-        if (!a.answered && booksCooldown(a)) {
+        if (!a.answered && booksCooldown(a) && a.cooldownOnExpiry) {
             cooldowns[a.kind] = Cooldown(mono, a.targetId, a.level, baseCooldownMin(a.kind) * 60_000L)
         }
     }
@@ -303,7 +309,7 @@ internal class PromptPolicy(
     private fun issue(c: Candidate, statKey: String?, now: Long, mono: Long): Issued {
         val ttl = config.promptTtlS * 1000L
         val p = Prompt(id = ids.next(), kind = c.kind, speech = c.speech, stop = c.stop, expiresAt = now + ttl, userRequested = c.userInitiated)
-        val iss = Issued(p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes, c.reasons, c.groupDriven)
+        val iss = Issued(p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes, c.reasons, c.groupDriven, c.cooldownOnExpiry)
         iss.lastSeenD = c.distanceM ?: Double.NaN
         iss.lastSeenMono = mono
         active = iss

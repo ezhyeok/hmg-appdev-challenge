@@ -323,6 +323,8 @@ class CoachEngine(
                             purposes = purposesFor(t.stop, p, ctx),
                             reasons = if (lc != null) lastChanceReasons(lc) + requested else listOf(requested),
                             groupDriven = lc?.groupDriven == true,
+                            // 서 있을 때 대답 없이 내려간 답은 '그곳은 됐다'가 아니다: 출발하면 가까운 화장실을 다시 물을 수 있어야 한다
+                            cooldownOnExpiry = moving,
                         )
                     }
                 },
@@ -774,7 +776,8 @@ class CoachEngine(
         purposes: Set<Purpose> = emptySet(),
         reasons: List<Reason> = emptyList(),
         groupDriven: Boolean = false,
-    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh, reasons, groupDriven)
+        cooldownOnExpiry: Boolean = true,
+    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh, reasons, groupDriven, cooldownOnExpiry)
 
     /**
      * 사용자의 말에 답할 곳([stop])이 이미 들르기로 한 곳이면 '들를까요?' 대신 낼 안내, 아니면 null.
