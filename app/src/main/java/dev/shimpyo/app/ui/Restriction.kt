@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import dev.hmg.pleoskit.UxRestrictionFlags
 import dev.hmg.pleoskit.UxRestrictions
 import dev.shimpyo.app.ui.theme.DriveLimits
+import dev.shimpyo.coach.CoachUiState
 
 /**
  * 화면이 지키는 주행 제한. 화면은 [UxRestrictions]를 서비스 없이 스스로 구독한다(Platform.kt의 프로세스 단위 구독).
@@ -67,6 +68,13 @@ fun noticeText(notice: String?, restriction: DriveRestriction): String? {
     val text = notice?.trim()?.takeIf { it.isNotEmpty() } ?: return null
     return if (restriction.driving) limitChars(text, restriction.maxChars) else text
 }
+
+/**
+ * 지금 화면에 띄울 코치 알림. 멈춘 코치에 남은 알림은 띄우지 않는다: 알림을 지우는 것은 코치라서, 코치가 알림을 올린 채 멈추면
+ * 화면에 끝없이 떠 있게 된다
+ */
+fun coachNotice(state: CoachUiState, restriction: DriveRestriction): String? =
+    noticeText(state.notice.takeIf { state.serviceRunning }, restriction)
 
 /** 주행 중 문구 길이 제한. 넘치면 말줄임표로 자른다 */
 fun limitChars(text: String, max: Int): String = if (text.length <= max || max < 2) text else text.take(max - 1) + "…"

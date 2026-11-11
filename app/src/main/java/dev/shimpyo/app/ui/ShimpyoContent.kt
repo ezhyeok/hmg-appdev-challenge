@@ -343,7 +343,7 @@ fun ShimpyoContent(
                 ToastLayer(
                     overlays,
                     topInset = if (urgent != null || shown == Screen.DRIVE) layout.headerHeight(driving) else null,
-                    notice = noticeText(state.notice, restriction),
+                    notice = coachNotice(state, restriction),
                 )
             }
         }

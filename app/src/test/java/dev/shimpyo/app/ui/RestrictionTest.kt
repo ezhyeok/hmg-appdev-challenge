@@ -3,6 +3,7 @@ package dev.shimpyo.app.ui
 import dev.hmg.pleoskit.UxRestrictionFlags
 import dev.hmg.pleoskit.UxRestrictions
 import dev.shimpyo.app.ui.theme.DriveLimits
+import dev.shimpyo.coach.CoachUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -67,6 +68,19 @@ class RestrictionTest {
         // 없거나 빈 알림은 띄우지 않는다
         assertNull(noticeText(null, limited))
         assertNull(noticeText("  ", DriveRestriction.PARKED))
+    }
+
+    @Test
+    fun aStoppedCoachsLeftoverNoticeIsNotShown() {
+        // 알림은 코치가 지운다. 알림을 올린 채 코치가 멈추면 지울 사람이 없다: 화면이 끝없이 띄워 두지 않는다
+        val answer = "다음 화장실은 12km 앞 옥산휴게소예요."
+        val running = CoachUiState(serviceRunning = true, notice = answer)
+        assertEquals(answer, coachNotice(running, DriveRestriction.PARKED))
+        assertNull(coachNotice(running.copy(serviceRunning = false), DriveRestriction.PARKED))
+        assertNull(coachNotice(running.copy(notice = null), DriveRestriction.PARKED))
+        // 주행 중 글자 수 제한은 그대로
+        val limited = driveRestriction(known(true, active = UxRestrictionFlags.LIMIT_STRING_LENGTH, maxLen = 10))
+        assertEquals(10, coachNotice(running, limited)!!.length)
     }
 
     @Test

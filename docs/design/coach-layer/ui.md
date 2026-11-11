@@ -191,7 +191,7 @@ compact 세로 윈도에서 결과 카드는 `FitColumn`(줄을 빼는 판단은
 
 ### 3.9 코치 알림 (리뷰 R-F4)
 
-코치가 말 대신 화면에 보이라고 올린 문장(`CoachUiState.notice`: 음성 안내를 껐을 때 "얼마나 남았어"의 대답, 못 알아들었을 때 등)을 토스트와 같은 모양으로 띄운다. 띄우고 내리는 때는 코치가 정한다(몇 초 뒤 지운다): 화면은 시간을 재지 않고 값이 있는 동안 보인다. 주행 화면과 급해 화면에서는 머리 아래, 정차 화면에서는 아래 가운데이고 토스트와 겹치지 않게 위아래로 쌓는다. 터치는 받지 않는다. 주행 중(모를 때 포함)에는 `noticeText`가 주행 제한의 글자 수로 자르고, 길어도 3줄까지다.
+코치가 말 대신 화면에 보이라고 올린 문장(`CoachUiState.notice`: 음성 안내를 껐을 때 "얼마나 남았어"의 대답, 못 알아들었을 때 등)을 토스트와 같은 모양으로 띄운다. 띄우고 내리는 때는 코치가 정한다(몇 초 뒤 지운다): 화면은 시간을 재지 않고 값이 있는 동안 보인다. 주행 화면과 급해 화면에서는 머리 아래, 정차 화면에서는 아래 가운데이고 토스트와 겹치지 않게 위아래로 쌓는다. 터치는 받지 않는다. 주행 중(모를 때 포함)에는 `noticeText`가 주행 제한의 글자 수로 자르고, 길어도 3줄까지다. 멈춘 코치에 남은 알림은 띄우지 않는다(`coachNotice`): 지울 코치가 없어 끝없이 떠 있게 된다.
 
 ## 4. 진행 중 상태와 액티비티 재생성 (감사 #14)
 
@@ -306,7 +306,7 @@ SDK와 라이브러리의 Manifest에서 합쳐져 APK에 들어가는 것(앱 M
 | 평소 간격·자는 중·간격을 말로 (U3·U4) | `OccupantEditTest.usualIntervalChoicesSetTheOverrideAndAutoClearsIt`, `infantsAndDogsHaveNoUsualIntervalChoice`, `theSelectorShowsWhatIsSetAndHighlightsIt`, `theRowAndTheSummarySayTheIntervalInWords`, `onlyChildrenCanBeMarkedAsleep` |
 | 새 이유 코드의 문구와 게이지 이유 순서 (U5) | `LabelsTest.contextFactorsAndRequestedStopsHaveLabels`, `DriveModelsTest.aSleepingChildAndAMealExplainTheRestroomGauge` |
 | 동의 철회는 확인 순간의 목록으로 (감사 #23) | `HealthConsentTest.*` |
-| 코치 알림의 글자 수 (리뷰 R-F4) | `RestrictionTest.aCoachNoticeIsCutToTheRestrictedStringLengthOnlyWhileDriving` |
+| 코치 알림의 글자 수, 멈춘 코치의 남은 알림 (리뷰 R-F4) | `RestrictionTest.aCoachNoticeIsCutToTheRestrictedStringLengthOnlyWhileDriving`, `aStoppedCoachsLeftoverNoticeIsNotShown` |
 | 제출용 빌드가 내놓는 것 (닫힘 UI-N1): 권한 목록, debug 전용 권한, 내보낸 컴포넌트, CCP 선언, 실행 인텐트에서 넘기는 값 | `ReleaseSurfaceTest.*` |
 | 기본 포커스, 급해 화면 위의 다른 질문, 안정성 설정 (감사 #13·#27·S4: 고친 코드에 시험이 없던 것) | `DriveModelsTest.defaultFocusGoesToTheAnswerButtonAndBackToUrgentWhenTheQuestionEnds`, `UrgentModelTest.anotherQuestionIsShownOnTheUrgentScreenButNotItsOwn`, `StabilityConfigTest` |
 
