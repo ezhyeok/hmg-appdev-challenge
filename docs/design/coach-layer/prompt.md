@@ -329,7 +329,8 @@ world 담당이 TripSession.kt에 먼저 정의했고 감지기도 이 타입을
 ## 7. 열린 문제와 다른 담당에게
 
 - **CoachWorld (world)**: 시연 엔진은 `CoachConfig.promptTtlS`를 배속만큼 늘려 만든다(2.5). 그러지 않으면 시연 질문이 6초 만에 사라진다
-  (`PromptEngineScenarioTest.aDemoEngineWithTheDefaultTtlDropsTheCardInSecondsOfRealTime`). 지금 `CoachWorld.newEngine`은 기본 수명이다.
+  (`PromptEngineScenarioTest.aDemoEngineWithTheDefaultTtlDropsTheCardInSecondsOfRealTime`). 지금 `CoachWorld.newEngine`은 `EngineFactory.create(profile, memory)`로 만들어 세계(배속)를 모르므로 기본 수명이 된다. 시연 세계가
+  배속을 넘길 길(예: EngineFactory에 CoachConfig나 promptTtlS를 함께 넘기기)이 필요하다.
   `ParkState`는 world의 타입을 그대로 쓴다(4.2). 감지기의 `restore`가 요청한 `restore(ParkState?)`다.
 - **엔진 (engine)**: INFO를 Report(true)로 알리면 `PromptPolicy.onResult`가 `noteInteraction`을 다시 불러 30초 조용한 때가 그 시각부터
   다시 시작된다(INFO를 낼 때 이미 한 번 시작했으므로 실제로는 몇 초 늘어날 뿐이다). 사용자와 대화했으니 맞는 동작이다.
