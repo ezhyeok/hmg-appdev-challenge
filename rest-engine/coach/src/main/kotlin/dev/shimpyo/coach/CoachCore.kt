@@ -73,7 +73,7 @@ class CoachCore(private val d: CoachDeps) {
     private val parser = IntentParser()
     private val desk = VoiceDesk(d.voice, d.log)
     private val urgent = UrgentFlow(seedMs = d.elapsed.elapsedMs())
-    private val plans = PlanKeeper()
+    private val plans = PlanKeeper(seedMs = d.elapsed.elapsedMs())
     private val freshAir = FreshAirGate()
     private val memorySaver = MemorySaver()
 
@@ -225,8 +225,8 @@ class CoachCore(private val d: CoachDeps) {
             UiCommand.ProfileChanged -> worlds.profileChanged()
             // 신호 수집을 다시 잇는 일은 서비스가 한다 (코어는 신호의 출처를 모른다)
             UiCommand.PermissionsChanged -> Unit
-            // 계약만 먼저 넣었다 (2026-11-12): 계획 닫기·자는 중 표시는 코어 수정에서 구현한다
-            UiCommand.ClosePlan -> Unit
+            UiCommand.ClosePlan -> plans.stop()
+            // 자는 중 표시는 코어 수정 U4에서 잇는다
             is UiCommand.SetAsleep -> Unit
         }
     }

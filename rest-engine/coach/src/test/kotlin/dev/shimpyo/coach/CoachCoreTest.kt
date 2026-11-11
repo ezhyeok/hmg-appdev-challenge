@@ -461,15 +461,61 @@ class CoachCoreTest {
         val rig = CoreRig(this)
         rig.drive(100f)
         rig.start()
+        assertEquals("요청 전에는 번호가 없다", 0L, rig.state.planGeneration)
         rig.command(UiCommand.MakePlan) // 첫 틱 전 요청도 답한다
         rig.command(UiCommand.Demo("holiday"))
         rig.run(2_000)
-        assertEquals(1L, rig.state.planGeneration)
+        val first = rig.state.planGeneration
+        assertTrue("요청에 답하면 번호가 생긴다 (0은 번호를 쓰지 않는 코치)", first > 0L)
         assertNotNull(rig.state.plan)
         rig.run(60_000) // 후보가 여러 번 바뀌어 계획을 다시 만든다
-        assertEquals("고쳐 낸 계획은 번호를 올리지 않는다", 1L, rig.state.planGeneration)
+        assertEquals("고쳐 낸 계획은 번호를 올리지 않는다", first, rig.state.planGeneration)
         rig.command(UiCommand.MakePlan)
-        assertEquals(2L, rig.state.planGeneration)
+        assertEquals("새 요청마다 1 오른다", first + 1, rig.state.planGeneration)
+    }
+
+    @Test
+    fun aClosedPlanIsNotRebuiltUntilItIsRequestedAgain() = runTest {
+        // 계획 화면을 떠났다는 신호가 없어서 MakePlan 한 번에 10분 동안 계획을 30번 다시 세웠다 (리뷰 R-F12).
+        // 화면이 ClosePlan을 보내면 멈춘다. 마지막 계획은 화면 상태에 남는다 (주행 화면의 '다음 계획' 카드)
+        val rig = CoreRig(this)
+        rig.drive(100f)
+        rig.start()
+        rig.command(UiCommand.Demo("holiday"))
+        rig.run(3_000)
+        rig.command(UiCommand.MakePlan)
+        rig.run(1_000)
+        val shown = checkNotNull(rig.state.plan)
+        val gen = rig.state.planGeneration
+        rig.command(UiCommand.ClosePlan)
+        var rebuilt = 0
+        repeat(600) {
+            rig.run(1_000)
+            if (rig.state.plan !== shown) rebuilt++
+        }
+        assertEquals("계획 화면을 떠난 뒤 10분 동안 다시 세운 횟수", 0, rebuilt)
+        assertEquals(gen, rig.state.planGeneration)
+        rig.command(UiCommand.MakePlan)
+        assertTrue("다시 요청하면 지금 위치로 다시 세운다", rig.state.plan !== shown)
+        assertEquals(gen + 1, rig.state.planGeneration)
+    }
+
+    @Test
+    fun aRestartedCoreNeverRepeatsAPlanGeneration() = runTest {
+        // 같은 프로세스에서 서비스만 다시 뜨면 화면 상태에 죽은 코어의 번호가 남는다. 새 코어가 같은 번호부터 세면 화면의
+        // '계획을 세우는 중'이 풀리지 않는다 (서비스 닫힘 검증 N8, UI 닫힘 검증 N6)
+        val seen = ArrayList<Long>()
+        repeat(2) {
+            val rig = CoreRig(this)
+            rig.drive(100f)
+            rig.start()
+            rig.command(UiCommand.Demo("holiday"))
+            rig.run(2_000)
+            rig.command(UiCommand.MakePlan)
+            rig.run(1_000)
+            seen += rig.state.planGeneration
+        }
+        assertTrue("다시 뜬 코어의 첫 계획 번호가 앞 코어의 번호와 겹친다: $seen", seen[1] > seen[0] && seen[0] > 0L)
     }
 
     @Test

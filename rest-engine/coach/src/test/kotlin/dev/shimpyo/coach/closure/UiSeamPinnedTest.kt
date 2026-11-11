@@ -172,12 +172,13 @@ class UiSeamPinnedTest {
         rig.run(1_000)
         val first = checkNotNull(rig.state.plan).stops.first().stop.id
         assertEquals("전제: 첫 계획 정차는 바로 앞 휴게소", "cheonan", first)
-        assertEquals(1L, rig.state.planGeneration)
+        val gen = rig.state.planGeneration
+        assertTrue("요청에 답한 계획에는 번호가 있다", gen > 0L)
         rig.runUntil(120_000) { rig.state.ahead.none { it.id == first } } ?: error("첫 정차를 지나치지 않았다")
         val late = rig.runUntil(35_000) { rig.state.plan!!.stops.none { it.stop.id == first } }
         assertNotNull("지나친 정차는 35초 안에 계획에서 빠진다 (30초 주기 또는 후보가 바뀔 때)", late)
         assertTrue("남은 계획 정차는 모두 앞쪽 후보에 있다", rig.state.plan!!.stops.all { p -> rig.state.ahead.any { it.id == p.stop.id } })
-        assertEquals("고쳐 낸 계획은 번호를 올리지 않는다 ('계획을 세우는 중'이 요청 없이 풀리지 않게)", 1L, rig.state.planGeneration)
+        assertEquals("고쳐 낸 계획은 번호를 올리지 않는다 ('계획을 세우는 중'이 요청 없이 풀리지 않게)", gen, rig.state.planGeneration)
     }
 
     // ------------------------------------------------------------ 세계 전환 (UI #15)

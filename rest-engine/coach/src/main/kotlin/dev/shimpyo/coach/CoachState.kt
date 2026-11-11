@@ -64,7 +64,8 @@ data class CoachUiState(
     /**
      * 계획을 새로 세울 때마다 1씩 오르는 번호 (MakePlan에 답해 새로 세웠는지 화면이 안다). 지나친 정차를 빼거나 거리를 고쳐
      * 같은 계획을 다시 낼 때는 올리지 않는다(그때마다 '계획을 세우는 중'이 풀리면 안 된다). 0이면 이 번호를 쓰지 않는 코치다.
-     * (2026-11-12 UI 계약 추가)
+     * 1부터가 아니라 코치를 만든 때(경과 시간)에서 시작한다: 서비스가 다시 떠도 앞 코치가 남긴 번호와 겹치지 않는다. 화면은
+     * 요청할 때의 번호와 달라졌는지만 본다. (2026-11-12 UI 계약 추가)
      */
     val planGeneration: Long = 0,
     val parked: Boolean = true,
@@ -140,7 +141,7 @@ sealed interface UiCommand {
     data object Listen : UiCommand
     data object StopVoice : UiCommand
     data object MakePlan : UiCommand
-    /** 계획 화면을 떠났다 (또는 주행을 시작했다): 계획을 더 고쳐 세우지 않는다 */
+    /** 계획 화면을 떠났다 (또는 주행을 시작했다): 계획을 더 고쳐 세우지 않는다. 마지막 계획은 상태에 남는다 */
     data object ClosePlan : UiCommand
     data class Answer(val promptId: String, val accept: Boolean) : UiCommand
     data class GoTo(val stop: StopCandidate) : UiCommand
