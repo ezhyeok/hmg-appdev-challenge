@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <!--
+      debug 빌드에만 더하는 권한: 개발용 점검(KitSelfTest, `run-app.ps1 -SelfTest`)이 kit의 각 기능을 실제로 불러 보는 데만 쓴다.
+      제품은 쓰지 않으므로 제출용(release) APK에는 들어가지 않는다 (닫힘 검증 UI-N1, ReleaseSurfaceTest가 지킨다).
+      컴포넌트는 더하지 않는다.
+    -->
+    <!-- 좌석: 점유 조회, 등받이 위치 조회와 이동 -->
+    <uses-permission android:name="pleos.car.permission.CAR_SEATS" />
+    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_SEATS" />
+    <!-- 조명: 실내등·앰비언트 라이트 제어 (조회 CAR_LIGHTS는 제품도 방향지시등에 쓴다) -->
+    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_LIGHTS" />
+    <!-- 창문: 위치 조회와 이동 -->
+    <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" />
+    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_WINDOWS" />
+    <!-- 에너지: 배터리 잔량 조회 -->
+    <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
+</manifest>

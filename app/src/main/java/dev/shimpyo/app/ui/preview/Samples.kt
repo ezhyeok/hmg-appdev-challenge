@@ -235,6 +235,42 @@ object Samples {
     /** 경유지 넣기 실패: 주행 화면이 [다시 시도] 카드를 보인다 */
     val goToFailed = cruising.copy(goToResult = GoToResult(manghyang.shift(-33.0), GoToOutcome.FAILED, now))
 
+    /** 들르기를 받은 뒤 내비가 확인하는 동안: 카드가 '내비에 넣는 중…'을 보이고 넣기 버튼은 모두 막힌다 */
+    val goToPending = cruising.copy(goToPending = manghyang.shift(-33.0))
+
+    /** 음성 안내를 껐을 때 "얼마나 남았어"의 대답: 말 대신 화면에 잠깐 보인다 (CoachUiState.notice) */
+    val notice = cruising.copy(notice = "다음 화장실은 13km 앞 망향휴게소예요. 화장실 여유는 약 52분이에요.", ttsAvailable = true, sttAvailable = true)
+
+    /**
+     * 실제 내비의 짧은 느린 구간들(2026-11-12 판교→부산역: 100m 안팎, 지나는 데 10~40초). 정체로 그리지 않는다.
+     * 뒤쪽의 이어진 두 항목(합 25분)만 한 정체로 보인다
+     */
+    val slowPatches = parkedPlan.copy(
+        plan = null,
+        congestion = listOf(
+            CongestionSegment(400.0, 100.0, 9.4, "HEAVY", "대왕판교로"),
+            CongestionSegment(600.0, 40.0, 4.1, "HEAVY", "대왕판교로"),
+            CongestionSegment(1_600.0, 60.0, 15.8, "HEAVY", "대왕판교로"),
+            CongestionSegment(2_400.0, 200.0, 20.1, "HEAVY", "경부고속도로"),
+            CongestionSegment(47_000.0, 100.0, 40.0, "HEAVY", "경부고속도로"),
+            CongestionSegment(108_600.0, 8_000.0, 10 * 60.0, "HEAVY", "경부고속도로", "청주IC", "남이JC"),
+            CongestionSegment(117_000.0, 9_000.0, 15 * 60.0, "HEAVY", "경부고속도로", "남이JC", "죽암휴게소"),
+        ),
+    )
+
+    /** 탑승자 화면: 운전자가 평소 간격을 2시간으로 정했고, 아이는 자는 중 */
+    val family = parkedPlan.copy(
+        occupants = listOf(driver.copy(intervalOverrideMin = 120.0), kid, dog),
+        asleepOccupantIds = setOf(kid.id),
+        restroom = Gauge(
+            88, Level.OK,
+            listOf(Reason("RESTROOM_ELAPSED", "7살 아이 기준, 마지막 화장실 후 40분 지났어요"), Reason("RESTROOM_ASLEEP", "7살 아이가 자는 동안은 여유를 조금 더 뒀어요")),
+            drivenBy = "kid",
+        ),
+        ttsAvailable = true,
+        sttAvailable = true,
+    )
+
     /** 탑승자를 처음 고르는 화면 (운전자만) */
     val onlyDriver = parkedPlan.copy(occupants = listOf(driver), restroom = Gauge(140, Level.OK, emptyList(), drivenBy = "driver"))
 

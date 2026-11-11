@@ -2,6 +2,7 @@ package dev.shimpyo.app.ui.preview
 
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.tooling.preview.Preview
+import dev.shimpyo.app.ui.DriveRestriction
 import dev.shimpyo.app.ui.MemoryPrefs
 import dev.shimpyo.app.ui.PreviewHost
 import dev.shimpyo.app.ui.Screen
@@ -15,6 +16,10 @@ import dev.shimpyo.coach.CoachUiState
  * 기획서 스크린샷은 이 미리보기를 그대로 캡처하면 된다.
  */
 
+/**
+ * 미리보기 한 장. 주행 제한은 상태의 drivingRestricted로 정한다: 미리보기에는 플랫폼 구독이 없어 그대로 두면 '모름 = 제한'이라
+ * 정차 화면(계획·탑승자·설정)이 모두 주행 화면으로 그려진다
+ */
 @Composable
 fun SampleFrame(
     state: CoachUiState,
@@ -22,11 +27,13 @@ fun SampleFrame(
     dark: Boolean = false,
     urgentRequest: Long? = null,
     healthConsent: Boolean = false,
+    voiceEnabled: Boolean = true,
 ) {
     ShimpyoTheme(darkTheme = dark) {
         ShimpyoContent(
             state = state,
-            host = PreviewHost(MemoryPrefs(healthConsent = healthConsent)),
+            host = PreviewHost(MemoryPrefs(healthConsent = healthConsent, voiceEnabled = voiceEnabled)),
+            restriction = if (state.drivingRestricted) DriveRestriction(driving = true, known = true) else DriveRestriction.PARKED,
             initialScreen = screen,
             initialUrgentRequest = urgentRequest,
         )
@@ -71,6 +78,14 @@ private fun DriveStartingPreview() = SampleFrame(Samples.starting)
 @Composable
 private fun DriveGoToFailedPreview() = SampleFrame(Samples.goToFailed)
 
+@Preview(name = "주행 · 내비에 넣는 중", widthDp = 840, heightDp = 1184)
+@Composable
+private fun DriveGoToPendingPreview() = SampleFrame(Samples.goToPending)
+
+@Preview(name = "주행 · 코치 알림 (음성 안내 끔)", widthDp = 840, heightDp = 1184)
+@Composable
+private fun DriveNoticePreview() = SampleFrame(Samples.notice, voiceEnabled = false)
+
 @Preview(name = "주행 · 위치 확인 중 (후보 없음)", widthDp = 840, heightDp = 1184)
 @Composable
 private fun DriveNoLocationPreview() = SampleFrame(Samples.cruising.copy(next = null, ahead = emptyList(), candidatesState = dev.shimpyo.coach.CandidatesState.NO_LOCATION))
@@ -107,6 +122,14 @@ private fun PlanPreview() = SampleFrame(Samples.parkedPlan, Screen.PLAN)
 @Composable
 private fun PlanLandscapePreview() = SampleFrame(Samples.parkedPlan, Screen.PLAN)
 
+@Preview(name = "계획 · 짧은 느린 구간은 정체로 그리지 않음", widthDp = 840, heightDp = 1184)
+@Composable
+private fun PlanSlowPatchesPreview() = SampleFrame(Samples.slowPatches, Screen.PLAN)
+
+@Preview(name = "계획 · 내비에 넣는 중", widthDp = 840, heightDp = 1184)
+@Composable
+private fun PlanGoToPendingPreview() = SampleFrame(Samples.parkedPlan.copy(goToPending = Samples.parkedPlan.plan!!.stops.first().stop), Screen.PLAN)
+
 @Preview(name = "계획 · 계획 전", widthDp = 840, heightDp = 1184)
 @Composable
 private fun PlanEmptyPreview() = SampleFrame(Samples.parkedPlan.copy(plan = null), Screen.PLAN)
@@ -116,6 +139,18 @@ private fun PlanEmptyPreview() = SampleFrame(Samples.parkedPlan.copy(plan = null
 @Preview(name = "탑승자", widthDp = 840, heightDp = 1184)
 @Composable
 private fun OccupantsPreview() = SampleFrame(Samples.parkedPlan, Screen.OCCUPANTS)
+
+@Preview(name = "탑승자 · 평소 간격, 자는 중", widthDp = 840, heightDp = 1184)
+@Composable
+private fun OccupantsFamilyPreview() = SampleFrame(Samples.family, Screen.OCCUPANTS)
+
+@Preview(name = "탑승자 · 좁은 세로 628×855", widthDp = 628, heightDp = 855)
+@Composable
+private fun OccupantsNarrowPreview() = SampleFrame(Samples.family, Screen.OCCUPANTS)
+
+@Preview(name = "탑승자 · 말로 설정 불가 (음성 인식 불가)", widthDp = 840, heightDp = 1184)
+@Composable
+private fun OccupantsNoSttPreview() = SampleFrame(Samples.family.copy(sttAvailable = false), Screen.OCCUPANTS)
 
 @Preview(name = "탑승자 · 추가 (동의 전)", widthDp = 840, heightDp = 1184)
 @Composable

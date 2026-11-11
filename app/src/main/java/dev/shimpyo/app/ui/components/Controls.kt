@@ -28,11 +28,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -131,7 +133,10 @@ private fun StepperKey(icon: ImageVector, description: String, enabled: Boolean,
     }
 }
 
-/** Toggle button (On/Off). 켜지면 Filled 색 + 체크 */
+/**
+ * Toggle button (On/Off). 켜지면 Filled 색 + 체크. 여러 개 가운데 하나를 고르는 묶음(평소 간격 선택지)에서는
+ * [role]에 Role.RadioButton을 넘긴다
+ */
 @Composable
 fun ToggleButton(
     text: String,
@@ -141,6 +146,7 @@ fun ToggleButton(
     icon: ImageVector? = null,
     size: ButtonSize = ButtonSize.Small,
     enabled: Boolean = true,
+    role: Role = Role.Checkbox,
 ) {
     val c = ShimpyoTheme.colors
     val interaction = remember { MutableInteractionSource() }
@@ -160,7 +166,7 @@ fun ToggleButton(
     Row(
         modifier
             .heightIn(min = size.height)
-            .pressable(interaction, enabled = enabled, cornerRadius = size.radius, role = Role.Checkbox, onClick = onClick)
+            .pressable(interaction, enabled = enabled, cornerRadius = size.radius, role = role, onClick = onClick)
             .clip(RoundedCornerShape(size.radius))
             .background(bg)
             .padding(horizontal = size.paddingH),
@@ -173,6 +179,39 @@ fun ToggleButton(
             Spacer(Modifier.width(Dimens.Space.xs))
         }
         Text(text, style = size.label, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    }
+}
+
+/**
+ * 선택 버튼: 지금 값을 글자로 보이고 누르면 선택지를 그 아래에 펼친다 (가이드 Dropdown의 Label + Suffix 아이콘 모양).
+ * 선택지는 부르는 쪽이 같은 화면 안에 그린다: 목록 안에서 팝업을 띄우지 않아 CCP 포커스 순서가 화면 순서 그대로다.
+ * 펼쳐지면 화살표가 위를 본다 (움직이지 않는다).
+ */
+@Composable
+fun PleosSelectButton(
+    text: String,
+    expanded: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier,
+    size: ButtonSize = ButtonSize.Small,
+) {
+    val c = ShimpyoTheme.colors
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    Row(
+        modifier
+            .heightIn(min = size.height)
+            .semantics { stateDescription = if (expanded) "펼침" else "접힘" }
+            .pressable(interaction, cornerRadius = size.radius, role = Role.DropdownList, onClick = onClick)
+            .clip(RoundedCornerShape(size.radius))
+            .background(if (pressed) c.buttonBasicPressed else c.buttonBasicEnabled)
+            .padding(start = size.paddingH, end = size.paddingH - Dimens.Space.xs),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Text(text, style = size.label, color = c.textPrimary, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+        Spacer(Modifier.width(Dimens.Space.xxs))
+        Icon(ShimpyoIcons.ExpandMore, contentDescription = null, modifier = Modifier.size(size.icon).rotate(if (expanded) 180f else 0f), tint = c.iconPrimary)
     }
 }
 

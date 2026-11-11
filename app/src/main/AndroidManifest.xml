@@ -3,32 +3,32 @@
 
     <uses-feature android:name="android.hardware.type.automotive" android:required="true" />
 
-    <!-- 쉼표가 쓰는 권한. 제출 전에 실제로 쓰는 것만 남긴다 -->
-    <!-- Vehicle SDK: 조회(CAR_*)와 제어(CONTROL_CAR_*) -->
+    <!--
+      쉼표(제품)가 쓰는 권한만 둔다 (앱 보안 가이드: 필요한 권한만 요청). 권한마다 쓰는 곳은 ReleaseSurfaceTest의 표가 기준이고,
+      그 시험이 이 목록과 어긋나면 실패한다. 개발용 점검(KitSelfTest)만 쓰는 좌석·창문·조명 제어·에너지 권한은
+      app/src/debug/AndroidManifest.xml에 있어 제출용(release) APK에는 들어가지 않는다 (닫힘 검증 UI-N1).
+      네트워크(INTERNET)는 앱이 선언하지 않는다: 앱 코드는 소켓을 열지 않는다(경로 계산은 내비 앱이 한다). 다만 Pleos TextToSpeech
+      SDK(3.3.1)의 Manifest가 INTERNET을 선언하고 있어서 합쳐진 Manifest(APK)에는 들어간다. SDK가 쓰는 것이므로 막지 않는다.
+    -->
+    <!-- Vehicle SDK 조회: 문 열림(화장실 정차 판정), 방향지시등, 공조 상태(환기 권유), 조향각·브레이크·크루즈(운전 패턴) -->
     <uses-permission android:name="pleos.car.permission.CAR_DOORS" />
-    <uses-permission android:name="pleos.car.permission.CAR_SEATS" />
-    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_SEATS" />
     <uses-permission android:name="pleos.car.permission.CAR_LIGHTS" />
-    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_LIGHTS" />
     <uses-permission android:name="pleos.car.permission.CAR_CLIMATE" />
-    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_CLIMATE" />
-    <uses-permission android:name="pleos.car.permission.CAR_WINDOWS" />
-    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_WINDOWS" />
-    <uses-permission android:name="pleos.car.permission.CAR_ENERGY" />
     <uses-permission android:name="pleos.car.permission.CAR_DRIVE" />
-    <!-- NaviHelper -->
+    <!-- Vehicle SDK 제어: 내기·외기 전환 하나 (동의한 자동 환기, 질문의 '외기로 전환') -->
+    <uses-permission android:name="pleos.car.permission.CONTROL_CAR_CLIMATE" />
+    <!-- NaviHelper: 길안내 상태·TBT·정체 읽기, 경유지 추가·길안내 시작·requestTrip -->
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE" />
     <uses-permission android:name="pleos.car.permission.NAVI_ROUTE_SEARCH" />
-    <!-- 음성, 위치(FUSED_LOCATION은 실행 중 요청) -->
+    <!-- 음성(질문·안내, 응/아니), 위치(FUSED_LOCATION은 실행 중 요청) -->
     <uses-permission android:name="pleos.car.permission.TTS_SERVICE" />
     <uses-permission android:name="pleos.car.permission.STT_SERVICE" />
     <uses-permission android:name="pleos.car.permission.FUSED_LOCATION" />
-    <!-- Pleos LLM SDK (ON_DEVICE 모드 확인용) -->
+    <!-- Pleos LLM SDK (ON_DEVICE): 규칙으로 못 알아들은 말을 해석한다 -->
     <uses-permission android:name="pleos.car.permission.LLM_SERVICE" />
     <!-- AAOS 표준 Car API: 기어(normal), 차속(실행 중 요청) -->
     <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
     <uses-permission android:name="android.car.permission.CAR_SPEED" />
-    <uses-permission android:name="android.permission.INTERNET" />
 
     <application
         android:name=".ShimpyoApp"
