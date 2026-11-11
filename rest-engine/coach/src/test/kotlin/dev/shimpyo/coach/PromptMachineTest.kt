@@ -568,6 +568,55 @@ class PromptMachineTest {
     }
 
     @Test
+    fun anAnswerToASpokenRequestIsShownAndStaysWhileParked() {
+        // 꽉 막힌 정체에서 P로 서 있을 때 "아이가 화장실 가고 싶대"라고 했다. 엔진은 가장 가까운 화장실을 묻는다 (마지막 기회와 같은 종류,
+        // Prompt.userRequested = true, 엔진 닫힘 검증 E6). 예전에는 종류만 보고 '정차 중 주행 질문'으로 거둬서 답이 보이지 않았다
+        val asked = p1.copy(id = "p9", speech = "다음 화장실은 6km 앞 옥산휴게소예요. 들를까요?", userRequested = true)
+        val r = Rig()
+        assertEquals("서 있어도 띄우고 묻는다", showEffects(asked), r.tick(asked, parked = true))
+        r.elapsed = 20_000
+        assertEquals("서 있는 동안 그대로다", emptyList<PromptEffect>(), r.tick(asked, parked = true))
+        assertEquals(asked.id, r.m.current?.prompt?.id)
+        // 수락하면 서 있는 채로 들르기를 시작한다
+        assertEquals(
+            listOf(CancelVoice, Show(null), PublishGoToResult(null), StartGoTo(1, oksan, parked = true)),
+            r.on(Tapped(key(asked), true)),
+        )
+
+        // "쉬고 싶어"의 답(휴식 권유)도 같다
+        val restAsked = rest.copy(id = "p10", userRequested = true)
+        val r2 = Rig()
+        assertEquals(showEffects(restAsked), r2.tick(restAsked, parked = true))
+    }
+
+    @Test
+    fun anAnswerShownWhileDrivingStaysWhenTheCarParks() {
+        // 달리다 한 말의 답이 떠 있는 동안 차를 세웠다 (갓길, 정체): 운전자가 청한 답이라 거두지 않는다. 엔진이 먼저 건 질문은 거둔다
+        val asked = p1.copy(id = "p9", userRequested = true)
+        val r = Rig()
+        r.tick(asked)
+        assertEquals(emptyList<PromptEffect>(), r.tick(asked, parked = true))
+        assertEquals(asked.id, r.m.current?.prompt?.id)
+
+        val own = Rig()
+        own.tick(p1)
+        assertEquals("엔진이 먼저 건 마지막 기회는 세우면 거둔다", listOf(CancelVoice, Show(null)), own.tick(p1, parked = true))
+        assertEquals("다시 띄우지 않는다", emptyList<PromptEffect>(), own.tick(p1, parked = false))
+    }
+
+    @Test
+    fun anInfoAnswerIsSpokenWhileParked() {
+        // 서 있는 곳 가까이에 화장실이 있으면 엔진은 안내로 답한다: 서 있어도 말하고 한 번만
+        val here = Prompt("p11", PromptKind.INFO, "가까이에 화장실이 있어요. 옥산휴게소예요.", null, expiresAt = 0, userRequested = true)
+        val r = Rig()
+        assertEquals(listOf(Speak(here.speech), Report(here.id, true)), r.tick(here, parked = true))
+        assertEquals(emptyList<PromptEffect>(), r.tick(here, parked = true))
+        // 음성 안내를 껐으면 화면 알림으로
+        val quiet = Rig(voice = false)
+        assertEquals(listOf(Notice(here.speech), Report(here.id, true)), quiet.tick(here, parked = true))
+    }
+
+    @Test
     fun aDrivingPromptDisplacedByAnotherCardDoesNotReturnAfterParking() {
         // 엔진이 급해 결과로 주행 질문을 밀어냈고 그 사이 차를 세웠다. 급해 카드가 끝난 뒤 엔진이 그 주행 질문을 다시 내도 P에서는 닫는다
         val r = Rig()

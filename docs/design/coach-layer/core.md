@@ -28,7 +28,7 @@ PT 기술 질의응답용. 코드: `rest-engine/coach/src/main/kotlin/dev/shimpy
 
 | 부품 (파일) | 맡는 것 | 상태 | 단위 테스트 |
 |---|---|---|---|
-| `PromptMachine` | 화면 질문 카드와 음성 질문, 들르기 한 번에 하나, 결과의 수명 (prompt.md) | 카드, 닫은 질문, 실행·대기 중 들르기, 다시 시도 연결 | `PromptMachineTest` 40 |
+| `PromptMachine` | 화면 질문 카드와 음성 질문, 들르기 한 번에 하나, 결과의 수명 (prompt.md) | 카드, 닫은 질문, 실행·대기 중 들르기, 다시 시도 연결 | `PromptMachineTest` 43 |
 | `UrgentFlow` | 급해 요청 하나의 진행, 음성으로 연 요청의 번호, 들르기로 한 곳의 고정, 엔진에 알릴 차례 (5장) | 요청, 고른 곳(넣는 중·넣은 뒤), 알릴 차례 | `UrgentFlowTest` 21 |
 | `VoiceDesk` | 음성 작업 모두(묻기·듣기·탑승자 말하기·해석·말), 무엇을 취소할지, 대답을 말로 낼지 화면 알림으로 낼지, '생각하는 중' (7장) | 작업들, 알림을 거둘 때 | `VoiceDeskTest` 18 |
 | `Crew` | 탑승자: 세계마다의 목록, 건강 정보 동의, 자는 중 표시, 말로 설정 (7장) | `AsleepMarks`, 마지막으로 본 동의 | `CrewTest` 6, `AsleepMarksTest` 8 |
@@ -279,7 +279,7 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 |---|---|
 | `CoachCoreUrgentTest` 10 | R-F1, R-F7a~d, UI-7, UI-9a·b·c, UI-N4 (닫기 직후, 먼저 보낸 들르기, 다시 말하기, 엔진 초기화, 질문 전에 고름, 넣는 중, 2순위 고름, 닫고 기다림, 지나침, 번호) |
 | `CoachCoreGoToTest` 9 | UI-N2(넣는 중·대기·감시), SV-D9(닫기 뒤 다시 시도), SV-D7(엔진에 알리기: 성공만, 한 번, 세계가 같을 때, 그 뒤 추천이 `NEXT_ACCEPTED`이고 다른 곳을 묻지 않음), SV-N7(맥박에 적기) |
-| `CoachCoreVoiceTest` 20 | R-F2(마이크에서 학습 파일까지), R-F3, R-F4, R-F8, R-F9, R-F11, UI-12, 멈추기(StopVoice), 말로 설정(DescribeOccupants) |
+| `CoachCoreVoiceTest` 23 | R-F2(마이크에서 학습 파일까지), R-F3, R-F4, R-F8, R-F9, R-F11, UI-12, E6(서 있을 때 한 말의 답: 카드·안내, 엔진이 먼저 건 질문은 거둠), 멈추기(StopVoice), 말로 설정(DescribeOccupants) |
 | `CoachCoreTripTest` 13 | SV-N2, SV-N3(재시작: 늦은 기어, 아직 P, 판정 전, 기어 없음, 시연 끄기), SV-N7(이어받은 수락), 새 여정, 종료(shutdown), 새 코어의 화면 초기화 |
 | `CoachCoreAsleepTest` 6 | U4 (화면·말·화장실 정차·탑승자 빠짐·세계 전환·07:00, 엔진의 `RESTROOM_ASLEEP` 이유) |
 | `StopRulesCrossCheckTest` 11 | 엔진의 정차 규칙과 `StopDetector`가 같은 신호 순서를 같게 본다 (prompt.md 4.4) |

@@ -2,7 +2,7 @@
 
 코드: `rest-engine/coach/src/main/kotlin/dev/shimpyo/coach/`
 `PromptMachine.kt`, `PromptRules.kt`, `GoTo.kt`(GoToPlanner, GoToRunner), `StopDetector.kt`(StopDetector, ParkState), `StopRecorder.kt`.
-테스트: `rest-engine/coach/src/test/kotlin/dev/shimpyo/coach/` 의 `PromptMachineTest`(40), `PromptRulesTest`, `GoToPlannerTest`,
+테스트: `rest-engine/coach/src/test/kotlin/dev/shimpyo/coach/` 의 `PromptMachineTest`(43), `PromptRulesTest`(3), `GoToPlannerTest`,
 `StopDetectorTest`(41), `StopRecorderTest`(13), `StopRulesCrossCheckTest`(11), 가짜는 `fakes/PromptFakes.kt`.
 실행: `./gradlew -q -p rest-engine :coach:test --tests 'dev.shimpyo.coach.PromptMachineTest'` (서버에서 돈다, 안드로이드 불필요).
 
@@ -83,6 +83,8 @@ PromptCard(prompt, key, reasons, shownAtMs, deadlineMs)   ← 시각은 ElapsedC
 ### 2.3 전이표 (상태 다이어그램)
 
 "닫음" = closed에 넣어 다시 띄우지 않음. "내림" = 카드를 내리지만 닫지 않음(엔진이 다시 내면 띄운다).
+"주행 질문" = 엔진이 먼저 건 마지막 기회·휴식 권유·상태 확인 (`PromptRules.withdrawWhenParked`). 사용자의 말에 대한 답
+(`Prompt.userRequested`)은 같은 종류로 와도 주행 질문이 아니다: 서 있어도 띄우고 남긴다 (아래).
 
 | 지금 상태 | 사건 | 조건 | 다음 상태 | 효과 |
 |---|---|---|---|---|
@@ -115,6 +117,12 @@ PromptCard(prompt, key, reasons, shownAtMs, deadlineMs)   ← 시각은 ElapsedC
 
 [CancelVoice]는 Asking일 때만 낸다(AwaitingTap이면 멈출 음성이 없다). Heard가 오면 음성 작업이 끝난 것이라 먼저 AwaitingTap으로 본다.
 한 사건에서 카드를 내리고 새 카드를 띄우면 Show(null) 없이 Show(새 질문)만 낸다.
+
+서 있을 때 한 말의 답 (엔진 닫힘 검증 E6): 엔진은 서 있는 동안(기어 P) 정차를 먼저 묻지 않지만 사용자의 말에는 서 있어도 답한다.
+꽉 막힌 정체에서 P로 서서 "아이가 화장실 가고 싶대"라고 하면 가장 가까운 화장실을 묻고(마지막 기회와 같은 종류), 선 곳 300m 안에
+화장실이 있으면 "가까이에 화장실이 있어요. …"라고 안내한다. 예전에는 기계가 종류만 보고 '정차 중 주행 질문'으로 거둬서 게이지만
+NOW가 되고 답이 보이지 않았다. 엔진이 그런 답에 `Prompt.userRequested`를 싣고, 기계는 그 표시가 있으면 P에서도 띄우고, 떠 있는 동안
+차를 세워도 거두지 않는다. 엔진이 먼저 건 질문은 전처럼 세우면 거둔다. 안내(INFO)는 원래 P와 상관없이 말한다.
 
 안내(INFO)가 Asking 중에 오면 묻던 음성을 멈추고 카드는 버튼 대기로 둔다. 운전자가 방금 물은 것의 대답이 카드 질문보다 지금 더 맞고,
 다음 틱에 엔진이 카드 질문을 버려 카드를 내릴 때 멈출 음성이 없어 그 대답을 끊지 않는다 (엔진은 지금 사용자 요청에 답하면서
@@ -187,6 +195,9 @@ PromptCard(prompt, key, reasons, shownAtMs, deadlineMs)   ← 시각은 ElapsedC
 | 대답한 질문을 엔진이 한 틱 더 냄 | 다시 띄우지 않음 | `anAnsweredPromptIsNotAskedAgainWhileTheEngineCatchesUp` |
 | 수명이 지난 질문을 엔진이 계속 냄 | 다시 띄우지 않음 | `anExpiredEngineCardIsNotShownAgainEvenIfStillOffered` |
 | P로 세움 | 주행 질문 거둠(다시 안 띄움), 정차 중 처음 온 질문은 출발 뒤 띄움 | `aParkedWithdrawalIsFinalButAnUnshownOfferWaitsForDriving`, 표 "P로 세움" 행 |
+| 서 있을 때 한 말("아이가 화장실 가고 싶대", "쉬고 싶어")의 답 | 서 있어도 띄우고 묻는다. 수락하면 서 있는 채로 들르기 (E6) | `anAnswerToASpokenRequestIsShownAndStaysWhileParked`, `PromptRulesTest.anAnswerToWhatSomeoneSaidStaysWhileParked`, `CoachCoreVoiceTest.aRestroomRequestSpokenWhileParkedIsAnsweredWithACardThatStays` |
+| 달리다 한 말의 답이 떠 있는 동안 세움 / 엔진이 먼저 건 마지막 기회가 떠 있는 동안 세움 | 남긴다 / 거둔다 | `anAnswerShownWhileDrivingStaysWhenTheCarParks`, `CoachCoreVoiceTest.theEnginesOwnLastChanceIsStillWithdrawnWhenTheCarParks` |
+| 선 곳 가까이에 화장실 (엔진의 안내) | 서 있어도 말한다. 음성 끔이면 화면 알림 | `anInfoAnswerIsSpokenWhileParked`, `CoachCoreVoiceTest.parkedNextToARestroomTheAnswerIsSpokenOrShown` |
 | "얼마나 남았어?"의 대답(INFO) | 말만, 카드 그대로, 한 번만 (D16) | `anInfoTickDoesNotHideTheCardAndTheCardIsNotReasked`, `anInfoIsSpokenOnce` |
 | 엔진이 잠깐 다른 질문을 냈다가 원래 질문을 다시 냄 | 원래 질문을 다시 띄움 | `aDisplacedEngineCardReturnsIfTheEngineStillOffersIt` |
 | 엔진 질문 위에 엔진의 급해 결과, 그 대답 뒤 | 급해 결과가 카드를 바꾸고, 대답하면 엔진이 다시 내는 원래 질문을 띄움 | `theEnginesUrgentResultDisplacesTheCardAndTheCardReturnsAfterTheAnswer` |
