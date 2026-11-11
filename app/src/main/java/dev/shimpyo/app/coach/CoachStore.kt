@@ -40,6 +40,8 @@ object CoachStore {
     fun resetTransient() = update {
         copy(
             serviceRunning = false, prompt = null, promptStop = null, promptReasons = emptyList(), goToResult = null,
+            // 진행 중이던 들르기·알림·자는 중 표시도 옛 서비스의 것이다 (새 코어가 자기 값으로 다시 올린다)
+            goToPending = null, notice = null, asleepOccupantIds = emptySet(),
             urgent = null, urgentState = UrgentState.IDLE, voice = VoiceState.IDLE, plan = null,
         )
     }

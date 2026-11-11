@@ -20,7 +20,7 @@ import dev.shimpyo.coach.CandidateProvider
 import dev.shimpyo.coach.CoachClock
 import dev.shimpyo.coach.CoachCore
 import dev.shimpyo.coach.CoachDeps
-import dev.shimpyo.coach.CoachGates
+import dev.shimpyo.coach.LoopInputs
 import dev.shimpyo.coach.CoachLog
 import dev.shimpyo.coach.ElapsedClock
 import dev.shimpyo.coach.EngineFactory
@@ -76,7 +76,7 @@ class CoachService : PleosForegroundService() {
         val hub = SignalHub()
         val odometer = Odometer(elapsed)
         val positions = PositionTracker(elapsed) { PositionTracker.isMoving(hub.speedKph, hub.gear == Gear.PARK) }
-        val gates = CoachGates()
+        val gates = LoopInputs()
         val navi = KitNaviPort(kits.navi)
         val tracker = NaviTracker(navi, odometer, { hub.speedKph != null }, elapsed, AppLog, positions.naviFallback { gates.naviFallback })
         val oracle = RouteOracle(navi, elapsed, AppLog)
@@ -89,7 +89,7 @@ class CoachService : PleosForegroundService() {
                 wall = wall, elapsed = elapsed, hub = hub, odometer = odometer, positions = positions, navi = navi, tracker = tracker,
                 candidates = candidates, oracle = oracle, stops = app.stops, voice = voice, interpreter = llm, cabin = cabin,
                 history = app.stopHistory, memory = app.memory, settings = app.settings, trips = app.trips, engines = ENGINES,
-                ui = CoachStore.sink, gates = gates, io = Dispatchers.IO, log = AppLog,
+                ui = CoachStore.sink, loopInputs = gates, io = Dispatchers.IO, log = AppLog,
             ),
         )
         core = c

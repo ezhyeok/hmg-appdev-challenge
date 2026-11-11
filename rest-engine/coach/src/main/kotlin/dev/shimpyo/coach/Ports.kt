@@ -18,8 +18,9 @@ import kotlinx.coroutines.flow.Flow
 // ------------------------------------------------------------ 시간
 
 /**
- * 엔진과 모드별 상태가 쓰는 시각(epoch ms). 시연에서는 가상 시각이다(DemoRun).
- * 정차 기록·질문 만료처럼 '엔진이 보는 시각'에 쓴다.
+ * epoch ms 시각을 주는 시계. 세계(CoachWorld.clock)의 것이면 코치 시각이다: 엔진 입력, 정차, 여정처럼 '엔진이 보는 시각'에 쓰고,
+ * 시연에서는 가상 시각이다(DemoRun). 실제 시각을 주는 것은 WallClock이라고 부른다(같은 타입, CoachDeps.kt).
+ * 질문 카드의 수명·만료처럼 사람이 겪는 시간은 이것이 아니라 [ElapsedClock]으로 잰다.
  */
 fun interface CoachClock {
     fun now(): Long

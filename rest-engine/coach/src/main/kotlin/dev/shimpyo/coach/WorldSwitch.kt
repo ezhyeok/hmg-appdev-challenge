@@ -63,7 +63,7 @@ class WorldSwitch(
     private val memory: MemoryPort,
     private val tripStore: TripStorePort,
     /** 실제 시각 (epoch ms) */
-    private val wall: CoachClock,
+    private val wall: WallClock,
     private val elapsed: ElapsedClock,
     private val rules: TripRules = TripRules(),
 ) {
@@ -140,6 +140,35 @@ class WorldSwitch(
         return next
     }
 
+    /**
+     * 건강 정보 동의를 거뒀다: 사용자가 넣은 건강 유형 탑승자를 모든 세계에서 뺀다. 동의는 세계와 무관한 설정 하나인데 탑승자는
+     * 세계마다 따로라서, 시연 중에 동의를 끄면 옆에 둔 실제 세계의 임신부가 시연을 끈 뒤 동의 없이 돌아와 게이지의 기준이 됐다
+     * (UI 닫힘 검증 N3). 설정에 저장된 실제 탑승자(시연 중이면 옆에 둔 세계의 것)와 시연에서 사용자가 고친 탑승자가 대상이다.
+     * 시나리오가 정한 시연 탑승자는 사용자의 정보가 아니라 그대로 둔다. 바뀐 것이 있으면 true
+     */
+    fun dropHealthOccupants(): Boolean {
+        var changed = false
+        val saved = settings.occupants
+        if (saved.any { HealthConsent.isHealth(it.type) }) {
+            settings.occupants = HealthConsent.allowed(saved, consent = false)
+            val real = this.real
+            real.engine.setProfile(real.profile(settings))
+            changed = true
+        }
+        val a = active
+        val w = a.world
+        if (w is CoachWorld.Demo && w.occupantsEdited) {
+            val edited = w.occupants(settings)
+            if (edited.any { HealthConsent.isHealth(it.type) }) {
+                val next = a.with(world = w.withOccupants(HealthConsent.allowed(edited, consent = false)))
+                current = next
+                next.engine.setProfile(next.profile(settings))
+                changed = true
+            }
+        }
+        return changed
+    }
+
     /** 설정(수면 시간 등)이 바뀌었다. 지금 세계의 기준점으로 프로필을 다시 넘긴다 (서비스 감사 D4: 시연 중이면 시연 여정이 리셋됐다) */
     fun profileChanged() {
         val a = active
@@ -174,6 +203,21 @@ class WorldSwitch(
         val next = a.with(generation = ++generation)
         current = next
         return WorldChange(next, WorldChange.Kind.ENGINE)
+    }
+
+    /**
+     * 되돌린 정차(재시작, 시연 끄기)가 [endedAt]에 끝난 것으로 판정됐다: 차는 지금 P가 아니다. 지금 세계의 엔진도 그때 떠난 것으로
+     * 맞춘다. 여정은 이어지는 [onTick](정차 없음)이 맞춘다. 판정 뒤 첫 엔진 update 전에 부른다
+     */
+    fun restoredParkEnded(endedAt: Long) {
+        val a = active
+        a.world.endPark(a.engine, endedAt)
+    }
+
+    /** 운전자가 고른 정차를 내비에 넣었다: 지금 세계의 여정에 적는다 (실제 세계면 맥박에 저장된다) */
+    fun onAccepted(stopId: String) {
+        val a = active
+        a.session.onAccepted(stopId, a.clock.now())
     }
 
     /** 정차 기록 (StopRecorder). 기록 파일에 덧붙일지는 코어가 world.persistsHistory로 정한다 */

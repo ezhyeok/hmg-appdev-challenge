@@ -23,8 +23,10 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * CoachCore를 서비스처럼 조립해(CoreRig: 같은 부품, 같은 루프, 가상 시간 하나) 시나리오 끝까지 돌린다 (docs/design/coach-layer/core.md 7장).
- * 엔진은 실제 엔진(고정 난수), 내비·음성·공조·저장소는 가짜다.
+ * CoachCore를 서비스처럼 조립해(CoreRig: 같은 부품, 같은 루프, 가상 시간 하나) 시나리오 끝까지 돌린다
+ * (docs/design/coach-layer/core.md 11장 '시나리오 → 테스트'). 엔진은 실제 엔진(고정 난수), 내비·음성·공조·저장소는 가짜다.
+ * 급해는 CoachCoreUrgentTest, 들르기는 CoachCoreGoToTest, 음성은 CoachCoreVoiceTest, 재시작·새 여정·종료는 CoachCoreTripTest,
+ * 자는 중 표시는 CoachCoreAsleepTest.
  */
 class CoachCoreTest {
 
@@ -123,6 +125,30 @@ class CoachCoreTest {
         assertEquals("화면 목록 1등과 엔진 질문이 같은 곳", rig.state.urgent!!.first().stop.id, rig.state.prompt?.stop?.id)
     }
 
+    // ------------------------------------------------------------ 질문 이유 (UI 닫힘 검증 #6)
+
+    @Test
+    fun aJamLastChanceAskedWhileTheGaugeIsNowIsStillPublishedAsAJamLastChance() = runTest {
+        // 코어는 카드를 띄울 때의 이유를 엔진 추천(next)에서 가져온다. 예전에는 화장실 게이지가 NOW(10분 이하, 또는 누가 말함)면
+        // 엔진 추천의 이유가 LAST_CHANCE_*가 아니라 NEXT_NEAREST_RESTROOM이었다(추천은 NOW를 먼저 봤다). 그래서 "앞에 1시간 정체가
+        // 있어요 … 정체 전 마지막 화장실이에요"라고 묻는 카드의 promptReasons가 [NEXT_NEAREST_RESTROOM]이고, 화면은 맥락 줄을
+        // '가까운 화장실', 칩을 '가장 빨리 가는 곳'으로 그렸다('정체 1시간' 칩이 없다). 가장 급할 때(아이가 화장실을 말했고 다음이
+        // 정체 전 마지막) 생겼다. 엔진이 질문의 이유를 추천에 함께 싣는다 (엔진 PromptReasonsTest). 여기서는 화면 상태까지 본다
+        val rig = CoreRig(this)
+        rig.voice.listens += "아이가 화장실 가고 싶대"
+        rig.drive(100f)
+        rig.start()
+        rig.command(UiCommand.Demo("holiday"))
+        rig.runUntil(120_000) { rig.state.ahead.firstOrNull()?.id == "oksan" } ?: error("천안을 지나치지 않았다")
+        rig.command(UiCommand.Listen)
+        rig.runUntil(5_000) { rig.state.prompt != null } ?: error("답이 없다")
+        val p = rig.state.prompt!!
+        assertEquals("oksan", p.stop?.id)
+        assertTrue("전제: 엔진은 정체 전 마지막 화장실이라고 묻는다 (${p.speech})", "정체 전 마지막 화장실" in p.speech)
+        val codes = rig.state.promptReasons.map { it.code }
+        assertTrue("카드 이유에 정체 전 마지막이 없다: $codes (화면 맥락 줄이 '가까운 화장실'이 된다)", "LAST_CHANCE_CONGESTION" in codes)
+    }
+
     // ------------------------------------------------------------ 급해
 
     @Test
@@ -143,7 +169,7 @@ class CoachCoreTest {
 
         // 화면에 떠 있는 동안 위치가 바뀌면 10초 안에 다시 찾는다 (UI 감사 #9)
         rig.fix(37.5045, 127.0490, 70f)
-        rig.run(UrgentSession.REFRESH_MS)
+        rig.run(UrgentFlow.REFRESH_MS)
         assertTrue("지난 위치의 결과가 그대로가 아니다", rig.state.urgent != first)
     }
 
@@ -171,7 +197,7 @@ class CoachCoreTest {
         rig.drive(30f)
         rig.start()
         rig.command(UiCommand.Urgent(9L))
-        rig.run(UrgentSession.LOCATE_MS + 1_000)
+        rig.run(UrgentFlow.LOCATE_MS + 1_000)
         assertEquals(UrgentState.NO_LOCATION, rig.state.urgentState)
         assertTrue(rig.voice.said.any { "위치" in it })
     }
@@ -232,14 +258,14 @@ class CoachCoreTest {
         rig.run(2_000)
         assertEquals("stop", rig.state.demo)
         assertEquals("시연 탑승자", listOf("driver", "kid"), rig.state.occupants.map { it.id })
-        assertEquals(CandidatePolicy.DEMO, rig.gates.request.policy)
-        assertFalse(rig.gates.naviFallback)
+        assertEquals(CandidatePolicy.DEMO, rig.loopInputs.request.policy)
+        assertFalse(rig.loopInputs.naviFallback)
         rig.command(UiCommand.Demo(null))
         rig.run(1_000)
         assertNull(rig.state.demo)
         assertEquals("실제 탑승자", listOf("driver"), rig.state.occupants.map { it.id })
-        assertEquals(CandidatePolicy.REAL, rig.gates.request.policy)
-        assertTrue(rig.gates.naviFallback)
+        assertEquals(CandidatePolicy.REAL, rig.loopInputs.request.policy)
+        assertTrue(rig.loopInputs.naviFallback)
         assertEquals("시연 탑승자를 설정에 쓰지 않았다", 0, rig.settings.occupantWrites)
     }
 
@@ -253,13 +279,13 @@ class CoachCoreTest {
         val before = checkNotNull(rig.state.fatigue?.minutes)
         rig.command(UiCommand.Demo("holiday"))
         rig.run(30_000)
-        assertTrue("시연 위치", rig.gates.request.pos!!.lat < 37.0)
+        assertTrue("시연 위치", rig.loopInputs.request.pos!!.lat < 37.0)
         rig.command(UiCommand.Demo(null))
         rig.run(2_000)
         // 실제 엔진을 옆에 두었다가 되돌린다 (파일에서 연속 주행 0으로 다시 만들면 피로 게이지가 처음으로 돌아갔다, 서비스 감사 D10)
         val after = checkNotNull(rig.state.fatigue?.minutes)
         assertTrue("피로가 이어진다: 시연 전 $before, 뒤 $after", after <= before && after >= before - 3)
-        val pos = rig.gates.request.pos!!
+        val pos = rig.loopInputs.request.pos!!
         assertEquals("시연을 끄면 실제 위치 (구조 리뷰 D3)", 37.40, pos.lat, 1e-6)
         assertEquals(127.10, pos.lon, 1e-6)
     }
@@ -333,7 +359,7 @@ class CoachCoreTest {
         rig.run(2 * 60_000L)
         val times = rig.timedMemory.saveTimes
         assertEquals("두 번째 변화는 1분을 기다려 저장 ($times)", 2, times.size)
-        assertTrue("저장 간격 ${times[1] - times[0]}ms", times[1] - times[0] >= CoachCore.MEMORY_EVERY_MS)
+        assertTrue("저장 간격 ${times[1] - times[0]}ms", times[1] - times[0] >= MemorySaver.EVERY_MS)
         assertEquals("두 사람의 간격이 모두 저장됐다", setOf("kid", "grandma"), memory.stored.restroomIntervalsMin.keys)
     }
 
@@ -383,6 +409,57 @@ class CoachCoreTest {
         rig.settings.healthConsent = true
         rig.command(UiCommand.SetOccupants(listOf(DRIVER, Occupant("p", OccupantType.PREGNANT))))
         assertEquals(listOf("driver", "p"), rig.state.occupants.map { it.id })
+    }
+
+    @Test
+    fun withdrawingHealthConsentDuringADemoAlsoStopsUsingHealthOccupantsOfTheRealTrip() = runTest {
+        // 건강 정보 동의는 세계와 무관한 설정 하나인데 탑승자는 세계마다 따로다. 시연 중에는 화면의 탑승자가 시연 탑승자라 동의 스위치를
+        // 꺼도 SetOccupants 없이 동의만 꺼진다. 예전에는 시연을 끄면 실제 탑승자(임신부)가 동의 없이 그대로 돌아와 화장실 게이지의
+        // 기준이 됐다 (UI 닫힘 검증 N3). 코어가 동의가 꺼진 것을 보면 모든 세계와 설정에서 건강 유형 탑승자를 뺀다
+        val pregnant = Occupant("p", OccupantType.PREGNANT, label = "임신부")
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER, pregnant), healthConsent = true))
+        rig.park()
+        rig.start()
+        rig.run(2_000)
+        assertEquals("전제: 동의한 실제 탑승자", listOf("driver", "p"), rig.state.occupants.map { it.id })
+        rig.command(UiCommand.Demo("holiday"))
+        rig.run(2_000)
+        rig.settings.healthConsent = false // 화면: prefs.updateHealthConsent(false)
+        rig.run(2_000)
+        assertEquals("시연 탑승자는 그대로", listOf("driver", "kid"), rig.state.occupants.map { it.id })
+        assertEquals("설정에서도 뺀다", listOf("driver"), rig.settings.occupants.map { it.id })
+        rig.command(UiCommand.Demo(null))
+        rig.run(2_000)
+        assertTrue("동의를 철회했는데 건강 유형 탑승자를 쓴다: ${rig.state.occupants.map { it.type }}", rig.state.occupants.none { HealthConsent.isHealth(it.type) })
+        assertTrue("화장실 게이지의 기준이 동의 없는 건강 유형 탑승자다", rig.state.restroom?.drivenBy != "p")
+    }
+
+    @Test
+    fun withdrawingHealthConsentInTheRealWorldRemovesTheOccupantAtOnce() = runTest {
+        val pregnant = Occupant("p", OccupantType.PREGNANT, label = "임신부")
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER, KID, pregnant), healthConsent = true))
+        rig.drive(60f)
+        rig.start()
+        rig.run(2_000)
+        rig.settings.healthConsent = false
+        rig.run(1_000)
+        assertEquals(listOf("driver", "kid"), rig.state.occupants.map { it.id })
+        assertEquals(listOf("driver", "kid"), rig.settings.occupants.map { it.id })
+        // 다시 동의해도 뺀 사람이 저절로 돌아오지 않는다
+        rig.settings.healthConsent = true
+        rig.run(2_000)
+        assertEquals(listOf("driver", "kid"), rig.state.occupants.map { it.id })
+    }
+
+    @Test
+    fun healthOccupantsStoredWithoutConsentAreRemovedAtStart() = runTest {
+        // 서비스가 꺼져 있는 동안 동의를 거뒀다 (또는 예전 판이 동의 없이 저장했다)
+        val oab = Occupant("o", OccupantType.OAB, label = "과민성 방광")
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER, oab), healthConsent = false))
+        rig.park()
+        rig.start()
+        assertEquals(listOf("driver"), rig.state.occupants.map { it.id })
+        assertEquals(listOf("driver"), rig.settings.occupants.map { it.id })
     }
 
     // ------------------------------------------------------------ 재시작
@@ -461,15 +538,61 @@ class CoachCoreTest {
         val rig = CoreRig(this)
         rig.drive(100f)
         rig.start()
+        assertEquals("요청 전에는 번호가 없다", 0L, rig.state.planGeneration)
         rig.command(UiCommand.MakePlan) // 첫 틱 전 요청도 답한다
         rig.command(UiCommand.Demo("holiday"))
         rig.run(2_000)
-        assertEquals(1L, rig.state.planGeneration)
+        val first = rig.state.planGeneration
+        assertTrue("요청에 답하면 번호가 생긴다 (0은 번호를 쓰지 않는 코치)", first > 0L)
         assertNotNull(rig.state.plan)
         rig.run(60_000) // 후보가 여러 번 바뀌어 계획을 다시 만든다
-        assertEquals("고쳐 낸 계획은 번호를 올리지 않는다", 1L, rig.state.planGeneration)
+        assertEquals("고쳐 낸 계획은 번호를 올리지 않는다", first, rig.state.planGeneration)
         rig.command(UiCommand.MakePlan)
-        assertEquals(2L, rig.state.planGeneration)
+        assertEquals("새 요청마다 1 오른다", first + 1, rig.state.planGeneration)
+    }
+
+    @Test
+    fun aClosedPlanIsNotRebuiltUntilItIsRequestedAgain() = runTest {
+        // 계획 화면을 떠났다는 신호가 없어서 MakePlan 한 번에 10분 동안 계획을 30번 다시 세웠다 (리뷰 R-F12).
+        // 화면이 ClosePlan을 보내면 멈춘다. 마지막 계획은 화면 상태에 남는다 (주행 화면의 '다음 계획' 카드)
+        val rig = CoreRig(this)
+        rig.drive(100f)
+        rig.start()
+        rig.command(UiCommand.Demo("holiday"))
+        rig.run(3_000)
+        rig.command(UiCommand.MakePlan)
+        rig.run(1_000)
+        val shown = checkNotNull(rig.state.plan)
+        val gen = rig.state.planGeneration
+        rig.command(UiCommand.ClosePlan)
+        var rebuilt = 0
+        repeat(600) {
+            rig.run(1_000)
+            if (rig.state.plan !== shown) rebuilt++
+        }
+        assertEquals("계획 화면을 떠난 뒤 10분 동안 다시 세운 횟수", 0, rebuilt)
+        assertEquals(gen, rig.state.planGeneration)
+        rig.command(UiCommand.MakePlan)
+        assertTrue("다시 요청하면 지금 위치로 다시 세운다", rig.state.plan !== shown)
+        assertEquals(gen + 1, rig.state.planGeneration)
+    }
+
+    @Test
+    fun aRestartedCoreNeverRepeatsAPlanGeneration() = runTest {
+        // 같은 프로세스에서 서비스만 다시 뜨면 화면 상태에 죽은 코어의 번호가 남는다. 새 코어가 같은 번호부터 세면 화면의
+        // '계획을 세우는 중'이 풀리지 않는다 (서비스 닫힘 검증 N8, UI 닫힘 검증 N6)
+        val seen = ArrayList<Long>()
+        repeat(2) {
+            val rig = CoreRig(this)
+            rig.drive(100f)
+            rig.start()
+            rig.command(UiCommand.Demo("holiday"))
+            rig.run(2_000)
+            rig.command(UiCommand.MakePlan)
+            rig.run(1_000)
+            seen += rig.state.planGeneration
+        }
+        assertTrue("다시 뜬 코어의 첫 계획 번호가 앞 코어의 번호와 겹친다: $seen", seen[1] > seen[0] && seen[0] > 0L)
     }
 
     @Test
@@ -488,7 +611,7 @@ class CoachCoreTest {
         rig.run(10_000)
         rig.state.goToResult?.let { seen += it.at }
         assertEquals("두 결과 (${rig.navi.commands})", 2, seen.distinct().size)
-        rig.run(CoachCore.GO_TO_RESULT_TTL_MS)
+        rig.run(PromptMachine.GO_TO_RESULT_TTL_MS)
         assertNull("오래된 결과는 거둔다", rig.state.goToResult)
     }
 }

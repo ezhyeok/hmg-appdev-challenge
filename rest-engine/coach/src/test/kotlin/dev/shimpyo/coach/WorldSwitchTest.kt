@@ -212,6 +212,40 @@ class WorldSwitchTest {
     }
 
     @Test
+    fun withdrawingHealthConsentRemovesHealthOccupantsFromEveryWorld() {
+        // UI 닫힘 검증 N3: 동의는 설정 하나인데 탑승자는 세계마다 따로다. 시연 중에 동의를 끄면 옆에 둔 실제 세계의 임신부가
+        // 시연을 끈 뒤 동의 없이 돌아왔다
+        val pregnant = Occupant("p", OccupantType.PREGNANT, label = "임신부")
+        val oab = Occupant("o", OccupantType.OAB, label = "과민성 방광")
+        settings.occupants = listOf(DRIVER, pregnant)
+        val writes = settings.occupantWrites
+        val w = opened()
+        w.drive(5)
+        w.enterDemo("holiday")
+        w.setOccupants(listOf(DRIVER, KID, oab)) // 시연에서 사용자가 고친 탑승자
+        assertTrue(w.dropHealthOccupants())
+        assertEquals("옆에 둔 실제 세계의 탑승자를 설정에서 뺀다", listOf(DRIVER), settings.occupants)
+        assertEquals(writes + 1, settings.occupantWrites)
+        assertEquals("시연에서 고친 탑승자에서도 뺀다", listOf(DRIVER, KID), w.active.world.occupants(settings))
+        assertEquals("시연 여정은 그대로", "holiday", w.active.world.name)
+        val real = w.exitDemo().active
+        assertEquals(listOf(DRIVER), real.world.occupants(settings))
+        assertEquals("실제 엔진도 그 사람을 더는 세지 않는다", "driver", w.tick().restroom.drivenBy)
+        assertEquals("뺄 사람이 없으면 아무것도 바꾸지 않는다", false, w.dropHealthOccupants())
+        assertEquals(writes + 1, settings.occupantWrites)
+    }
+
+    @Test
+    fun scenarioOccupantsOfADemoAreNotTheUsersHealthData() {
+        val w = opened()
+        w.enterDemo("holiday")
+        val before = w.active
+        assertEquals(false, w.dropHealthOccupants())
+        assertSame("시나리오가 정한 탑승자는 건드리지 않는다", before, w.active)
+        assertEquals(0, settings.occupantWrites)
+    }
+
+    @Test
     fun clearingLearningDuringADemoAlsoClearsTheKeptRealEngine() {
         val w = opened()
         w.drive(5)
