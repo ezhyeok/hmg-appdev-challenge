@@ -232,6 +232,23 @@ class NaviTrackerTest {
     }
 
     @Test
+    fun aZeroRemainingDistanceWhileStillGuidingIsAGlitchNotTwoReroutes() = runTest {
+        // 2026-11-12 에뮬레이터: 길안내 중인 내비가 목적지 응답 하나에서 남은 거리 0을 주고 다음 응답에서 383km로 돌아왔다.
+        // 0을 값으로 믿으면 '3km 넘게 줄었다'(재탐색)와 '1km 넘게 늘었다'(재탐색)로 epoch가 두 번 올라 후보 범위가 0이 되고 TBT를 다시 받았다.
+        // 길안내 모드인데 남은 거리가 0이면 도착이 아니다(도착하면 모드가 바뀐다): 못 읽은 것으로 본다
+        val r = Rig(this)
+        r.guide(totalM = 383_000.0, extra = {
+            val t = r.scope.testScheduler.currentTime
+            if (t in 25_000..35_000) -(383_000.0 - r.odo.meters) else 0.0
+        })
+        r.start()
+        advanceTimeBy(60_001)
+        assertEquals("epoch는 길안내 시작 한 번", 1, r.snap.epoch)
+        assertTrue("남은 거리는 0이 아니다", r.snap.route!!.remainDistanceM!! > 300_000.0)
+        assertTrue(r.published.none { it.route?.remainDistanceM == 0.0 })
+    }
+
+    @Test
     fun aRerouteBumpsTheEpochResetsCongestionAndNeverPairsTheOldTbt() = runTest {
         val r = Rig(this)
         // 40초에 출구를 놓쳐 남은 거리가 5km 늘었다 (이벤트 없이 남은 거리로만 안다)

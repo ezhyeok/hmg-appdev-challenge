@@ -150,7 +150,9 @@ class NaviTracker(
         }
         val odoAt = odometer.meters // 내비는 요청 시점의 위치에서 잰다
         val dest = call("destination") { navi.destination() }
-        val remain = dest?.remainDistanceM?.takeIf { it.isFinite() && it >= 0.0 }
+        // 길안내 모드인데 남은 거리 0은 도착이 아니라 깨진 응답이다(도착하면 모드가 바뀐다). 2026-11-12 에뮬레이터에서 응답 하나만
+        // 0으로 왔다가 돌아와 재탐색이 두 번 잡혔다. 못 읽은 것으로 본다 (같은 경로면 지난 값을 둔다)
+        val remain = dest?.remainDistanceM?.takeIf { it.isFinite() && it > 0.0 }
         val usable = remain != null
         nextRouteAt = startedAt + if (usable) NaviPoll.ROUTE_MS else NaviPoll.NEAR_MS
 
