@@ -20,6 +20,7 @@ Pleos Connect SDK(Vehicle, NaviHelper, TTS, STT, FusedLocation)와 AAOS Car API�
 | Car 서비스가 죽으면 `createCar(context)`로 만든 연결은 프로세스를 죽인다 | `CarState`는 상태 리스너를 받는 `createCar`로 만들고 `connected`로 알린다 (API 30+) |
 | Pleos 차량 서비스가 멈추면(`force-stop`) SDK는 다시 붙지 않고 값이 언다 | `VehicleKit.reconnect()`, `LocationKit.reconnect()`가 SDK 객체를 버리고 새로 붙는다. 신호 객체는 그대로 쓸 수 있다 |
 | TTS/STT 이벤트에 요청 번호가 없다. 쉬는 TTS에 `stop()`을 보내도 `onStop`이 온다 | `TurnRunner`(Turns.kt): 요청을 하나씩 보내고, 앞 요청의 끝남 이벤트를 받은 뒤 다음을 보낸다. 하는 중이 아니면 `stop()`은 SDK를 부르지 않는다 |
+| STT는 `request()` 뒤 0.2~8초가 지나야 녹음을 시작한다(`onReady`). 듣는 시간을 요청부터 재면 그만큼 줄어든다 | `SttKit.listen(timeoutMs, onMicOpen)`: 듣는 시간은 `onReady`부터 잰다(`listenWindow`). 12초 안에 열리지 않으면 null. '듣는 중' 표시는 `onMicOpen`에서 켠다 |
 | 내비는 새 경유지를 늘 뒤에 붙이고, 셋째는 조용히 버리고, 경유지 좌표를 돌려주지 않는다 | `NaviKit.addWaypoint`는 이름으로 확인하고 가득 차 있으면 곧바로 false. 순서를 정하려면 `NaviKit.setWaypoints` |
 | 취소를 SDK 실패로 바꾸면 쓰는 쪽이 취소를 실패로 센다 | `sdkSend`·`sdkCall`은 취소를 `CancellationException` 그대로 던진다 |
 | 앱이 죽은 뒤 다시 만들어진 서비스에는 `onStartCommand` 없이 `onTaskRemoved`만 올 수 있다 | `PleosForegroundService`가 `onTaskRemoved`에서도 시작하고, `startForeground`가 거절돼도 죽지 않고 다시 시도한다 |
@@ -33,7 +34,7 @@ Pleos Connect SDK(Vehicle, NaviHelper, TTS, STT, FusedLocation)와 AAOS Car API�
 | `UxRestrictions`, `UxRestrictionWatcher` | 주행 중 UX 제한(`CarUxRestrictions`). 모르는 상태를 `Unknown`으로 따로 두고 `restricted`는 모르면 true(fail closed). 기능별 비트(`UxRestrictionFlags`)와 최대 글자 수·항목 수. `UxRestrictionWatcher`는 권한 없이 제한만 구독한다(화면이 서비스 없이 쓸 때) |
 | `NaviKit` | NaviHelper. 조회(`routeState`, `tbt`, `waypoints`, `tripEstimate` 등)와 경로 변경(`startRoute`, `addWaypoint`, `cancelRoute`) |
 | `TtsKit`, `SttKit` | 음성 합성·인식(ON_DEVICE 기본). `speak()`는 재생이 끝날 때까지 기다린다. `SpeechOutput`/`SpeechInput` 인터페이스를 구현한다(쓰는 쪽이 가짜로 시험할 수 있게) |
-| `Turns.kt` | 음성 요청과 요청 번호 없는 이벤트를 짝짓는 `TurnGate`·`TurnRunner` |
+| `Turns.kt` | 음성 요청과 요청 번호 없는 이벤트를 짝짓는 `TurnGate`·`TurnRunner`, 듣는 시간 규칙 `listenWindow` |
 | `LocationKit` | FusedLocation. 마지막 위치, 위치 갱신 Flow, 근접 알림 Flow |
 | `PleosForegroundService` | 주행 중 계속 살아 있어야 하는 로직을 두는 서비스의 바탕 |
 | `PleosPermissions` | 실행 중 요청이 필요한 권한 처리 |
@@ -112,7 +113,7 @@ vehicle.call2<SeatArea, MoveControl?>("moveSeatBackrestAngle") { ok, fail ->
 
 ## 테스트
 
-SDK와 안드로이드를 부르지 않는 규칙은 JVM 테스트로 지킨다 (노트북에서 `gradle.ps1 :pleos-kit:testDebugUnitTest`): `TurnsTest`(음성 요청 순서, 늦은 멈춤 이벤트), `SdkCallTest`(취소는 취소로, SDK 객체는 처음 쓸 때 한 번, 미지원 오류 분류). 내비 경유지 확인 규칙은 앱의 `KitRulesTest`에 있다.
+SDK와 안드로이드를 부르지 않는 규칙은 JVM 테스트로 지킨다 (노트북에서 `gradle.ps1 :pleos-kit:testDebugUnitTest`): `TurnsTest`(음성 요청 순서, 늦은 멈춤 이벤트), `ListenWindowTest`(듣는 시간은 마이크가 열린 뒤부터), `SdkCallTest`(취소는 취소로, SDK 객체는 처음 쓸 때 한 번, 미지원 오류 분류). 내비 경유지 확인 규칙은 앱의 `KitRulesTest`에 있다.
 기기에서만 볼 수 있는 것은 점검 스크립트가 본다: `tools/laptop/restart-check.sh`(서비스 다시 만들기), `tools/laptop/signals-check.sh`(차량 서비스가 죽거나 멈춘 뒤 신호가 다시 오는지).
 
 ## 에뮬레이터 확인 결과
