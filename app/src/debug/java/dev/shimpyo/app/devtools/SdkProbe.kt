@@ -6,6 +6,8 @@ import ai.pleos.playground.navi.data.RouteInfo
 import ai.pleos.playground.navi.data.WaypointInfo
 import ai.pleos.playground.stt.listener.ResultListener
 import ai.pleos.playground.tts.listener.EventListener
+import android.app.Service
+import android.content.Context
 import android.os.SystemClock
 import android.util.Log
 import dev.hmg.pleoskit.NaviEvent
@@ -38,10 +40,13 @@ import ai.pleos.playground.tts.constant.ErrorType as TtsErrorType
  * - `route:<위도>,<경도>:<이름>` / `route-cancel`: 길안내 시작 / 끝
  * - `tts:<stop-mid|stop-idle|stop-then-speak|stop-early>`: 말하기를 끊어 보고 이벤트 순서를 본다
  * - `stt:<stop-then-request>`: 듣기를 끊고 곧바로 다시 듣는다
+ * - `stop-self`: 서비스가 스스로 끝낸다 (stopSelf → onDestroy). 끝나는 순서와 마지막 저장을 본다. 이 이미지에서는
+ *   `am stopservice`가 exported가 아닌 서비스에 닿지 않는다
  * - `veh-read`: 차량 신호 몇 개를 읽는다 (서비스가 죽었을 때 무엇이 오는지)
  * - `veh-reconnect`: Vehicle SDK를 놓고 다시 붙인 뒤 읽는다
  */
 class SdkProbe(
+    private val service: Context,
     private val vehicle: () -> VehicleKit,
     private val navi: () -> NaviKit,
     private val tts: () -> TtsKit,
@@ -64,6 +69,7 @@ class SdkProbe(
                 "route-cancel" -> log(name, "cancelled=${connectedNavi().cancelRoute()}")
                 "tts" -> ttsProbe(name, parts.getOrElse(1) { "stop-mid" })
                 "stt" -> sttProbe(name)
+                "stop-self" -> stopSelf(name)
                 "veh-read" -> vehicleRead(name)
                 "veh-reconnect" -> {
                     vehicle().reconnect()
@@ -139,6 +145,12 @@ class SdkProbe(
         val ok = n.setWaypoints(RouteInfo(latitude = d.latitude, longitude = d.longitude, poiName = d.name, poiId = "", address = d.address, poiSubId = ""), list)
         val after = n.destination()
         log(name, "confirmed=$ok after=${describe(n.waypoints())} destination=${after.name} ${after.remainDistance}m mode=${n.routeState().naviMode}")
+    }
+
+    private fun stopSelf(name: String) {
+        val s = service as? Service ?: return log(name, "not a service")
+        log(name, "stopSelf()")
+        s.stopSelf()
     }
 
     private suspend fun portAdd(name: String, coords: String, poi: String) {

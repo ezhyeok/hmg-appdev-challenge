@@ -54,7 +54,7 @@ object DevToolRunner {
         when (request.tool) {
             DevHooks.Tool.VERIFY -> SdkVerify(context, kits.vehicle(), kits.navi(), kits.location()).run()
             DevHooks.Tool.SELFTEST -> KitSelfTest(kits.vehicle(), kits.navi(), kits.tts(), kits.stt(), kits.location()).run(request.withRoute)
-            DevHooks.Tool.PROBE -> SdkProbe(kits.vehicle, kits.navi, kits.tts, kits.stt).run(request.probe.orEmpty())
+            DevHooks.Tool.PROBE -> SdkProbe(context, kits.vehicle, kits.navi, kits.tts, kits.stt).run(request.probe.orEmpty())
             null -> Unit
         }
     }

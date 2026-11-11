@@ -51,7 +51,7 @@
 - 에뮬레이터 이미지는 user 빌드다(`adb root` 불가). 프로세스를 죽이는 방법: `am crash <패키지>`(크래시), `am force-stop --user 10 <패키지>`(멈춤, 다시 뜨지 않는다), debug 빌드의 앱은 `run-as dev.shimpyo.app --user 10 kill -9 <pid>`(크래시가 아닌 죽음). `run-as`에 `--user 10`을 빼면 user 0의 uid라 앱 프로세스에 닿지 않는다
 - 이미 떠 있는 앱에 보낸 `am start … --es …`는 Pleos 홈 화면이 창 다시 띄우기로 처리해 앱의 `onNewIntent`에 닿지 않는다(2026-11-12). 옵션을 주려면 `am start -S`(앱 재시작)로 보내거나, debug 빌드는 `adb shell am broadcast --user current -a dev.shimpyo.app.DEV -p dev.shimpyo.app --es probe wp`처럼 브로드캐스트로 보낸다
 - 에뮬레이터 부하: 평소 load average는 5~7이다. APK 설치 직후나 앱을 연달아 다시 시작하면 20을 넘는다(2026-11-12). 설치·재시작 뒤에는 `tools/laptop/wait-emulator.sh 8`로 가라앉기를 기다리고, 시간을 재는 점검은 그 뒤에 한다
-- 2026-11-12 에뮬레이터가 7시간 가동 뒤 `libgfxstream_backend.dll` 접근 위반(0xc0000005)으로 죽었다(`-gpu host`, 직전에 앱을 여러 번 죽였다 살렸다). 증상: `adb devices`가 비고 qemu 프로세스가 없다. `start-emulator.ps1`로 다시 띄운다. 다시 부팅하면 내비의 길안내는 사라지고 시각대가 America/Los_Angeles로 돌아올 수 있다(`wait-emulator.sh`가 Asia/Seoul로 맞춘다: `cmd time_zone_detector set_auto_detection_enabled false` + `service call alarm 3 s16 Asia/Seoul`)
+- 2026-11-12 에뮬레이터가 `libgfxstream_backend.dll` 접근 위반(0xc0000005)으로 두 번 죽었다(`-gpu host`, 7시간·2시간 가동). 두 번 모두 앱을 `am start -S`로 10~15번 다시 시작한 뒤였고, 창이 다시 만들어질 때마다 에뮬레이터 로그에 `Failed to find ColorBuffer`가 쌓였다. **앱 재시작은 아껴 쓴다**: debug 빌드의 시연 전환·실험은 브로드캐스트(`am broadcast -a dev.shimpyo.app.DEV --es demo holiday`)로 보내면 창을 다시 만들지 않는다. 증상: `adb devices`가 비고 qemu 프로세스가 없다. `start-emulator.ps1`로 다시 띄운다. 다시 부팅하면 내비의 길안내는 사라지고 시각대가 America/Los_Angeles로 돌아올 수 있다(`wait-emulator.sh`가 Asia/Seoul로 맞춘다: `cmd time_zone_detector set_auto_detection_enabled false` + `service call alarm 3 s16 Asia/Seoul`)
 - GitHub private repo: https://github.com/ezhyeok/hmg-appdev-challenge (기본 브랜치 `main`)
 
 ## SDK 사용 조건 (설명회 기준, Playground 문서보다 우선)

@@ -154,7 +154,8 @@ internal class TurnRunner<E : Any>(
         val prev = gate.pending ?: return
         stop()
         if (withTimeoutOrNull(confirmMs) { prev.end.await() } == null) {
-            KitLog.w("$name: no end event for request ${prev.seq} in ${confirmMs}ms; a late one may be read as the next request's")
+            // 에뮬레이터의 STT는 멈춘 듣기의 끝남 이벤트를 주지 않아 듣기마다 여기로 온다: 경고가 아니라 기록으로 남긴다
+            KitLog.d("$name: no end event for request ${prev.seq} in ${confirmMs}ms; a late one may be read as the next request's")
             gate.abandon(prev)
         }
     }
