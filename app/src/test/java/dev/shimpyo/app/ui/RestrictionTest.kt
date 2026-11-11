@@ -3,7 +3,6 @@ package dev.shimpyo.app.ui
 import dev.hmg.pleoskit.UxRestrictionFlags
 import dev.hmg.pleoskit.UxRestrictions
 import dev.shimpyo.app.ui.theme.DriveLimits
-import dev.shimpyo.coach.CoachUiState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -18,37 +17,31 @@ class RestrictionTest {
     @Test
     fun unknownIsRestricted() {
         // 연결 전·구독 실패: 서비스도 모르면(기본 drivingRestricted = true, 서비스 꺼짐) 제한
-        assertTrue(driveRestriction(UxRestrictions.NOT_CONNECTED, CoachUiState()).driving)
-        assertTrue(driveRestriction(UxRestrictions.Unknown("구독 실패"), CoachUiState(serviceRunning = true)).driving)
-        assertFalse(driveRestriction(UxRestrictions.NOT_CONNECTED, CoachUiState()).known)
+        assertTrue(driveRestriction(UxRestrictions.NOT_CONNECTED).driving)
+        assertTrue(driveRestriction(UxRestrictions.Unknown("구독 실패")).driving)
+        assertFalse(driveRestriction(UxRestrictions.NOT_CONNECTED).known)
         assertTrue(UxRestrictions.NOT_CONNECTED.restricted)
     }
 
     @Test
-    fun screenSubscriptionWinsOverServiceValue() {
-        // 서비스가 멈춰 옛 값(false)이 남아 있어도 화면 구독이 주행 중이면 주행 중이다
-        val stale = CoachUiState(serviceRunning = false, drivingRestricted = false)
-        assertTrue(driveRestriction(known(true), stale).driving)
-        assertFalse(driveRestriction(known(false), CoachUiState(drivingRestricted = true)).driving)
-        // 화면 구독을 아직 모르면 돌고 있는 서비스가 읽은 값을 쓴다
-        assertFalse(driveRestriction(UxRestrictions.NOT_CONNECTED, CoachUiState(serviceRunning = true, drivingRestricted = false)).driving)
-        // 서비스가 멈췄으면 그 값은 믿지 않는다
-        assertTrue(driveRestriction(UxRestrictions.NOT_CONNECTED, stale).driving)
+    fun screenSubscriptionIsTheOnlySource() {
+        // 화면 구독만 본다. 모르면 서비스 값(CoachUiState.drivingRestricted)이 false여도 제한이다: 새로 뜬 서비스가 자기
+        // 구독을 내기 전에는 죽은 서비스의 옛 false가 남아 있어서 믿을 수 없다 (재검토 #12). 그래서 함수가 상태를 받지 않는다
+        assertTrue(driveRestriction(known(true)).driving)
+        assertFalse(driveRestriction(known(false)).driving)
+        assertTrue(driveRestriction(UxRestrictions.Unknown("연결 해제")).driving)
     }
 
     @Test
     fun perFeatureLimitsApplyOnlyWhenFlagged() {
-        val plain = driveRestriction(known(true, active = UxRestrictionFlags.NO_SETUP or UxRestrictionFlags.NO_VIDEO, maxLen = 20, maxItems = 1), CoachUiState())
+        val plain = driveRestriction(known(true, active = UxRestrictionFlags.NO_SETUP or UxRestrictionFlags.NO_VIDEO, maxLen = 20, maxItems = 1))
         assertEquals(DriveLimits.MAX_STRING_LENGTH, plain.maxChars)
         assertEquals(DriveLimits.MAX_URGENT_RESULTS, plain.maxItems)
-        val limited = driveRestriction(
-            known(true, active = UxRestrictionFlags.LIMIT_STRING_LENGTH or UxRestrictionFlags.LIMIT_CONTENT, maxLen = 20, maxItems = 1),
-            CoachUiState(),
-        )
+        val limited = driveRestriction(known(true, active = UxRestrictionFlags.LIMIT_STRING_LENGTH or UxRestrictionFlags.LIMIT_CONTENT, maxLen = 20, maxItems = 1))
         assertEquals(20, limited.maxChars)
         assertEquals(1, limited.maxItems)
         // 플랫폼 상한이 앱 상한보다 크면 앱 상한
-        assertEquals(DriveLimits.MAX_URGENT_RESULTS, driveRestriction(known(true, UxRestrictionFlags.LIMIT_CONTENT, maxItems = 10), CoachUiState()).maxItems)
+        assertEquals(DriveLimits.MAX_URGENT_RESULTS, driveRestriction(known(true, UxRestrictionFlags.LIMIT_CONTENT, maxItems = 10)).maxItems)
     }
 
     @Test

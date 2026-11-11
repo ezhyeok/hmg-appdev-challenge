@@ -72,14 +72,14 @@ fun SettingsScreen(
         }
         SectionTitle("차량")
         ListGroup {
-            val cabin = status.cabinSupported
+            val toggle = freshAirToggle(status.cabinSupported, prefs.autoFreshAir)
             SettingRow(
                 "피로가 오르면 외기로 전환",
-                subtitle = if (cabin) "묻지 않고 내기순환을 꺼서 환기해요" else "이 차에서는 쓸 수 없어요 (내기·외기 전환 미지원)",
+                subtitle = toggle.subtitle,
                 icon = ShimpyoIcons.Air,
-                enabled = cabin,
-                onClick = { prefs.updateAutoFreshAir(!prefs.autoFreshAir) },
-                trailing = { PleosSwitch(cabin && prefs.autoFreshAir, enabled = cabin) },
+                enabled = toggle.enabled,
+                onClick = { if (toggle.enabled) prefs.updateAutoFreshAir(!prefs.autoFreshAir) },
+                trailing = { PleosSwitch(prefs.autoFreshAir, enabled = toggle.enabled) },
             )
         }
         SectionTitle("운전자")
@@ -113,6 +113,15 @@ fun SettingsScreen(
             right()
         }
     }
+}
+
+/** 외기 전환 설정 행. 지원하지 않는 차에서는 켤 수 없지만, 이미 켜져 있으면(예전 설정) 끌 수는 있다 (재검토 #8) */
+data class FreshAirToggle(val enabled: Boolean, val subtitle: String)
+
+fun freshAirToggle(cabinSupported: Boolean, on: Boolean): FreshAirToggle = when {
+    cabinSupported -> FreshAirToggle(true, "묻지 않고 내기순환을 꺼서 환기해요")
+    on -> FreshAirToggle(true, "이 차에서는 동작하지 않아요. 꺼 두세요")
+    else -> FreshAirToggle(false, "이 차에서는 쓸 수 없어요 (내기·외기 전환 미지원)")
 }
 
 /** 지난밤 수면: 모름, 4~10시간. 6시간 미만이면 엔진이 휴식 권유를 앞당긴다 */

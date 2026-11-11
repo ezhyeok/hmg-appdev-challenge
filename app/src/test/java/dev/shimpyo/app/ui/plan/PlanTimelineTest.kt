@@ -94,9 +94,9 @@ class PlanTimelineTest {
 
     @Test
     fun emptyTimelineTextFollowsCandidatesState() {
-        assertEquals("정차 데이터를 읽는 중이에요", noOpportunityText(CandidatesState.LOADING_DATA))
-        assertEquals("위치를 확인하는 중이에요", noOpportunityText(CandidatesState.NO_LOCATION))
-        assertEquals("이 경로에는 화장실 기회 정보가 없어요", noOpportunityText(CandidatesState.READY))
+        assertEquals("정차 데이터를 읽는 중이에요", noOpportunityText(CoachUiState(candidatesState = CandidatesState.LOADING_DATA)))
+        assertEquals("위치를 확인하는 중이에요", noOpportunityText(CoachUiState(candidatesState = CandidatesState.NO_LOCATION)))
+        assertEquals("이 경로에는 화장실 기회 정보가 없어요", noOpportunityText(CoachUiState(candidatesState = CandidatesState.READY)))
     }
 
     // ---------------------------------------------------------------- 요약 (#5)
@@ -159,5 +159,30 @@ class PlanTimelineTest {
         assertNull(summary(null).detail)
         assertNotEquals("쉬지 않고 가도 돼요", s.headline)
         assertFalse(s.notes.any())
+    }
+
+    @Test
+    fun notesNamingPassedStopsAreDropped() {
+        // 재검토 #6: 지나친 안성을 가리키는 '바로 들르세요'·식사 메모는 보이지 않는다
+        val a = PlannedStop(stop("안성휴게소", 52.0), setOf(Purpose.RESTROOM, Purpose.MEAL), 20, 2_700.0)
+        val b = PlannedStop(stop("옥산휴게소", 118.0), setOf(Purpose.REST), 10, 5_400.0)
+        val s = planSummary(
+            CoachUiState(
+                guiding = true, remainDistanceM = 200_000.0, ahead = listOf(stop("옥산휴게소", 60.0)),
+                plan = PitStopPlan(listOf(a, b), 30, listOf(note("PLAN_NOW", "지금 쉬어야 할 때예요. 안성휴게소에 바로 들르세요"), note("PLAN_MEAL", "식사 시간에 맞춰 안성휴게소에서 식사해요"), note("PLAN_SLEEPY_TIME", "졸음 시간"))),
+            ),
+        )
+        assertEquals("정차 1번 · 쉬는 시간 10분", s.headline)
+        assertTrue(s.notes.none { "안성" in it.text })
+        assertEquals(listOf("졸음 시간"), s.notes.map { it.text })
+    }
+
+    @Test
+    fun candidatesWithoutRouteDistanceAreNotCalledNoInformation() {
+        // 재검토 #9: 반경 후보의 경로 거리를 아직 받지 못했다 → '정보가 없어요'가 아니라 확인 중
+        val straightOnly = StopCandidate("r", "r", StopKind.PUBLIC_RESTROOM, 0.0, 0.0, Facilities(), true, straightDistanceM = 3_000.0)
+        val s = CoachUiState(guiding = true, candidatesState = CandidatesState.READY, ahead = listOf(straightOnly))
+        assertEquals("경로 거리를 확인하는 중이에요", noOpportunityText(s))
+        assertEquals("이 경로에는 화장실 기회 정보가 없어요", noOpportunityText(CoachUiState(candidatesState = CandidatesState.READY)))
     }
 }

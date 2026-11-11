@@ -25,17 +25,18 @@
 
 ## 2. 주행 제한 (fail closed, 감사 #2·#26)
 
-플랫폼의 `CarUxRestrictions`를 화면이 서비스 없이 직접 구독한다(`UiRestrictions`, pleos-kit `UxRestrictionWatcher`). 프로세스에 하나만 두어 액티비티가 다시 만들어져도 값을 이어받는다(새로 연결하면 잠깐 '모름'이 되어 정차 중 설정 화면에서 주행 화면으로 튕긴다).
+플랫폼의 `CarUxRestrictions`를 화면이 서비스 없이 직접 구독한다(`UiRestrictions`, pleos-kit `UxRestrictionWatcher`). 프로세스에 하나만 두어 액티비티가 다시 만들어져도 값을 이어받는다(새로 연결하면 잠깐 '모름'이 되어 정차 중 설정 화면에서 주행 화면으로 튕긴다). 연결이나 구독에 실패하면(Car가 null, 서비스 오류) 1초부터 두 배씩(최대 30초) 다시 연결한다.
 
-| 화면 구독(`UxRestrictions`) | 서비스 | 결과 `driving` |
-|---|---|---|
-| Known, requiresDO = true | 무관 | true |
-| Known, requiresDO = false | 무관 | false |
-| Unknown(연결 전·구독 실패·해제) | 돌고 있고 `drivingRestricted = false` | false (서비스가 플랫폼에서 읽은 값) |
-| Unknown | 그 밖 (서비스 꺼짐, 기본값 true) | **true** |
+| 화면 구독(`UxRestrictions`) | 결과 `driving` |
+|---|---|
+| Known, requiresDO = true | true |
+| Known, requiresDO = false | false |
+| Unknown(연결 전·구독 실패·해제) | **true** |
 
-- `driving`이면 주행 화면과 급해 결과만 그린다. 다른 화면에 있었으면 주행 화면으로 돌아오고, 제한을 실제로 읽었을 때만(`known`) 토스트 "주행 중에는 주행 화면만 보여요"를 띄운다.
-- 기능별 비트(주행 중일 때만): `LIMIT_STRING_LENGTH` → 주행 화면 카드 문구를 `maxRestrictedStringLength`로 자른다. `LIMIT_CONTENT` → 급해 결과 수를 `maxCumulativeContentItems`로 줄인다(앱 상한 2보다 작을 때만). `NO_SETUP`·`NO_KEYBOARD`·`NO_VIDEO`는 정차 화면을 모두 닫는 것으로 이미 지킨다. 음성 인식 문장(`lastHeard`)은 정차 중 시연 패널에만 있어 `NO_VOICE_TRANSCRIPTION`에 걸리지 않는다.
+서비스가 읽은 값(`CoachUiState.drivingRestricted`)은 쓰지 않는다(`driveRestriction(ux)`는 상태를 받지 않는다). 서비스가 다시 뜰 때 새 인스턴스가 자기 구독을 내기 전까지는 죽은 인스턴스의 옛 false가 CoachStore에 남아 그 틈에 정차 화면이 열릴 수 있기 때문이다(독립 재검토).
+
+- `driving`이면 주행 화면과 급해 결과만 그린다. 제한을 실제로 읽었을 때(`known`)만 고른 화면을 주행 화면으로 되돌리고 토스트 "주행 중에는 주행 화면만 보여요"를 띄운다. 모를 때(차가운 시작, 프로세스 복원)는 그리기만 주행 화면으로 하고 저장된 화면은 남겨 두어, 정차로 읽히면 그 화면으로 돌아간다.
+- 기능별 비트(주행 중일 때만): `LIMIT_STRING_LENGTH` → 주행 화면 카드와 급해 결과(이름·시간·질문 줄)를 `maxRestrictedStringLength`로 자른다(게이지·칩 문구는 12자 이하라 걸리지 않는다). `LIMIT_CONTENT` → 급해 결과 수를 `maxCumulativeContentItems`로 줄인다(앱 상한 2보다 작을 때만). `NO_SETUP`·`NO_KEYBOARD`·`NO_VIDEO`는 정차 화면을 모두 닫는 것으로 이미 지킨다. 음성 인식 문장(`lastHeard`)은 정차 중 시연 패널에만 있어 `NO_VOICE_TRANSCRIPTION`에 걸리지 않는다.
 - pleos-kit `CarState.drivingRestricted`도 모르면 true다(예전 기본값 false).
 
 ## 3. 상태 → 화면
@@ -47,10 +48,10 @@
 | `serviceRunning = false`, 게이지를 받은 적 없음 | 다음 화장실 | 준비하고 있어요 | 잠시 후 게이지와 추천이 나타나요 |
 | `serviceRunning = false`, 받은 적 있음 (감사 #18) | 다음 화장실 | 코치가 멈췄어요 | 앱을 다시 열면 이어서 계산해요 (게이지는 "--"·"코치 멈춤", 버튼 없음) |
 | `prompt != null` | `promptReasons` 코드로 (감사 #6): 정체 → "정체 전 마지막 화장실", 공백·기준 → "화장실 공백 전 마지막 기회", 가장 가까운 곳 → "가까운 화장실". 이유가 없으면 문장으로 고르되 마지막 기회를 "가까운 화장실"로 부르지 않는다 | 장소 이름, 장소 없으면 `shortQuestion`(질문 문장만, 30자 이하, 감사 #11) | 지금 거리만: 같은 곳의 `next` → `promptStop`. 둘 다 없으면 위치("경로 위")만 (물은 때의 거리를 보이지 않는다, 감사 #1) |
-| `goToResult.outcome = FAILED` (감사 #3) | 경유지를 넣지 못했어요 | 장소 이름 | 다시 시도하거나 내비에서 넣어 주세요 |
-| 정차 중 + 남은 계획 정차 있음 (감사 #4) | 다음 계획 | 첫 정차(지나친 것 뺌) | 지금 거리 · 지금 기준 "N분 뒤 도착" · 정차 분 |
+| `goToResult.outcome = FAILED` (감사 #3), 그곳이 아직 앞에 있음 | 경유지를 넣지 못했어요 | 장소 이름 | 다시 시도하거나 내비에서 넣어 주세요. 후보 목록이 준비됐는데 그곳이 앞쪽 후보·추천·질문·급해 결과·계획 어디에도 없으면(지나침) 카드와 다시 시도를 두지 않는다 (`failedGoTo`) |
+| 정차 중 + 남은 계획 정차 있음 (감사 #4) | 다음 계획 | 첫 정차(지나친 것 뺌) | `plannedDistanceText`(지금 거리, 또는 "계획 때 52km") · 지금 후보가 있을 때만 "N분 뒤 도착" · 정차 분 |
 | `next != null` | `goToResult`가 같은 곳이면 결과(넣었어요/길안내 시작/경로 위·진입로/내비에서 찾아 둠), `NEXT_ACCEPTED`만이면 "들르기로 한 곳"(엔진은 '응'을 받은 순간 기록하므로 넣었다고 하지 않는다) | 장소 | 거리·시간·위치 |
-| 경로 앞 첫 화장실 (목적지까지) | 다음 화장실 | 장소 | 거리, 정체 뒤면 칩 "정체 뒤" |
+| 경로 앞 첫 화장실 (목적지까지, 유턴 필요한 곳 제외) | 다음 화장실 | 장소 | 거리. 가는 길에 정체가 있으면 칩: 그 앞에서 끝나면 "정체 뒤", 그곳을 지나서도 이어지면 "정체 구간 안"(차가 이미 정체 안이어도 센다) |
 | 후보 없음 (감사 #18) | — | `candidatesState`: LOADING_DATA "정차 데이터를 읽는 중이에요", NO_LOCATION "위치를 확인하는 중이에요", READY "앞쪽에 화장실 정보가 없어요" | 급할 때는 아래 버튼을 누르세요 |
 
 칩: 주행 중 2개, 정차 중 3개. 모든 칩은 12자 이하이고(`Labels.shortReason`이 넘치면 짧은 대체 문구), 모르는 코드의 원문은 내보내지 않는다(질환 이름이 샐 수 있다). 엔진 소스의 모든 이유 코드는 문구가 있거나 `NOT_CHIP_CODES`에 있어야 한다(`ReasonCoverageTest`).
@@ -63,6 +64,8 @@
 | 서비스 돌고 경유지 실패 | 다시 시도 (`DismissGoToResult` + `GoTo`) | 닫기 (`DismissGoToResult`) |
 | 정차 중 | 계획 보기 | 탑승자 |
 | 주행 중, 그 밖 | 빈 자리 (높이 유지) | |
+
+행동 줄의 내용이 바뀐 뒤 0.6초 동안은 누름을 받지 않는다: 정차 중 [계획 보기]를 누르는 순간 질문이 떠서 같은 자리의 [들르기]가 눌리는 일을 막는다.
 
 좌표 없는 경로 위 시설(TBT)의 질문도 "들르기"다: 코치가 `ON_ROUTE`(진입로로 들어가면 된다)로 답하고 카드가 그것을 보인다. 주행 중에 내비 장소 검색을 여는 것은 코치가 하지 않는다(감사 #3).
 
@@ -77,15 +80,17 @@
 
 | 상황 | 표시 |
 |---|---|
-| 서비스 꺼짐 | 코치가 멈췄어요 |
+| 서비스가 아직 안 뜸 (한 번도 계산을 내지 않음: 차가운 시작, 프로세스 복원) / 돌다가 멈춤 | 준비하고 있어요 / 코치가 멈췄어요 |
 | 코치가 우리 번호로 LOCATING / SEARCHING | 위치를 확인하는 중이에요 / 가까운 화장실을 찾는 중이에요 |
 | READY (목록 있음) | 결과 (주행 중 2곳 카드, 정차 중 필터 목록) |
 | READY 빈 목록, NO_RESULT | 가까운 곳에 열린 화장실이 없어요 + [다시 시도] |
 | NO_LOCATION | 위치를 확인할 수 없어요 + [다시 시도] (코치가 정한다. 화면이 8초 뒤 지어내지 않는다) |
 | 아직 답이 없음 | 위치를 확인하는 중이에요 → 8초 뒤 "가까운 화장실을 찾지 못했어요 · 위치를 확인하지 못했을 수 있어요" + [다시 시도]. 요청을 받기 전의 코치 상태(번호 0, IDLE)는 응답 없는 코치와 위치가 없어 조용히 끝난 옛 코치가 같아서, 둘 다에 맞는 말로 알린다 |
 | 코치가 우리 번호를 IDLE로 끝냄 | 닫는다 (경유지를 넣었다) |
-| 닫은 번호의 늦은 결과 | 다시 띄우지 않는다 (`urgentDismissed`). 번호는 다시 쓰이지 않으므로 계속 들고 있는다: 일찍 잊으면 코치가 Urgent를 늦게 받아 그 번호로 LOCATING을 알릴 때 닫은 화면이 다시 열린다. 번호 0을 다시 쓰는 옛 코치만 목록이 지워지면 잊는다 |
-| 화면이 요청하지 않았는데 코치가 진행 중 (음성 "화장실 급해") | 연다 |
+| 닫은 번호의 늦은 결과 | 다시 띄우지 않는다 (`dismissedUrgent`, 최근 8개). 번호는 다시 쓰이지 않으므로 계속 들고 있는다: 일찍 잊으면 코치가 Urgent를 늦게 받아 그 번호로 LOCATING을 알릴 때 닫은 화면이 다시 열린다. 하나만 들고 있으면 '7을 답 전에 닫고 8을 보내고 닫기'에서 7의 늦은 답이 다시 연다. 번호 0을 다시 쓰는 옛 코치만 목록이 지워지면 잊는다 |
+| [다시 시도] | 끝난 앞 번호를 닫은 번호에 넣고 새 번호로 보낸다(코치가 아직 앞 번호를 보이는 동안 화면이 그것을 따르지 않는다) |
+| 화면이 요청하지 않았는데 코치가 진행 중 (음성 "화장실 급해") | 연다. 우리 요청이 떠 있는데 코치가 다른 번호로 시작했으면 그 번호를 우리 요청으로 삼는다(`adoptUrgentRequest`): 그 요청이 끝나면(IDLE) 닫힌다 |
+| 옛 코치: 결과를 보인 뒤 목록이 지워짐 | 닫는다 (음성 '응'으로 경유지를 넣었다. 예전에는 8초가 지나 '찾지 못했어요'로 바뀌었다) |
 
 급해 버튼은 진행 중인 요청이 있으면 새 요청을 보내지 않는다(한 프레임 안의 두 번 누르기). [다시 시도]만 끝난 앞 요청을 정리하고(`DismissUrgent`) 새 번호로 보낸다. 결과를 고르면(`pick`) 결과가 올 때까지 다른 카드를 막는다. `goToResult`가 실패면 다시 고를 수 있게 풀고 토스트, 성공이면 닫는다. 12초 동안 결과가 없으면 "결과를 받지 못했어요. 내비에서 확인해 주세요"(성공했는지 모르므로 실패라고 하지 않는다).
 
@@ -95,7 +100,9 @@ compact 세로 윈도에서 결과 카드는 `FitColumn`(줄을 빼는 판단은
 
 ### 3.5 계획 화면 (감사 #4·#5)
 
-- `livePlan`: 계획 정차를 지금 후보(ahead)에 맞춘다. 같은 id가 후보에 있으면 그 거리·ETA(없으면 평균 속도 + 정체 지연), 없으면 계획 때 값을 "약"으로. 뒤의 계획 정차가 후보에 있는데 앞의 것이 없으면 지나친 것이라 뺀다. 목적지보다 먼 정차는 뺀다. 거리를 전혀 모르는 정차(PLAN_NOW, 도착 0초)는 지금 위치에 그린다(예전에는 조용히 빠졌다). 번호는 남은 정차 안에서 1부터.
+- `livePlan`: 계획 정차를 지금 후보(ahead)에 맞춘다. 같은 id가 후보에 있으면 그 거리·ETA(없으면 평균 속도 + 정체 지연). 없으면 계획 때 거리를 "계획 때 52km"로 밝히고 ETA는 보이지 않는다(계획 때 도착 시간을 지금 값처럼 보이지 않는다). 거리 출처는 `PlannedSource`.
+- 지나침: 뒤의 계획 정차가 후보에 있는데 앞의 것이 없으면 지나친 것이다. 또 길안내 중이고 목록이 준비됐는데 경로 위 목록(TBT, 경로 순서대로 빠짐없이 온다)이 그 정차의 계획 때 위치보다 멀리까지 오면서 그 정차가 없으면 지나친 것이다(앞에 있다면 지금 거리는 계획 때 거리보다 짧으므로 목록 안에 있어야 한다). 마지막 하나 남은 정차도 이렇게 빠진다. 반경 후보(길안내 아님)는 빠짐없다고 볼 수 없어 이 추론을 하지 않는다.
+- 목적지보다 먼 정차는 뺀다(지금 후보의 거리로만 견준다: 계획 때 거리는 그 뒤 달린 만큼 낡았다). 거리를 전혀 모르는 정차(PLAN_NOW, 도착 0초)는 지금 위치에 "지금"으로 그린다(예전에는 조용히 빠졌다). 번호는 남은 정차 안에서 1부터.
 - 타임라인: 지금 → 정차 → 공백 → 정체 → 목적지 (같은 거리일 때). 목적지 뒤 후보는 뺀다. 정체 안이면 남은 부분과 남은 시간만("지금부터 12km", "정체 40분").
 - 화장실 공백: 차 → 첫 기회도 본다(정체 속에서 가장 중요한 공백, 감사 #20). 경로 거리를 모르는 화장실 후보가 있으면 순서를 알 수 없어 공백을 말하지 않는다. 마지막 기회 뒤는 모른다(후보 목록이 일부라서).
 - 요약 첫 줄은 엔진 메모 코드를 따른다:
@@ -111,7 +118,9 @@ compact 세로 윈도에서 결과 카드는 `FitColumn`(줄을 빼는 판단은
 | PLAN_NONE_NEEDED | 목적지까지 쉬지 않아도 돼요 |
 | 그 밖 | 쉴 곳을 정하지 못했어요 |
 
-첫 줄로 쓴 메모는 아래 목록에서 빼고, 나머지 메모는 문장 그대로 보인다. PLAN_NOW·PLAN_GAP·PLAN_FUEL_SHORT는 강조(경고)로 보인다. 경유지 버튼은 결과가 오거나 12초가 지날 때까지 막는다(감사 #24).
+지나친(또는 목적지 뒤로 빠진) 정차를 이름으로 가리키는 메모(PLAN_NOW·PLAN_MEAL·PLAN_FUEL)는 뺀다: "안성휴게소에 바로 들르세요"가 지나친 뒤에도 남았다. 첫 줄로 쓴 메모는 아래 목록에서 빼고, 나머지 메모는 문장 그대로 보인다. PLAN_NOW·PLAN_GAP·PLAN_FUEL_SHORT는 강조(경고)로 보인다. 경유지 버튼은 결과가 오거나 12초가 지날 때까지 막는다(감사 #24). 화장실 기회가 없을 때 문구: 준비 전이면 그 이유, 후보는 있는데 경로 거리를 아직 모르면 "경로 거리를 확인하는 중이에요", 정말 없으면 "이 경로에는 화장실 기회 정보가 없어요". 남은 거리가 100m 아래면 "목적지에 거의 다 왔어요".
+
+'계획을 세우는 중'은 코치가 `planGeneration`(새로 세울 때마다 오르는 번호, 2026-11-12 계약 추가)을 쓰면 번호가 오를 때 풀고, 쓰지 않으면(옛 코치) 새 계획 객체가 올 때 푼다. 번호를 쓰는 코치는 지나친 정차를 빼며 같은 계획을 매초 다시 낼 수 있어서 객체로 보면 바로 풀린다.
 
 ### 3.6 마이크 (`micModel`, 감사 #12·#25)
 
@@ -127,11 +136,11 @@ compact 세로 윈도에서 결과 카드는 `FitColumn`(줄을 빼는 판단은
 
 ### 3.7 설정
 
-외기 전환 스위치는 `cabinSupported`일 때만 켤 수 있고, 아니면 "이 차에서는 쓸 수 없어요"(감사 #16). 설정 화면은 상태 전체가 아니라 `SettingsStatus`와 탑승자만 받는다(매초 다시 그리지 않게, S3).
+외기 전환 스위치는 `cabinSupported`일 때만 켤 수 있고, 아니면 "이 차에서는 쓸 수 없어요"(감사 #16). 이미 켜져 있으면(예전 설정) 끌 수는 있다(`freshAirToggle`): 꺼진 채 잠기면 옛 서비스가 계속 외기로 바꾼다. 설정 화면은 상태 전체가 아니라 `SettingsStatus`와 탑승자만 받는다(매초 다시 그리지 않게, S3).
 
 ## 4. 진행 중 상태와 액티비티 재생성 (감사 #14)
 
-`ContentState`(화면, 계획 계산 중, 급해 요청·닫은 번호, 고른 곳, 넣는 중, 이미 알린 결과 시각)는 `rememberSaveable`의 Saver로 저장한다. 창 분할·크기 변경·야간 모드로 액티비티가 다시 만들어져도 '넣는 중'이 풀리지 않아 같은 요청을 1초 안에 다시 보내지 않는다.
+`ContentState`(화면, 계획 계산 중과 그때의 계획 번호, 급해 요청·닫은 번호들·결과를 본 요청·답 기다림 초과, 고른 곳, 넣는 중, 이미 알린 결과 시각)는 `rememberSaveable`의 Saver로 저장한다. 창 분할·크기 변경·야간 모드로 액티비티가 다시 만들어져도 '넣는 중'이 풀리지 않아 같은 요청을 1초 안에 다시 보내지 않는다.
 
 `MainActivity`:
 - 서비스는 권한과 관계없이 화면이 보일 때 시작한다(이미 돌면 다시 부르지 않음). 서비스가 멈췄다가 화면으로 돌아오면 다시 시작한다.
@@ -163,6 +172,7 @@ compact 세로 윈도에서 결과 카드는 `FitColumn`(줄을 빼는 판단은
 | `cabinSupported` (기본 false) | 외기 전환 스위치가 꺼져 있고, 환기 권유에는 [확인]만 보인다 |
 | `ttsAvailable`·`sttAvailable` (기본 false) | 마이크가 "음성 불가"로 보이고 누르면 이유만 알린다 |
 | `PermissionsChanged` | 옛 서비스는 무시한다: 권한을 나중에 허용하면 서비스를 다시 시작해야 차속·위치가 들어온다 |
+| `planGeneration` | 0이면 계획 객체가 바뀔 때 '세우는 중'을 푼다 |
 
 ## 8. 시험 (app/src/test/java/dev/shimpyo/app/ui/, 노트북 `gradle.ps1 :app:testDebugUnitTest`)
 
@@ -180,6 +190,10 @@ compact 세로 윈도에서 결과 카드는 `FitColumn`(줄을 빼는 판단은
 | 칩 길이·질환 이름·모든 엔진 코드 | `LabelsTest.*`, `ReasonCoverageTest` |
 | 급해 상태·늦은 결과(답 전에 닫기 포함)·옛 코치 | `UrgentModelTest.*` (`closingBeforeTheCoachAcknowledgesDoesNotReopenOnTheLateAck` 등) |
 | 카드가 잘리지 않음 (덜 중요한 줄부터 뺌) | `FitColumnTest.*` |
+| 독립 재검토: 지나친 실패 카드, 유턴 곳·정체 칩, 계획 때 값 표시, 카드가 실제로 보이는 결과 | `DriveModelsTest.failedWaypointForAStopBehindTheCarIsNotOfferedAgain`, `nearestAheadSkipsUTurnStopsAndJamChipCoversTheJamWeAreIn`, `parkedPlanCardForStopWithoutLiveAnchorShowsNoCurrentEta`, `cardShowsGoToMatchesWhatIsActuallyOnTheCard` |
+| 독립 재검토: 급해 음성 수락·다시 시도·이어받기 | `UrgentModelTest.legacyVoiceAcceptClosesInsteadOfClaimingFailure`, `retryHidesTheReplacedRequestAndClosedIdsAllStayHidden`, `coachInitiatedRequestTakingOverOursIsAdopted` |
+| 독립 재검토: 마지막 계획 정차 지나침, 거리 출처, 지나친 정차 메모, 경로 거리 확인 중 | `RouteModelTest.lastPlannedStopPassedWhenTheRouteListReachesBeyondIt`, `plannedDistanceTextNamesItsSource`, `PlanTimelineTest.notesNamingPassedStopsAreDropped`, `candidatesWithoutRouteDistanceAreNotCalledNoInformation` |
+| 외기 전환 설정 | `FreshAirToggleTest` |
 | 계획 타임라인·요약 | `PlanTimelineTest.*`, `RouteModelTest.*` |
 | 마이크 | `MicModelTest.*` |
 | 재생성 뒤 진행 중 상태, 결과 토스트 | `ContentStateTest.*` |

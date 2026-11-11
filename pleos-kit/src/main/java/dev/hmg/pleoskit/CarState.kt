@@ -65,7 +65,11 @@ class CarState(context: Context) {
     /** Car 서비스에 연결하고 구독을 시작한다. 권한이 없는 항목은 건너뛰고 로그만 남긴다. */
     suspend fun connect() = withContext(Dispatchers.IO) {
         if (car != null) return@withContext
-        val c = Car.createCar(appContext)
+        // createCar는 차 환경이 아니면 null을 준다. 그때 주행 제한은 '모름'(= 제한)으로 남는다
+        val c: Car = runCatching { Car.createCar(appContext) }.getOrNull() ?: run {
+            ux.fail("Car 연결 실패")
+            return@withContext
+        }
         car = c
         // 주행 제한부터: 권한이 필요 없고 화면이 가장 먼저 알아야 한다
         ux.attach(c)

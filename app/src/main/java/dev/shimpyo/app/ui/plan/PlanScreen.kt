@@ -45,6 +45,7 @@ import dev.shimpyo.app.ui.congestionLabel
 import dev.shimpyo.app.ui.drive.StripLegend
 import dev.shimpyo.app.ui.livePlan
 import dev.shimpyo.app.ui.opportunities
+import dev.shimpyo.app.ui.plannedDistanceText
 import dev.shimpyo.app.ui.remainingCongestion
 import dev.shimpyo.app.ui.restroomGaps
 import dev.shimpyo.app.ui.routeSpeedMps
@@ -75,8 +76,9 @@ sealed interface TimelineRow {
     }
 
     /**
-     * @property estimated 거리를 어림했다 (지금 후보 목록에 없는 계획 정차) → "약"을 붙인다
-     * @property etaS 지금 기준 도착까지 (초): 후보의 ETA, 없으면 평균 속도 + 정체 지연
+     * @property estimated 거리가 지금 후보의 경로 거리가 아니다 (어림 또는 계획 때 값)
+     * @property distanceText 화면 거리 글자 ("12km", "약 3km", "계획 때 52km", "지금")
+     * @property etaS 지금 기준 도착까지 (초): 후보의 ETA, 없으면 평균 속도 + 정체 지연. 계획 때 값만 있으면 null
      */
     data class Stop(
         val stop: StopCandidate,
@@ -86,6 +88,7 @@ sealed interface TimelineRow {
         val number: Int?,
         val recommended: Boolean,
         val estimated: Boolean = false,
+        val distanceText: String = Labels.distance(distanceM),
     ) : TimelineRow
 
     /** [segment]는 남은 부분이다 (차가 정체 안이면 지금 위치부터, 시간도 남은 길이만큼) */
@@ -119,7 +122,7 @@ fun timeline(state: CoachUiState): List<TimelineRow> {
     }
     plan.forEach { p ->
         if (opps.none { it.id == p.planned.stop.id }) {
-            rows += TimelineRow.Stop(p.stop, p.distanceM, p.etaS, p.planned, p.number, p.planned.stop.id == recommendedId, p.estimated)
+            rows += TimelineRow.Stop(p.stop, p.distanceM, p.etaS, p.planned, p.number, p.planned.stop.id == recommendedId, p.estimated, plannedDistanceText(p))
         }
     }
     restroomGaps(state).forEach { rows += TimelineRow.Gap(it) }
@@ -154,8 +157,11 @@ data class PlanNote(val text: String, val warning: Boolean)
 fun planSummary(state: CoachUiState): PlanSummary {
     val plan = state.plan
         ?: return PlanSummary("아직 계획이 없어요", candidatesWaiting(state.candidatesState), emptyList())
-    val codes = plan.notes.map { it.code }.toSet()
     val live = livePlan(state)
+    // 지나친(또는 목적지 뒤로 빠진) 정차를 가리키는 메모는 뺀다: "안성휴게소에 바로 들르세요"가 지나친 뒤에도 남았다(재검토 #6)
+    val goneNames = plan.stops.filter { p -> live.none { it.planned.stop.id == p.stop.id } }.map { it.stop.name }.filter { it.isNotBlank() }
+    val notesShown = plan.notes.filterNot { n -> n.code in STOP_NOTES && goneNames.any { n.text.contains(it) } }
+    val codes = notesShown.map { it.code }.toSet()
     val count = if (live.isNotEmpty()) "정차 ${live.size}번 · 쉬는 시간 ${Labels.duration(live.sumOf { it.planned.dwellMin })}" else null
     val partial = "PLAN_PARTIAL" in codes || "PLAN_NO_DESTINATION" in codes
     var used: String? = null
@@ -173,11 +179,14 @@ fun planSummary(state: CoachUiState): PlanSummary {
         }
         else -> "쉴 곳을 정하지 못했어요" to null
     }
-    val notes = plan.notes.filter { it.code != used }.map { PlanNote(it.text, it.code in WARNING_NOTES) }
+    val notes = notesShown.filter { it.code != used }.map { PlanNote(it.text, it.code in WARNING_NOTES) }
     return PlanSummary(headline, detail, notes)
 }
 
 private val WARNING_NOTES = setOf("PLAN_NOW", "PLAN_GAP", "PLAN_FUEL_SHORT")
+
+/** 특정 정차 이름을 담는 메모 (CoachTexts.planNow/planMeal/planFuel) */
+private val STOP_NOTES = setOf("PLAN_NOW", "PLAN_MEAL", "PLAN_FUEL")
 
 /** 후보 목록이 아직 준비되지 않은 이유. 준비됐으면 null */
 fun candidatesWaiting(s: CandidatesState): String? = when (s) {
@@ -186,8 +195,13 @@ fun candidatesWaiting(s: CandidatesState): String? = when (s) {
     CandidatesState.READY -> null
 }
 
-/** 경로 앞에 보일 정차 후보가 없을 때의 문구: 준비 전이면 그 이유, 준비됐으면 "정보가 없어요" */
-fun noOpportunityText(s: CandidatesState): String = candidatesWaiting(s) ?: "이 경로에는 화장실 기회 정보가 없어요"
+/**
+ * 경로 앞에 보일 화장실 기회가 없을 때의 문구: 준비 전이면 그 이유, 후보는 있는데 경로 거리를 아직 모르면 확인 중
+ * (반경 후보의 경로 거리 보정 전. 주행 화면은 같은 목록의 직선거리 "약 3km"를 보이는데 계획 화면이 '없어요'라고 했다, 재검토 #9),
+ * 정말 없으면 "정보가 없어요"
+ */
+fun noOpportunityText(state: CoachUiState): String = candidatesWaiting(state.candidatesState)
+    ?: if (state.ahead.any { it.facilities.restroom && it.routeDistanceM == null }) "경로 거리를 확인하는 중이에요" else "이 경로에는 화장실 기회 정보가 없어요"
 
 /**
  * @param goToPendingId 내비에 넣는 중인 곳. 결과가 올 때까지 같은 곳의 버튼을 막는다 (UI 감사 #24: 두 번 누르면 경유지 요청이 1초 안에 두 번 갔다)
@@ -218,7 +232,7 @@ fun PlanScreen(
             }
             Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(bottom = layout.bottom)) {
                 Spacer(Modifier.height(layout.gap))
-                Timeline(rows, state.candidatesState, goToPendingId, onGoTo)
+                Timeline(rows, noOpportunityText(state), goToPendingId, onGoTo)
             }
         }
     } else {
@@ -230,7 +244,7 @@ fun PlanScreen(
             Spacer(Modifier.height(layout.gap))
             StripCard(state)
             Spacer(Modifier.height(layout.gap))
-            Timeline(rows, state.candidatesState, goToPendingId, onGoTo)
+            Timeline(rows, noOpportunityText(state), goToPendingId, onGoTo)
         }
     }
 }
@@ -263,10 +277,15 @@ private fun SummaryCard(
         val remain = state.remainDistanceM
         Text(
             if (remain != null) {
-                listOfNotNull(
-                    "남은 ${Labels.distance(remain)}",
-                    state.remainTimeS?.let { "도착까지 ${Labels.minutesOf(it)}" },
-                ).joinToString(" · ")
+                // 남은 거리 0 근처는 "남은 100m"가 아니라 도착으로 (CoachTexts.distance는 100m 아래를 쓰지 않는다)
+                if (remain < ARRIVED_M) {
+                    "목적지에 거의 다 왔어요"
+                } else {
+                    listOfNotNull(
+                        "남은 ${Labels.distance(remain)}",
+                        state.remainTimeS?.let { "도착까지 ${Labels.minutesOf(it)}" },
+                    ).joinToString(" · ")
+                }
             } else {
                 "내비에서 목적지를 정하면 도착까지 계획해요"
             },
@@ -313,7 +332,7 @@ private fun StripCard(state: CoachUiState) {
         Text("경로 앞 (거리 비례)", style = PleosType.BodyMediumStrong, color = c.textSecondary)
         Spacer(Modifier.height(Dimens.Space.s))
         if (data.isEmpty) {
-            Text(noOpportunityText(state.candidatesState), style = PleosType.BodyMedium, color = c.textSecondary)
+            Text(noOpportunityText(state), style = PleosType.BodyMedium, color = c.textSecondary)
         } else {
             RouteStrip(data.axisM, data.stops, data.spans, data.destinationM, description = "경로 앞 화장실 기회, 정체, 계획 정차")
             Spacer(Modifier.height(Dimens.Space.xs))
@@ -325,14 +344,15 @@ private fun StripCard(state: CoachUiState) {
 // ------------------------------------------------------------ 타임라인
 
 private val RailColumn = 72.dp
+private const val ARRIVED_M = 100.0
 
 @Composable
-private fun Timeline(rows: List<TimelineRow>, candidates: CandidatesState, goToPendingId: String?, onGoTo: (StopCandidate) -> Unit) {
+private fun Timeline(rows: List<TimelineRow>, emptyText: String, goToPendingId: String?, onGoTo: (StopCandidate) -> Unit) {
     val c = ShimpyoTheme.colors
     Column(Modifier.fillMaxWidth()) {
         if (rows.none { it is TimelineRow.Stop }) {
             TimelineLine(RailKind.ROUTE, top = true, bottom = true, marker = {}) {
-                Text(noOpportunityText(candidates), style = PleosType.BodyMedium, color = c.textSecondary, modifier = Modifier.padding(vertical = Dimens.Space.l))
+                Text(emptyText, style = PleosType.BodyMedium, color = c.textSecondary, modifier = Modifier.padding(vertical = Dimens.Space.l))
             }
         }
         rows.forEachIndexed { i, row ->
@@ -383,8 +403,7 @@ private fun StopLine(row: TimelineRow.Stop, first: Boolean, last: Boolean, goToP
         },
     ) {
         Column(Modifier.padding(vertical = Dimens.Space.m)) {
-            val distance = Labels.distance(row.distanceM).let { if (row.estimated) "약 $it" else it }
-            RowText(row.stop.name, distance, row.etaS?.let { Labels.minutesOf(it) }, strong = p != null)
+            RowText(row.stop.name, row.distanceText, row.etaS?.let { Labels.minutesOf(it) }, strong = p != null)
             Spacer(Modifier.height(Dimens.Space.xxs))
             Text(
                 facilitiesLine(row.stop),

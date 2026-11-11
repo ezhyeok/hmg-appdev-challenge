@@ -317,4 +317,55 @@ class DriveModelsTest {
         )
         assertTrue(stopCard(s, driving = true).chips.size <= 2)
     }
+
+    // ---------------------------------------------------------------- 재검토(독립 감사) 결과
+
+    @Test
+    fun failedWaypointForAStopBehindTheCarIsNotOfferedAgain() {
+        // 재검토 #4: 실패한 곳을 지나쳤다(후보 목록 준비됨, 어디에도 없음) → 다시 시도 카드를 두지 않는다
+        val a = stop("a", "안성휴게소", 4.0)
+        val b = stop("b", "천안휴게소", 30.0)
+        val passed = running.copy(goToResult = GoToResult(a, GoToOutcome.FAILED, 1L), ahead = listOf(b), next = rec(b))
+        assertFalse(driveActions(passed, driving = true) is DriveActions.RetryGoTo)
+        assertEquals("천안휴게소", stopCard(passed, driving = true).title)
+        // 목록을 아직 모르면(위치 확인 중) 지나쳤다고 단정하지 않는다
+        val unknown = passed.copy(candidatesState = CandidatesState.NO_LOCATION, ahead = emptyList(), next = null)
+        assertTrue(driveActions(unknown, driving = true) is DriveActions.RetryGoTo)
+    }
+
+    @Test
+    fun nearestAheadSkipsUTurnStopsAndJamChipCoversTheJamWeAreIn() {
+        val uturn = stop("u", "반대편 휴게소", 2.0).copy(directionOk = false)
+        val ahead = stop("a", "옥산휴게소", 8.0)
+        val s = running.copy(guiding = true, ahead = listOf(uturn, ahead))
+        assertEquals("옥산휴게소", stopCard(s, driving = true).title)
+        // 차가 이미 정체 안(시작 -2km)이고 정체가 6km에서 끝난다 → 8km 휴게소는 '정체 뒤'
+        val inJam = s.copy(congestion = listOf(CongestionSegment(-2_000.0, 8_000.0, 1_200.0)))
+        assertEquals(listOf("정체 뒤"), stopCard(inJam, driving = true).chips)
+        // 정체가 휴게소 너머까지 이어지면 '정체 구간 안'
+        val through = s.copy(congestion = listOf(CongestionSegment(-2_000.0, 20_000.0, 2_400.0)))
+        assertEquals(listOf("정체 구간 안"), stopCard(through, driving = true).chips)
+    }
+
+    @Test
+    fun parkedPlanCardForStopWithoutLiveAnchorShowsNoCurrentEta() {
+        // 재검토 #5: 후보 목록에 없는 계획 정차는 계획 때 값임을 밝히고 'N분 뒤 도착'을 지금 값처럼 보이지 않는다
+        val a = PlannedStop(stop("anseong", "안성휴게소", 52.0), setOf(Purpose.RESTROOM), 10, arriveInS = 2_700.0)
+        val s = running.copy(parked = true, plan = PitStopPlan(listOf(a), 10), ahead = emptyList(), candidatesState = CandidatesState.NO_LOCATION)
+        val meta = stopCard(s, driving = false).meta!!
+        assertTrue(meta, meta.startsWith("계획 때 52km"))
+        assertFalse(meta, meta.contains("뒤 도착"))
+    }
+
+    @Test
+    fun cardShowsGoToMatchesWhatIsActuallyOnTheCard() {
+        // 재검토 #10: 질문이 떠 있으면 실패 카드가 가려진다 → 토스트로 알려야 한다
+        val a = stop("a", "안성휴게소", 4.0)
+        val failed = GoToResult(a, GoToOutcome.FAILED, 1L)
+        assertTrue(cardShowsGoTo(running.copy(goToResult = failed, ahead = listOf(a)), driving = true, r = failed))
+        val p = Prompt("p", PromptKind.LAST_CHANCE, "들를까요?", stop("o", "옥산휴게소", 3.0), Long.MAX_VALUE)
+        assertFalse(cardShowsGoTo(running.copy(goToResult = failed, ahead = listOf(a), prompt = p), driving = true, r = failed))
+        val added = GoToResult(a, GoToOutcome.WAYPOINT_ADDED, 1L)
+        assertTrue(cardShowsGoTo(running.copy(goToResult = added, next = rec(a, Reason("NEXT_ACCEPTED", "…"))), driving = true, r = added))
+    }
 }

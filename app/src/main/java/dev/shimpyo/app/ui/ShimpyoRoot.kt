@@ -17,6 +17,6 @@ fun ShimpyoRoot() {
     val ux = rememberUxRestrictions()
     val host = rememberAndroidHost()
     ShimpyoTheme {
-        ShimpyoContent(state = state, host = host, restriction = driveRestriction(ux, state))
+        ShimpyoContent(state = state, host = host, restriction = driveRestriction(ux))
     }
 }

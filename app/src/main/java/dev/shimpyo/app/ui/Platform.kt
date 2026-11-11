@@ -54,7 +54,8 @@ object UiRestrictions {
     fun state(context: Context): StateFlow<UxRestrictions> =
         (watcher ?: UxRestrictionWatcher(context.applicationContext).also { w ->
             watcher = w
-            scope.launch { w.connect() }
+            // 실패하면 간격을 늘려 다시 연결한다 (한 번 실패로 프로세스 내내 '모름'=제한에 갇히지 않게)
+            scope.launch { w.connectWithRetry() }
         }).state
 }
 

@@ -18,6 +18,8 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +62,7 @@ import dev.shimpyo.app.ui.theme.ShimpyoTheme
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.engine.Prompt
 import dev.shimpyo.engine.StopCandidate
+import kotlinx.coroutines.delay
 
 /**
  * 1. 주행 화면 (screens.md 1장). 운전 중 1~2초 보고 "지금 괜찮은지, 다음에 어디서 쉬는지"를 안다.
@@ -98,8 +101,14 @@ fun DriveScreen(
             HumanGauge("피로", ShimpyoIcons.Rest, f.minutes, f.level, f.fraction, f.tick, f.reason, layout.compact, cell, tall = tall)
         }
     }
+    val focusKey = when (actions) {
+        is DriveActions.Answer -> "answer:${actions.prompt.id}"
+        is DriveActions.RetryGoTo -> "retry:${actions.stop.id}"
+        DriveActions.Parked -> "parked"
+        DriveActions.None -> "none"
+    }
     val actionRow: @Composable () -> Unit = {
-        ActionRow(actions, primaryFocus, onAnswer, onRetryGoTo, onDismissGoTo, onOpenPlan, onOpenOccupants)
+        ActionRow(actions, focusKey, primaryFocus, onAnswer, onRetryGoTo, onDismissGoTo, onOpenPlan, onOpenOccupants)
     }
     val stopMin = if (layout.compact) Dimens.Drive.stopCardMinHeightCompact else Dimens.Drive.stopCardMinHeight
     val urgent: @Composable () -> Unit = {
@@ -139,18 +148,18 @@ fun DriveScreen(
             urgent()
         }
     }
-    val focusKey = when (actions) {
-        is DriveActions.Answer -> "answer:${actions.prompt.id}"
-        is DriveActions.RetryGoTo -> "retry:${actions.stop.id}"
-        else -> "urgent"
-    }
     RequestFocusOnce(if (actions is DriveActions.Answer || actions is DriveActions.RetryGoTo) primaryFocus else urgentFocus, focusKey)
 }
 
-/** 행동 줄(높이 100). 질문이 없으면 주행 중에는 빈 자리로 둬서 레이아웃이 움직이지 않는다 */
+/**
+ * 행동 줄(높이 100). 질문이 없으면 주행 중에는 빈 자리로 둬서 레이아웃이 움직이지 않는다.
+ * 내용이 바뀐 뒤 [ACTION_ARM_MS] 동안은 누름을 받지 않는다: 정차 중 [계획 보기]를 누르는 순간 질문이 떠서 같은 자리의
+ * [들르기]가 눌리는 일을 막는다 (재검토, 운전자 주의 분산 가이드의 의도치 않은 입력)
+ */
 @Composable
 private fun ActionRow(
     actions: DriveActions,
+    contentKey: String,
     primaryFocus: FocusRequester,
     onAnswer: (Prompt, Boolean) -> Unit,
     onRetryGoTo: (StopCandidate) -> Unit,
@@ -159,26 +168,32 @@ private fun ActionRow(
     onOpenOccupants: () -> Unit,
 ) {
     val h = Dimens.Drive.primaryActionHeight
+    val armed = remember(contentKey) { mutableStateOf(false) }
+    LaunchedEffect(contentKey) {
+        delay(ACTION_ARM_MS)
+        armed.value = true
+    }
+    fun armedOnly(action: () -> Unit): () -> Unit = { if (armed.value) action() }
     Row(Modifier.fillMaxWidth().height(h), horizontalArrangement = Arrangement.spacedBy(ButtonGap)) {
         when (actions) {
             is DriveActions.Answer -> {
                 val p = actions.prompt
                 if (actions.accept != null) {
                     // 들르기를 왼쪽에: 왼쪽 운전석에서 가까운 쪽이 주 행동이다
-                    PleosButton(actions.accept, { onAnswer(p, true) }, Modifier.weight(1f).height(h).focusRequester(primaryFocus), filled = true, labelStyle = DriveType.ActionLabel)
-                    PleosButton("괜찮아요", { onAnswer(p, false) }, Modifier.weight(1f).height(h), labelStyle = DriveType.ActionLabel)
+                    PleosButton(actions.accept, armedOnly { onAnswer(p, true) }, Modifier.weight(1f).height(h).focusRequester(primaryFocus), filled = true, labelStyle = DriveType.ActionLabel)
+                    PleosButton("괜찮아요", armedOnly { onAnswer(p, false) }, Modifier.weight(1f).height(h), labelStyle = DriveType.ActionLabel)
                 } else {
                     Spacer(Modifier.weight(1f))
-                    PleosButton("확인", { onAnswer(p, false) }, Modifier.weight(1f).height(h).focusRequester(primaryFocus), labelStyle = DriveType.ActionLabel)
+                    PleosButton("확인", armedOnly { onAnswer(p, false) }, Modifier.weight(1f).height(h).focusRequester(primaryFocus), labelStyle = DriveType.ActionLabel)
                 }
             }
             is DriveActions.RetryGoTo -> {
-                PleosButton("다시 시도", { onRetryGoTo(actions.stop) }, Modifier.weight(1f).height(h).focusRequester(primaryFocus), filled = true, labelStyle = DriveType.ActionLabel)
-                PleosButton("닫기", onDismissGoTo, Modifier.weight(1f).height(h), labelStyle = DriveType.ActionLabel)
+                PleosButton("다시 시도", armedOnly { onRetryGoTo(actions.stop) }, Modifier.weight(1f).height(h).focusRequester(primaryFocus), filled = true, labelStyle = DriveType.ActionLabel)
+                PleosButton("닫기", armedOnly(onDismissGoTo), Modifier.weight(1f).height(h), labelStyle = DriveType.ActionLabel)
             }
             DriveActions.Parked -> {
-                PleosButton("계획 보기", onOpenPlan, Modifier.weight(1f).height(h), filled = true, icon = ShimpyoIcons.Route, size = ButtonSize.Large)
-                PleosButton("탑승자", onOpenOccupants, Modifier.weight(1f).height(h), icon = ShimpyoIcons.Group, size = ButtonSize.Large)
+                PleosButton("계획 보기", armedOnly(onOpenPlan), Modifier.weight(1f).height(h), filled = true, icon = ShimpyoIcons.Route, size = ButtonSize.Large)
+                PleosButton("탑승자", armedOnly(onOpenOccupants), Modifier.weight(1f).height(h), icon = ShimpyoIcons.Group, size = ButtonSize.Large)
             }
             DriveActions.None -> Spacer(Modifier.weight(1f))
         }
@@ -253,7 +268,7 @@ private fun AheadStripCard(state: CoachUiState, driving: Boolean, modifier: Modi
             if (data.isEmpty) {
                 // 준비 전(데이터·위치)이면 그 이유를, 길안내 중이면 '정보 없음'을, 아니면 길안내 안내를 보인다
                 val text = when {
-                    state.guiding -> noOpportunityText(state.candidatesState)
+                    state.guiding -> noOpportunityText(state)
                     else -> candidatesWaiting(state.candidatesState) ?: "길안내를 시작하면 경로 앞 화장실과 정체를 보여 드려요"
                 }
                 Text(text, style = DriveType.Minimum, color = c.textSecondary, maxLines = 2)
@@ -313,3 +328,6 @@ private fun BarSwatch(color: Color, size: Dp) {
 }
 
 private const val AHEAD_AXIS_M = 120_000.0
+
+/** 행동 줄 내용이 바뀐 뒤 누름을 받기 시작할 때까지 (ms). 눌림 반응 0.25초 기준보다 길고, 의도한 누름을 막지 않을 만큼 짧다 */
+private const val ACTION_ARM_MS = 600L

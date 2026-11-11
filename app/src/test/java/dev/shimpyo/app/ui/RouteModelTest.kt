@@ -2,6 +2,7 @@ package dev.shimpyo.app.ui
 
 import dev.shimpyo.app.ui.components.StripMark
 import dev.shimpyo.app.ui.components.StripSpanKind
+import dev.shimpyo.coach.CandidatesState
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.Facilities
@@ -151,7 +152,7 @@ class RouteModelTest {
         val p = PlannedStop(opp("anseong", 52.0), setOf(Purpose.RESTROOM), 10, arriveInS = 2_700.0)
         val s = CoachUiState(guiding = true, remainDistanceM = 150_000.0, remainTimeS = 6_000.0, ahead = listOf(opp("anseong", 10.0)), plan = PitStopPlan(listOf(p), 10))
         // 25m/s로 10km = 400초 (계획 때 2,700초가 아니라)
-        assertEquals(400.0, livePlan(s).single().etaS, 1.0)
+        assertEquals(400.0, livePlan(s).single().etaS!!, 1.0)
     }
 
     @Test
@@ -168,5 +169,33 @@ class RouteModelTest {
         assertEquals(22.0, routeSpeedMps(CoachUiState()), 0.0)
         assertEquals(33.0, routeSpeedMps(CoachUiState(remainDistanceM = 100_000.0, remainTimeS = 100.0)), 0.0)
         assertEquals(5.0, routeSpeedMps(CoachUiState(remainDistanceM = 1_000.0, remainTimeS = 3_600.0)), 0.0)
+    }
+
+    @Test
+    fun lastPlannedStopPassedWhenTheRouteListReachesBeyondIt() {
+        // 재검토 #5: 길안내 중 경로 위 목록(TBT)이 계획 때 위치(52km)보다 멀리까지 오는데 그 정차가 없다 → 지나쳤다
+        val a = PlannedStop(opp("anseong", 52.0), setOf(Purpose.RESTROOM), 10, 2_700.0)
+        val s = CoachUiState(guiding = true, candidatesState = CandidatesState.READY, plan = PitStopPlan(listOf(a), 10), ahead = listOf(opp("b", 60.0)))
+        assertTrue(livePlan(s).isEmpty())
+        // 목록이 그만큼 멀리 오지 않으면 모른다: 남기되 계획 때 값임을 밝히고 지금 ETA는 없다
+        val short = s.copy(ahead = listOf(opp("b", 30.0)))
+        val kept = livePlan(short).single()
+        assertNull(kept.etaS)
+        assertEquals("계획 때 52km", plannedDistanceText(kept))
+        // 길안내가 아니면(반경 후보) 목록이 빠짐없다고 볼 수 없어 추론하지 않는다
+        assertEquals(1, livePlan(s.copy(guiding = false)).size)
+    }
+
+    @Test
+    fun plannedDistanceTextNamesItsSource() {
+        val p = PlannedStop(opp("x", null), setOf(Purpose.RESTROOM), 5, arriveInS = 0.0)
+        assertEquals("지금", plannedDistanceText(livePlan(CoachUiState(plan = PitStopPlan(listOf(p), 5))).single()))
+        val live = PlannedStop(opp("a", 52.0), setOf(Purpose.RESTROOM), 5, 100.0)
+        val s = CoachUiState(plan = PitStopPlan(listOf(live), 5), ahead = listOf(opp("a", 2.0)))
+        assertEquals("2km", plannedDistanceText(livePlan(s).single()))
+        // 지금 후보에 거리가 하나도 없으면 계획 때 값 ("약"이 아니라 '계획 때'로)
+        val noDist = s.copy(ahead = listOf(opp("a", null)))
+        assertEquals("계획 때 52km", plannedDistanceText(livePlan(noDist).single()))
+        assertNull(livePlan(noDist).single().etaS)
     }
 }

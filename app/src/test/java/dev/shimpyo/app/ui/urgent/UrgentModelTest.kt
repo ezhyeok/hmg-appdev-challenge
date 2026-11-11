@@ -25,23 +25,23 @@ class UrgentModelTest {
 
     @Test
     fun followsCoachStatesForOurRequest() {
-        assertEquals(UrgentStatus.LOCATING, urgentView(7, null, coach(7, UrgentState.LOCATING), false, null)!!.status)
-        assertEquals(UrgentStatus.SEARCHING, urgentView(7, null, coach(7, UrgentState.SEARCHING), false, null)!!.status)
-        assertEquals(UrgentStatus.NO_LOCATION, urgentView(7, null, coach(7, UrgentState.NO_LOCATION), false, null)!!.status)
-        assertEquals(UrgentStatus.NO_RESULT, urgentView(7, null, coach(7, UrgentState.NO_RESULT), false, null)!!.status)
-        val ready = urgentView(7, null, coach(7, UrgentState.READY, listOf(r1)), false, null)!!
+        assertEquals(UrgentStatus.LOCATING, urgentView(7, emptySet(), coach(7, UrgentState.LOCATING), false, null)!!.status)
+        assertEquals(UrgentStatus.SEARCHING, urgentView(7, emptySet(), coach(7, UrgentState.SEARCHING), false, null)!!.status)
+        assertEquals(UrgentStatus.NO_LOCATION, urgentView(7, emptySet(), coach(7, UrgentState.NO_LOCATION), false, null)!!.status)
+        assertEquals(UrgentStatus.NO_RESULT, urgentView(7, emptySet(), coach(7, UrgentState.NO_RESULT), false, null)!!.status)
+        val ready = urgentView(7, emptySet(), coach(7, UrgentState.READY, listOf(r1)), false, null)!!
         assertEquals(UrgentStatus.READY, ready.status)
         assertEquals(listOf(r1), ready.results)
         // READY인데 목록이 비면 결과 없음
-        assertEquals(UrgentStatus.NO_RESULT, urgentView(7, null, coach(7, UrgentState.READY, emptyList()), false, null)!!.status)
+        assertEquals(UrgentStatus.NO_RESULT, urgentView(7, emptySet(), coach(7, UrgentState.READY, emptyList()), false, null)!!.status)
     }
 
     @Test
     fun beforeAckShowsLocatingThenNoResponseNeverInventsNoLocation() {
         // 코치가 아직 다른(앞) 번호를 보고 있고 진행 중도 아니다
         val idle = coach(3, UrgentState.IDLE)
-        assertEquals(UrgentStatus.LOCATING, urgentView(7, null, idle, ackExpired = false, picking = null)!!.status)
-        val late = urgentView(7, null, idle, ackExpired = true, picking = null)!!
+        assertEquals(UrgentStatus.LOCATING, urgentView(7, emptySet(), idle, ackExpired = false, picking = null)!!.status)
+        val late = urgentView(7, emptySet(), idle, ackExpired = true, picking = null)!!
         assertEquals(UrgentStatus.NO_RESPONSE, late.status)
         assertNotEquals(UrgentStatus.NO_LOCATION, late.status)
     }
@@ -49,55 +49,93 @@ class UrgentModelTest {
     @Test
     fun coachEndingOurRequestClosesTheScreen() {
         // 경유지를 넣으면 코치가 요청을 끝낸다(IDLE, 같은 번호)
-        assertNull(urgentView(7, null, coach(7, UrgentState.IDLE), false, picking = "u1"))
+        assertNull(urgentView(7, emptySet(), coach(7, UrgentState.IDLE), false, picking = "u1"))
     }
 
     @Test
     fun dismissedRequestsLateResultDoesNotReopen() {
         // #7: 찾는 중에 닫았다. 코치가 아직 DismissUrgent를 처리하기 전에 결과를 냈다
         val late = coach(7, UrgentState.READY, listOf(r1))
-        assertNull(urgentView(requested = null, dismissed = 7, state = late, ackExpired = false, picking = null))
-        assertEquals(7L, settleDismissed(7, late))
+        assertNull(urgentView(requested = null, dismissed = setOf(7L), state = late, ackExpired = false, picking = null))
+        assertEquals(setOf(7L), settleDismissed(setOf(7L), late))
     }
 
     @Test
     fun closingBeforeTheCoachAcknowledgesDoesNotReopenOnTheLateAck() {
         // 보낸 직후 닫았다. 코치는 아직 앞 번호(3, IDLE)를 보이고 있다 → 닫은 번호를 잊으면 안 된다
         val before = coach(3, UrgentState.IDLE)
-        val kept = settleDismissed(7, before)
-        assertEquals(7L, kept)
+        val kept = settleDismissed(setOf(7L), before)
+        assertEquals(setOf(7L), kept)
         // 코치가 늦게 Urgent(7)을 받아 LOCATING을 알린다: 닫은 화면이 다시 열리지 않는다
         assertNull(urgentView(null, kept, coach(7, UrgentState.LOCATING), false, null))
-        assertEquals(7L, settleDismissed(kept, coach(7, UrgentState.IDLE)))
+        assertEquals(setOf(7L), settleDismissed(kept, coach(7, UrgentState.IDLE)))
     }
 
     @Test
     fun coachInitiatedUrgentOpensTheScreen() {
         // 음성 "화장실 급해": 화면은 요청하지 않았지만 코치가 새 번호로 진행 중이다
-        val v = urgentView(null, dismissed = 3, state = coach(9, UrgentState.SEARCHING), ackExpired = false, picking = null)!!
+        val v = urgentView(null, dismissed = setOf(3L), state = coach(9, UrgentState.SEARCHING), ackExpired = false, picking = null)!!
         assertEquals(9L, v.requestId)
         assertEquals(UrgentStatus.SEARCHING, v.status)
-        assertNull(urgentView(null, null, coach(9, UrgentState.IDLE), false, null))
+        assertNull(urgentView(null, emptySet(), coach(9, UrgentState.IDLE), false, null))
     }
 
     @Test
     fun serviceOffIsSaidPlainly() {
-        assertEquals(UrgentStatus.SERVICE_OFF, urgentView(7, null, CoachUiState(serviceRunning = false), false, null)!!.status)
+        // 한 번도 돈 적 없으면(차가운 시작, 저장된 요청 복원) '준비 중', 돌다가 멈췄으면 '멈춤'
+        assertEquals(UrgentStatus.SERVICE_STARTING, urgentView(7, emptySet(), CoachUiState(serviceRunning = false), false, null)!!.status)
+        val stopped = CoachUiState(serviceRunning = false, restroom = dev.shimpyo.engine.Gauge(30, dev.shimpyo.engine.Level.OK))
+        assertEquals(UrgentStatus.SERVICE_OFF, urgentView(7, emptySet(), stopped, false, null)!!.status)
     }
 
     @Test
     fun legacyCoachWithoutRequestIds() {
         // 옛 CoachService: 번호 0, 상태 IDLE, 결과는 urgent 목록뿐
-        assertEquals(UrgentStatus.LOCATING, urgentView(7, null, on, false, null)!!.status)
-        assertEquals(UrgentStatus.READY, urgentView(7, null, on.copy(urgent = listOf(r1)), false, null)!!.status)
-        assertEquals(UrgentStatus.NO_RESULT, urgentView(7, null, on.copy(urgent = emptyList()), false, null)!!.status)
+        assertEquals(UrgentStatus.LOCATING, urgentView(7, emptySet(), on, false, null)!!.status)
+        assertEquals(UrgentStatus.READY, urgentView(7, emptySet(), on.copy(urgent = listOf(r1)), false, null)!!.status)
+        assertEquals(UrgentStatus.NO_RESULT, urgentView(7, emptySet(), on.copy(urgent = emptyList()), false, null)!!.status)
         // 옛 코치는 위치가 없으면 결과 없이 끝난다. 응답 없는 코치와 구분할 수 없으니 '위치 없음'이라고 단정하지 않는다
-        assertEquals(UrgentStatus.NO_RESPONSE, urgentView(7, null, on, ackExpired = true, picking = null)!!.status)
+        assertEquals(UrgentStatus.NO_RESPONSE, urgentView(7, emptySet(), on, ackExpired = true, picking = null)!!.status)
         // 고른 뒤 목록이 지워졌다 = 경유지를 넣었다
-        assertNull(urgentView(7, null, on, false, picking = "u1"))
+        assertNull(urgentView(7, emptySet(), on, false, picking = "u1"))
         // 음성으로 연 급해(번호 0)를 닫으면 목록이 지워질 때까지 다시 열지 않는다
-        assertNull(urgentView(null, dismissed = 0, state = on.copy(urgent = listOf(r1)), ackExpired = false, picking = null))
-        assertNull(settleDismissed(0, on))
+        assertNull(urgentView(null, dismissed = setOf(0L), state = on.copy(urgent = listOf(r1)), ackExpired = false, picking = null))
+        assertEquals(emptySet<Long>(), settleDismissed(setOf(0L), on))
+    }
+
+    @Test
+    fun legacyVoiceAcceptClosesInsteadOfClaimingFailure() {
+        // 감사(재검토) 1: 결과를 본 뒤 '응'으로 경유지를 넣으면 옛 코치는 목록을 지운다(고른 곳 없음, 8초 지남)
+        assertNull(urgentView(7, emptySet(), on, ackExpired = true, picking = null, resultsSeen = true))
+        // 결과를 보기 전이면 아직 찾는 중/응답 없음
+        assertEquals(UrgentStatus.NO_RESPONSE, urgentView(7, emptySet(), on, ackExpired = true, picking = null, resultsSeen = false)!!.status)
+    }
+
+    @Test
+    fun retryHidesTheReplacedRequestAndClosedIdsAllStayHidden() {
+        // 다시 시도: 7을 닫은 번호에 넣고 8을 보낸다. 코치가 아직 7(NO_LOCATION)을 보이면 8의 '찾는 중'을 보인다
+        val v = urgentView(8, setOf(7L), coach(7, UrgentState.NO_LOCATION), false, null)!!
+        assertEquals(8L, v.requestId)
+        assertEquals(UrgentStatus.LOCATING, v.status)
+        // 7을 답 전에 닫고, 8을 보내고 또 닫았다: 7의 늦은 답도 8의 늦은 답도 다시 열지 않는다
+        assertNull(urgentView(null, setOf(7L, 8L), coach(7, UrgentState.LOCATING), false, null))
+        assertNull(urgentView(null, setOf(7L, 8L), coach(8, UrgentState.READY, listOf(r1)), false, null))
+        // 닫은 번호는 최근 몇 개만 남긴다
+        assertEquals(DISMISSED_KEEP, rememberDismissed((1L..20L).toSet(), 21L).size)
+        assertTrue(21L in rememberDismissed((1L..20L).toSet(), 21L))
+    }
+
+    @Test
+    fun coachInitiatedRequestTakingOverOursIsAdopted() {
+        // 감사(재검토) 3: 우리 요청 7이 떠 있는데 음성 "화장실 급해"로 코치가 9를 시작했다 → 화면은 9를 따르고 번호도 9로 바꾼다
+        val following = urgentView(7, emptySet(), coach(9, UrgentState.SEARCHING), false, null)!!
+        assertEquals(9L, following.requestId)
+        assertEquals(9L, adoptUrgentRequest(7, following, coach(9, UrgentState.SEARCHING)))
+        // 9가 끝나면(IDLE) 닫힌다. 예전에는 7로 돌아가 '찾지 못했어요'를 보였다
+        assertNull(urgentView(9, emptySet(), coach(9, UrgentState.IDLE), true, null))
+        // 옛 코치(번호 0)는 바꾸지 않는다
+        val legacy = urgentView(7, emptySet(), on.copy(urgent = listOf(r1)), false, null)!!
+        assertEquals(7L, adoptUrgentRequest(7, legacy, on.copy(urgent = listOf(r1))))
     }
 
     @Test

@@ -59,6 +59,7 @@ import dev.shimpyo.app.ui.components.VoiceButton
 import dev.shimpyo.app.ui.components.pressable
 import dev.shimpyo.app.ui.drive.acceptLabel
 import dev.shimpyo.app.ui.drive.shortQuestion
+import dev.shimpyo.app.ui.limitChars
 import dev.shimpyo.app.ui.shortStopName
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.DriveLimits
@@ -93,6 +94,8 @@ fun UrgentScreen(
     onClose: () -> Unit,
     onRetry: () -> Unit,
     modifier: Modifier = Modifier,
+    maxChars: Int = DriveLimits.MAX_STRING_LENGTH,
+    cabinSupported: Boolean = true,
     question: Prompt? = null,
     onAnswer: (Prompt, Boolean) -> Unit = { _, _ -> },
     badge: String? = null,
@@ -114,14 +117,14 @@ fun UrgentScreen(
         val body = Modifier.fillMaxWidth().weight(1f).padding(start = layout.margin, end = layout.margin, bottom = layout.bottom)
         Column(body) {
             if (question != null) {
-                QuestionStrip(question, driving, onAnswer)
+                QuestionStrip(question, driving, cabinSupported, maxChars, onAnswer)
                 Spacer(Modifier.height(Dimens.Space.m))
             }
             val rest = Modifier.fillMaxWidth().weight(1f)
             val n = urgentNotice(view.status)
             when {
                 n != null -> Notice(rest, n, onClose, onRetry)
-                driving -> DrivingResults(view.results.take(maxItems.coerceIn(1, DriveLimits.MAX_URGENT_RESULTS)), pickingId, onPick, onClose, rest)
+                driving -> DrivingResults(view.results.take(maxItems.coerceIn(1, DriveLimits.MAX_URGENT_RESULTS)), pickingId, maxChars, onPick, onClose, rest)
                 else -> ParkedResults(view.results, pickingId, onPick, rest)
             }
         }
@@ -138,6 +141,7 @@ fun urgentNotice(status: UrgentStatus): UrgentNotice? = when (status) {
     UrgentStatus.NO_LOCATION -> UrgentNotice("위치를 확인할 수 없어요", "잠시 후 다시 시도해 주세요", retry = true)
     UrgentStatus.NO_RESULT -> UrgentNotice("가까운 곳에 열린 화장실이 없어요", "조금 더 가서 다시 찾아 보세요", retry = true)
     UrgentStatus.NO_RESPONSE -> UrgentNotice("가까운 화장실을 찾지 못했어요", "위치를 확인하지 못했을 수 있어요. 다시 시도해 주세요", retry = true)
+    UrgentStatus.SERVICE_STARTING -> UrgentNotice("준비하고 있어요", "잠시 후 가까운 화장실을 찾아요", retry = false)
     UrgentStatus.SERVICE_OFF -> UrgentNotice("코치가 멈췄어요", "앱을 다시 열면 이어서 찾을 수 있어요", retry = false)
 }
 
@@ -160,14 +164,14 @@ private fun Notice(modifier: Modifier, n: UrgentNotice, onClose: () -> Unit, onR
 
 /** 급해 화면 위의 다른 질문 (UI 감사 #27) */
 @Composable
-private fun QuestionStrip(p: Prompt, driving: Boolean, onAnswer: (Prompt, Boolean) -> Unit) {
+private fun QuestionStrip(p: Prompt, driving: Boolean, cabinSupported: Boolean, maxChars: Int, onAnswer: (Prompt, Boolean) -> Unit) {
     val c = ShimpyoTheme.colors
     ShimpyoCard(Modifier.fillMaxWidth(), contentPadding = PaddingValues(horizontal = Dimens.Space.l, vertical = Dimens.Space.m)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(ShimpyoIcons.Info, contentDescription = null, modifier = Modifier.size(Dimens.Icon.small), tint = c.iconSecondary)
             Spacer(Modifier.width(Dimens.Space.xs))
             Text(
-                p.stop?.let { "${shortStopName(it.name)}: ${shortQuestion(p)}" } ?: shortQuestion(p),
+                limitChars(p.stop?.let { "${shortStopName(it.name)}: ${shortQuestion(p)}" } ?: shortQuestion(p), maxChars),
                 style = DriveType.Minimum,
                 color = c.textPrimary,
                 maxLines = 1,
@@ -180,7 +184,7 @@ private fun QuestionStrip(p: Prompt, driving: Boolean, onAnswer: (Prompt, Boolea
         } else {
             Spacer(Modifier.height(Dimens.Space.s))
             Row(horizontalArrangement = Arrangement.spacedBy(Dimens.Space.m)) {
-                val accept = acceptLabel(p)
+                val accept = acceptLabel(p, cabinSupported)
                 if (accept != null) PleosButton(accept, { onAnswer(p, true) }, Modifier.weight(1f), size = ButtonSize.Medium)
                 PleosButton(if (accept != null) "괜찮아요" else "확인", { onAnswer(p, false) }, Modifier.weight(1f), size = ButtonSize.Medium)
             }
@@ -189,7 +193,7 @@ private fun QuestionStrip(p: Prompt, driving: Boolean, onAnswer: (Prompt, Boolea
 }
 
 @Composable
-private fun DrivingResults(results: List<RankedStop>, pickingId: String?, onPick: (RankedStop) -> Unit, onClose: () -> Unit, modifier: Modifier) {
+private fun DrivingResults(results: List<RankedStop>, pickingId: String?, maxChars: Int, onPick: (RankedStop) -> Unit, onClose: () -> Unit, modifier: Modifier) {
     val layout = LocalLayout.current
     val firstFocus = remember { FocusRequester() }
     Column(modifier) {
@@ -202,7 +206,7 @@ private fun DrivingResults(results: List<RankedStop>, pickingId: String?, onPick
                 val r = results.getOrNull(i)
                 if (r != null) {
                     UrgentResultCard(
-                        i + 1, r, primary = i == 0, picking = pickingId == r.stop.id, enabled = pickingId == null, compact = layout.compact,
+                        i + 1, r, primary = i == 0, picking = pickingId == r.stop.id, enabled = pickingId == null, compact = layout.compact, maxChars = maxChars,
                         onClick = { onPick(r) },
                         modifier = if (i == 0) cell.focusRequester(firstFocus) else cell,
                     )
@@ -238,6 +242,7 @@ private fun UrgentResultCard(
     picking: Boolean,
     enabled: Boolean,
     compact: Boolean,
+    maxChars: Int,
     onClick: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
@@ -261,10 +266,10 @@ private fun UrgentResultCard(
                 Spacer(Modifier.width(Dimens.Space.m))
                 Icon(Labels.kindIcon(r.stop.kind), contentDescription = Labels.kindName(r.stop.kind), modifier = Modifier.size(Dimens.Icon.base), tint = fg)
                 Spacer(Modifier.width(Dimens.Space.s))
-                Text(r.stop.name, style = DriveType.StopName, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
+                Text(limitChars(r.stop.name, maxChars), style = DriveType.StopName, color = fg, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f))
             }
         }
-        add { Text(urgentMeta(r), style = DriveType.StopMeta, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        add { Text(limitChars(urgentMeta(r), maxChars), style = DriveType.StopMeta, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         // 소요 구성은 시간 바로 아래에 두되, 높이가 모자라면 배지 줄보다 먼저 뺀다 (priority)
         if (breakdown != null) add { Text(breakdown, style = DriveType.Minimum, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         add {

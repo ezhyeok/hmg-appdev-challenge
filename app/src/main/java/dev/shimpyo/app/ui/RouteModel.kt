@@ -5,6 +5,7 @@ import dev.shimpyo.app.ui.components.StripMark
 import dev.shimpyo.app.ui.components.StripSpan
 import dev.shimpyo.app.ui.components.StripSpanKind
 import dev.shimpyo.app.ui.components.StripStop
+import dev.shimpyo.coach.CandidatesState
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.PlannedStop
@@ -110,13 +111,27 @@ fun congestionPlace(c: CongestionSegment): String? {
     }
 }
 
+/** 계획 정차의 거리를 어디서 얻었는지 */
+enum class PlannedSource {
+    /** 지금 후보의 경로 거리 */
+    LIVE_ROUTE,
+    /** 지금 후보의 직선거리 × 도로계수 (어림) */
+    LIVE_STRAIGHT,
+    /** 계획 때 경로 거리 (그 뒤 달린 만큼 낡았다) */
+    PLAN_ROUTE,
+    /** 계획 때 직선거리 × 도로계수 */
+    PLAN_STRAIGHT,
+    /** 계획 때 도착 시간 × 평균 속도 (거리를 전혀 모름. 도착 0초면 지금 위치) */
+    PLAN_ETA,
+}
+
 /**
  * 계획 정차의 지금 모습.
  * @property number 남은 계획 안에서의 순서 (1부터, 지나친 정차는 빼고 센다)
  * @property stop 경로 앞 후보(ahead)에 같은 곳이 있으면 그 후보(거리·시간이 매초 줄어든다), 없으면 계획 때 값
  * @property live [stop]이 지금 후보 목록의 값인지
- * @property distanceM 차에서 경로 거리. 모르면 어림값([estimated])
- * @property etaS 지금 기준 도착까지 (초)
+ * @property distanceM 차에서 경로 거리 ([source]에 따라 낡았거나 어림일 수 있다)
+ * @property etaS 지금 기준 도착까지 (초). 지금 후보가 없으면 null: 계획 때 도착 시간을 지금 값처럼 보이지 않는다
  */
 data class LivePlannedStop(
     val planned: PlannedStop,
@@ -124,13 +139,18 @@ data class LivePlannedStop(
     val stop: StopCandidate,
     val live: Boolean,
     val distanceM: Double,
-    val estimated: Boolean,
-    val etaS: Double,
-)
+    val source: PlannedSource,
+    val etaS: Double?,
+) {
+    /** 지금 후보의 경로 거리가 아니다 (화면에 '약'·'계획 때'를 붙인다) */
+    val estimated: Boolean get() = source != PlannedSource.LIVE_ROUTE
+}
 
 /**
  * 계획을 지금 위치에 맞춘다 (UI 감사 #4: 계획 때 거리·도착 시간이 그대로 보였고, 지나친 정차가 첫 번째로 남았다).
- * - 지나침: 후보 목록에 없는데 뒤의 계획 정차는 있으면 지나친 것이다.
+ * - 지나침: 후보 목록에 없는데 뒤의 계획 정차는 있으면 지나친 것이다. 또 길안내 중이고 목록이 준비됐는데, 경로 위 목록(TBT,
+ *   경로 순서대로 빠짐없이 온다)이 그 정차의 계획 때 위치보다 멀리까지 오면서 그 정차가 없으면 지나친 것이다(앞에 있다면 지금
+ *   거리는 계획 때 거리보다 짧으므로 목록 안에 있어야 한다). 마지막 하나 남은 정차도 이렇게 빠진다(재검토 #5).
  * - 목적지 뒤(길안내 중 남은 거리보다 먼 곳)는 뺀다. 지금 후보에 있는 정차만 견준다(계획 때 거리는 낡았다).
  * - 거리를 전혀 모르면(경로 거리·직선거리 없음) 도착 시간 × 평균 속도로 어림하고, 도착 0초(PLAN_NOW)는 지금 위치다.
  *   예전에는 이런 정차가 계획 화면에서 조용히 빠졌다.
@@ -142,30 +162,47 @@ fun livePlan(state: CoachUiState): List<LivePlannedStop> {
     val byId = state.ahead.associateBy { it.id }
     val liveIdx = stops.indices.filter { byId.containsKey(stops[it].stop.id) }
     val lastLive = liveIdx.maxOrNull() ?: -1
+    val routeListReach = if (state.guiding && state.candidatesState == CandidatesState.READY) state.ahead.mapNotNull { it.routeDistanceM }.maxOrNull() else null
     val speed = routeSpeedMps(state)
     val out = ArrayList<LivePlannedStop>(stops.size)
     stops.forEachIndexed { i, p ->
         val now = byId[p.stop.id]
-        if (now == null && i < lastLive) return@forEachIndexed
-        val (d, est) = plannedPosition(p, now, speed)
+        if (now == null) {
+            if (i < lastLive) return@forEachIndexed
+            val planM = p.stop.routeDistanceM
+            if (routeListReach != null && planM != null && routeListReach >= planM) return@forEachIndexed
+        }
+        val (d, source) = plannedPosition(p, now, speed)
         // 목적지와 비교는 지금 거리로만 한다: 계획 때 거리(52km)는 그 뒤 달린 만큼 낡아 남은 거리(30km)와 견줄 수 없다
-        if (now != null && beyondDestination(state, d)) return@forEachIndexed
-        val eta = now?.etaS ?: if (now != null || !est) travelSeconds(0.0, d, state.congestion, speed) else p.arriveInS
-        out += LivePlannedStop(p, out.size + 1, now ?: p.stop, now != null, d, est, eta)
+        val liveDistance = source == PlannedSource.LIVE_ROUTE || source == PlannedSource.LIVE_STRAIGHT
+        if (liveDistance && beyondDestination(state, d)) return@forEachIndexed
+        val eta = if (liveDistance) now?.etaS ?: travelSeconds(0.0, d, state.congestion, speed) else null
+        out += LivePlannedStop(p, out.size + 1, now ?: p.stop, now != null, d, source, eta)
     }
     return out
 }
 
-/** 계획 정차의 경로 거리: 지금 후보 → 계획 때 경로 거리 → 직선거리 × 도로계수(어림) → 도착 시간 × 평균 속도(어림) */
+/** 계획 정차의 경로 거리: 지금 후보 → 계획 때 경로 거리 → 계획 때 직선거리 × 도로계수 → 도착 시간 × 평균 속도 */
 fun plannedDistance(p: PlannedStop, state: CoachUiState): Double =
     plannedPosition(p, state.ahead.firstOrNull { it.id == p.stop.id }, routeSpeedMps(state)).first
 
-private fun plannedPosition(p: PlannedStop, now: StopCandidate?, speed: Double): Pair<Double, Boolean> {
-    now?.routeDistanceM?.let { return it to false }
-    now?.straightDistanceM?.let { return it * Labels.config.roadFactor to true }
-    p.stop.routeDistanceM?.let { return it to (now == null) }
-    p.stop.straightDistanceM?.let { return it * Labels.config.roadFactor to true }
-    return (p.arriveInS.coerceAtLeast(0.0) * speed) to true
+private fun plannedPosition(p: PlannedStop, now: StopCandidate?, speed: Double): Pair<Double, PlannedSource> {
+    now?.routeDistanceM?.let { return it to PlannedSource.LIVE_ROUTE }
+    now?.straightDistanceM?.let { return it * Labels.config.roadFactor to PlannedSource.LIVE_STRAIGHT }
+    p.stop.routeDistanceM?.let { return it to PlannedSource.PLAN_ROUTE }
+    p.stop.straightDistanceM?.let { return it * Labels.config.roadFactor to PlannedSource.PLAN_STRAIGHT }
+    return (p.arriveInS.coerceAtLeast(0.0) * speed) to PlannedSource.PLAN_ETA
+}
+
+/** 계획 정차 거리 글자: "2km", "약 3km", 계획 때 값이면 "계획 때 52km", 거리를 모르는 바로 들를 곳은 "지금" */
+fun plannedDistanceText(p: LivePlannedStop): String {
+    val d = Labels.distance(p.distanceM)
+    return when (p.source) {
+        PlannedSource.LIVE_ROUTE -> d
+        PlannedSource.LIVE_STRAIGHT -> "약 $d"
+        PlannedSource.PLAN_ROUTE, PlannedSource.PLAN_STRAIGHT -> "계획 때 $d"
+        PlannedSource.PLAN_ETA -> if (p.distanceM <= 0.0) "지금" else "계획 때 약 $d"
+    }
 }
 
 /** 경로 띠 데이터 */

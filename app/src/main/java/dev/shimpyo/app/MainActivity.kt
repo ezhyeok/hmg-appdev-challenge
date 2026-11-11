@@ -17,8 +17,8 @@ import dev.shimpyo.app.ui.ShimpyoRoot
 import dev.shimpyo.app.ui.UiRestrictions
 import dev.shimpyo.app.ui.driveRestriction
 import dev.shimpyo.coach.UiCommand
-import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 
 /**
@@ -49,7 +49,8 @@ class MainActivity : ComponentActivity() {
         // 정차 중임을 읽은 뒤에만 권한 창을 띄운다. 주행 중에 실행했으면 정차할 때까지 기다린다
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
-                combine(UiRestrictions.state(this@MainActivity), CoachStore.state) { ux, s -> driveRestriction(ux, s) }
+                UiRestrictions.state(this@MainActivity)
+                    .map { driveRestriction(it) }
                     .distinctUntilChanged()
                     .collect { r ->
                         val missing = PleosPermissions.missing(this@MainActivity)

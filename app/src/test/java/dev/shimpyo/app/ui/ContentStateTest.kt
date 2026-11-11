@@ -17,7 +17,8 @@ class ContentStateTest {
     fun inFlightStateSurvivesRecreation() {
         val before = ContentState(
             screen = Screen.PLAN, demoReturn = Screen.HISTORY, planRequested = true,
-            urgentRequested = 42L, urgentDismissed = 41L, pickingId = "u1", goToPendingId = "ra-anseong", seenGoToAt = 99L,
+            urgentRequested = 42L, dismissedUrgent = setOf(40L, 41L), pickingId = "u1", goToPendingId = "ra-anseong", seenGoToAt = 99L,
+            urgentResultsFor = 42L, ackExpiredFor = 42L, planRequestedGen = 3L,
         )
         val saved = with(ContentState.Saver) { SaverScope { true }.save(before) }!!
         val after = ContentState.Saver.restore(saved)!!
@@ -25,7 +26,10 @@ class ContentStateTest {
         assertEquals(Screen.HISTORY, after.demoReturn)
         assertEquals(true, after.planRequested)
         assertEquals(42L, after.urgentRequested)
-        assertEquals(41L, after.urgentDismissed)
+        assertEquals(setOf(40L, 41L), after.dismissedUrgent)
+        assertEquals(42L, after.urgentResultsFor)
+        assertEquals(42L, after.ackExpiredFor)
+        assertEquals(3L, after.planRequestedGen)
         assertEquals("u1", after.pickingId)
         assertEquals("ra-anseong", after.goToPendingId)
         assertEquals(99L, after.seenGoToAt)
@@ -34,6 +38,7 @@ class ContentStateTest {
         assertNull(empty.urgentRequested)
         assertNull(empty.pickingId)
         assertNull(empty.goToPendingId)
+        assertEquals(emptySet<Long>(), empty.dismissedUrgent)
     }
 
     private val anseong = StopCandidate("a", "안성휴게소(부산방향)", StopKind.HIGHWAY_REST_AREA, 0.0, 0.0, Facilities(), true)
@@ -41,14 +46,11 @@ class ContentStateTest {
     @Test
     fun goToToastOnlyWhenTheDriveCardDoesNotShowIt() {
         val added = GoToResult(anseong, GoToOutcome.WAYPOINT_ADDED, 1L)
-        assertEquals("안성휴게소를 경유지로 넣었어요", goToToast(added, onDriveCard = false, nextStopId = null))
-        // 주행 화면 카드가 같은 곳을 보이면(맥락 "경유지로 넣었어요") 토스트는 띄우지 않는다
-        assertNull(goToToast(added, onDriveCard = true, nextStopId = "a"))
-        assertEquals("안성휴게소를 경유지로 넣었어요", goToToast(added, onDriveCard = true, nextStopId = "other"))
-        // 실패는 주행 화면에 다시 시도 카드가 있다
-        assertNull(goToToast(added.copy(outcome = GoToOutcome.FAILED), onDriveCard = true, nextStopId = null))
-        assertEquals("안성휴게소를 넣지 못했어요. 다시 시도해 주세요", goToToast(added.copy(outcome = GoToOutcome.FAILED), false, null))
-        assertEquals("안성휴게소로 길안내를 시작했어요", goToToast(added.copy(outcome = GoToOutcome.ROUTE_STARTED), false, null))
-        assertEquals("안성휴게소가 경로 위에 있어요. 진입로로 들어가세요", goToToast(added.copy(outcome = GoToOutcome.ON_ROUTE), false, null))
+        assertEquals("안성휴게소를 경유지로 넣었어요", goToToast(added, shownOnCard = false))
+        // 주행 화면 카드가 지금 그 결과를 보이면(DriveModels.cardShowsGoTo) 토스트는 띄우지 않는다
+        assertNull(goToToast(added, shownOnCard = true))
+        assertEquals("안성휴게소를 넣지 못했어요. 다시 시도해 주세요", goToToast(added.copy(outcome = GoToOutcome.FAILED), false))
+        assertEquals("안성휴게소로 길안내를 시작했어요", goToToast(added.copy(outcome = GoToOutcome.ROUTE_STARTED), false))
+        assertEquals("안성휴게소가 경로 위에 있어요. 진입로로 들어가세요", goToToast(added.copy(outcome = GoToOutcome.ON_ROUTE), false))
     }
 }

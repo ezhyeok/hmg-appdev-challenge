@@ -35,6 +35,7 @@ import dev.shimpyo.app.ui.components.micModel
 import dev.shimpyo.app.ui.demo.DemoPanel
 import dev.shimpyo.app.ui.demo.demoTitle
 import dev.shimpyo.app.ui.drive.DriveScreen
+import dev.shimpyo.app.ui.drive.cardShowsGoTo
 import dev.shimpyo.app.ui.history.HistoryScreen
 import dev.shimpyo.app.ui.occupants.OccupantsScreen
 import dev.shimpyo.app.ui.plan.PlanScreen
@@ -44,6 +45,9 @@ import dev.shimpyo.app.ui.theme.ShimpyoTheme
 import dev.shimpyo.app.ui.urgent.URGENT_ACK_TIMEOUT_MS
 import dev.shimpyo.app.ui.urgent.UrgentRequestIds
 import dev.shimpyo.app.ui.urgent.UrgentScreen
+import dev.shimpyo.app.ui.urgent.UrgentStatus
+import dev.shimpyo.app.ui.urgent.adoptUrgentRequest
+import dev.shimpyo.app.ui.urgent.rememberDismissed
 import dev.shimpyo.app.ui.urgent.settleDismissed
 import dev.shimpyo.app.ui.urgent.urgentView
 import dev.shimpyo.coach.CoachUiState
@@ -93,7 +97,7 @@ fun ShimpyoContent(
     state: CoachUiState,
     host: AppHost,
     modifier: Modifier = Modifier,
-    restriction: DriveRestriction = driveRestriction(UxRestrictions.NOT_CONNECTED, state),
+    restriction: DriveRestriction = driveRestriction(UxRestrictions.NOT_CONNECTED),
     initialScreen: Screen = Screen.DRIVE,
     initialUrgentRequest: Long? = null,
 ) {
@@ -110,24 +114,24 @@ fun ShimpyoContent(
     val shown = if (driving) Screen.DRIVE else ui.screen
     val holder = rememberSaveableStateHolder()
 
-    LaunchedEffect(driving) {
-        if (driving) {
-            overlays.dismissPopup()
-            if (ui.screen != Screen.DRIVE) {
-                ui.screen = Screen.DRIVE
-                if (restriction.known) overlays.toast("주행 중에는 주행 화면만 보여요")
-            }
+    // 주행 중이면 팝업을 닫고, 제한을 실제로 읽었을 때만 고른 화면을 주행으로 되돌린다. 모를 때(차가운 시작, 프로세스 복원)는
+    // 그리기만 주행 화면으로 하고(shown) 저장된 화면은 남겨 둔다: 정차로 읽히면 그 화면으로 돌아간다 (재검토)
+    LaunchedEffect(driving, restriction.known) {
+        if (driving) overlays.dismissPopup()
+        if (driving && restriction.known && ui.screen != Screen.DRIVE) {
+            ui.screen = Screen.DRIVE
+            overlays.toast("주행 중에는 주행 화면만 보여요")
         }
     }
 
-    // 계획 요청: 새 계획이 오면(다른 객체) 진행 표시를 끈다. 다시 계산한 계획이 이전과 같아 상태가 바뀌지 않으면
-    // 시간이 지나면 조용히 끄고, 계획이 아예 없을 때만 실패를 알린다. 기준 계획은 처음 그릴 때 값이다(다시 만들어져도 이어진다)
+    // 계획 요청: 코치가 계획 번호(planGeneration)를 쓰면 번호가 오를 때, 쓰지 않으면(옛 코치) 새 계획 객체가 올 때 진행 표시를 끈다.
+    // 번호를 쓰는 코치는 지나친 정차를 빼며 같은 계획을 매초 다시 낼 수 있어 객체로 보면 바로 풀린다 (재검토).
+    // 다시 계산한 계획이 이전과 같아 상태가 바뀌지 않으면 시간이 지나면 조용히 끄고, 계획이 아예 없을 때만 실패를 알린다
     var planBaseline by remember { mutableStateOf(state.plan) }
-    LaunchedEffect(state.plan) {
-        if (state.plan !== planBaseline) {
-            planBaseline = state.plan
-            ui.planRequested = false
-        }
+    LaunchedEffect(state.plan, state.planGeneration) {
+        val arrived = if (state.planGeneration > 0L) state.planGeneration != ui.planRequestedGen else state.plan !== planBaseline
+        planBaseline = state.plan
+        if (arrived) ui.planRequested = false
     }
     LaunchedEffect(ui.planRequested) {
         if (ui.planRequested) {
@@ -139,23 +143,38 @@ fun ShimpyoContent(
         }
     }
 
-    // 급해: 요청 번호로 코치의 진행 상태를 짝짓는다 (UrgentModel). 답 기다림 시간 초과는 그 번호에만 붙인다:
-    // Boolean 하나로 두면 [다시 시도]로 새 번호를 보낸 첫 프레임에 앞 요청의 '초과'가 그대로 보인다
-    var ackExpiredFor by remember { mutableStateOf<Long?>(null) }
+    // 급해: 요청 번호로 코치의 진행 상태를 짝짓는다 (UrgentModel). 답 기다림 시간 초과는 그 번호에만 붙이고 저장한다:
+    // Boolean 하나로 두면 [다시 시도]로 새 번호를 보낸 첫 프레임에 앞 요청의 '초과'가 보이고, 다시 만들어지면 8초를 또 기다렸다
     LaunchedEffect(ui.urgentRequested) {
         val id = ui.urgentRequested ?: return@LaunchedEffect
+        if (ui.ackExpiredFor == id) return@LaunchedEffect
         delay(URGENT_ACK_TIMEOUT_MS)
-        ackExpiredFor = id
+        ui.ackExpiredFor = id
     }
-    val ackExpired = ui.urgentRequested != null && ackExpiredFor == ui.urgentRequested
-    val urgent = urgentView(ui.urgentRequested, ui.urgentDismissed, state, ackExpired, ui.pickingId)
+    val requested = ui.urgentRequested
+    val urgent = urgentView(
+        requested = requested,
+        dismissed = ui.dismissedUrgent,
+        state = state,
+        ackExpired = requested != null && ui.ackExpiredFor == requested,
+        picking = ui.pickingId,
+        resultsSeen = requested != null && ui.urgentResultsFor == requested,
+    )
     val urgentVisible = urgent != null
     LaunchedEffect(state.urgentRequestId, state.urgentState, state.urgent == null) {
-        ui.urgentDismissed = settleDismissed(ui.urgentDismissed, state)
+        ui.dismissedUrgent = settleDismissed(ui.dismissedUrgent, state)
     }
-    // 코치가 요청을 끝냈다(경유지를 넣었다 등): 화면도 닫는다
+    LaunchedEffect(urgent?.requestId, urgent?.status) {
+        // 음성 "화장실 급해"로 코치가 연 다른 번호를 따르고 있으면 그 번호를 우리 요청으로 삼는다 (끝날 때 닫히게)
+        ui.urgentRequested = adoptUrgentRequest(ui.urgentRequested, urgent, current.value)
+        // 옛 코치에서 결과를 보였다: 그 뒤 목록이 지워지면 끝난 것이다(음성 '응'으로 경유지를 넣음)
+        if (urgent != null && (urgent.status == UrgentStatus.READY || urgent.status == UrgentStatus.NO_RESULT)) {
+            ui.urgentResultsFor = ui.urgentRequested
+        }
+    }
+    // 화면이 닫혔다(코치가 끝냄, 경유지를 넣음, 음성으로 연 급해가 끝남): 기다리던 것을 모두 푼다
     LaunchedEffect(urgentVisible) {
-        if (!urgentVisible && ui.urgentRequested != null) {
+        if (!urgentVisible) {
             ui.urgentRequested = null
             ui.pickingId = null
         }
@@ -191,7 +210,8 @@ fun ShimpyoContent(
             // 고른 곳이 들어갔으면 급해 화면을 닫는다 (코치도 끝내지만 한 틱 늦을 수 있다)
             if (r.outcome != GoToOutcome.FAILED && view != null) actions.closeUrgent(view.requestId, answerUrgentPrompt = false)
         }
-        goToToast(r, onDriveCard = shown == Screen.DRIVE && view == null, nextStopId = current.value.next?.stop?.id)?.let(overlays::toast)
+        val onCard = shown == Screen.DRIVE && view == null && cardShowsGoTo(current.value, driving, r)
+        goToToast(r, shownOnCard = onCard)?.let(overlays::toast)
     }
 
     PlatformBackHandler {
@@ -223,6 +243,8 @@ fun ShimpyoContent(
                         onPick = { actions.pick(it) },
                         onClose = { actions.closeUrgent(urgent.requestId) },
                         onRetry = { actions.requestUrgent(replacing = urgent.requestId) },
+                        maxChars = restriction.maxChars,
+                        cabinSupported = state.cabinSupported,
                         question = state.prompt?.takeIf { state.serviceRunning && it.kind != PromptKind.URGENT_RESULT },
                         onAnswer = { p, accept -> actions.answer(p, accept) },
                         badge = badge,
@@ -342,7 +364,11 @@ private class ContentActions(
     fun requestUrgent(replacing: Long? = null) {
         // 급해 버튼을 한 프레임 안에 두 번 누르면 요청이 둘 간다: 진행 중인 요청이 있으면 다시 시도할 때만 새로 보낸다
         if (replacing == null && ui.urgentRequested != null) return
-        if (replacing != null) host.send(UiCommand.DismissUrgent(replacing))
+        if (replacing != null) {
+            // 끝난 앞 요청은 닫은 것으로 둔다: 코치가 아직 그 번호를 보이는 동안 화면이 그것을 따르지 않게 (재검토 #2)
+            host.send(UiCommand.DismissUrgent(replacing))
+            ui.dismissedUrgent = rememberDismissed(ui.dismissedUrgent, replacing)
+        }
         val id = UrgentRequestIds.next()
         ui.pickingId = null
         ui.urgentRequested = id
@@ -353,7 +379,7 @@ private class ContentActions(
         val p = state().prompt
         if (answerUrgentPrompt && p?.kind == PromptKind.URGENT_RESULT) host.send(UiCommand.Answer(p.id, false))
         host.send(UiCommand.DismissUrgent(requestId))
-        ui.urgentDismissed = requestId
+        ui.dismissedUrgent = rememberDismissed(ui.dismissedUrgent, requestId)
         ui.urgentRequested = null
         ui.pickingId = null
     }
@@ -399,6 +425,7 @@ private class ContentActions(
     }
 
     fun makePlan() {
+        ui.planRequestedGen = state().planGeneration
         ui.planRequested = true
         host.send(UiCommand.MakePlan)
     }

@@ -7,6 +7,7 @@ import dev.shimpyo.app.ui.beyondDestination
 import dev.shimpyo.app.ui.components.ShimpyoIcons
 import dev.shimpyo.app.ui.limitChars
 import dev.shimpyo.app.ui.livePlan
+import dev.shimpyo.app.ui.plannedDistanceText
 import dev.shimpyo.app.ui.theme.DriveLimits
 import dev.shimpyo.coach.CandidatesState
 import dev.shimpyo.coach.CoachUiState
@@ -103,11 +104,14 @@ data class StopCardModel(
     val muted: Boolean = false,
 )
 
-/** 경로 앞에서 가장 가까운 화장실 (경로 거리, 없으면 직선거리 기준). 길안내 중이면 목적지까지만 */
+/**
+ * 경로 앞에서 가장 가까운 화장실 (경로 거리, 없으면 직선거리 기준). 길안내 중이면 목적지까지만, 유턴이 필요한 곳은 뺀다
+ * ('진행 방향 가까운 화장실 … · 유턴 필요'처럼 맥락과 어긋났다, 재검토 #13)
+ */
 internal fun nearestAhead(state: CoachUiState) = state.ahead
     .filter { s ->
         val d = s.routeDistanceM ?: s.straightDistanceM ?: -1.0
-        s.facilities.restroom && d >= 0.0 && !(s.routeDistanceM != null && beyondDestination(state, d))
+        s.facilities.restroom && d >= 0.0 && s.directionOk != false && !(s.routeDistanceM != null && beyondDestination(state, d))
     }
     .minByOrNull { it.routeDistanceM ?: it.straightDistanceM ?: Double.MAX_VALUE }
 
@@ -165,7 +169,7 @@ fun stopCard(state: CoachUiState, driving: Boolean, maxChars: Int = DriveLimits.
     val drivenBy = state.occupants.firstOrNull { it.id == state.restroom?.drivenBy }
     val who = drivenBy?.let { Labels.publicName(it) }
     val prompt = state.prompt
-    val failed = state.goToResult?.takeIf { it.outcome == GoToOutcome.FAILED }
+    val failed = failedGoTo(state)
     val card = when {
         !state.serviceRunning -> serviceCard(state)
         prompt != null -> promptCard(prompt, state, maxChips, who)
@@ -253,6 +257,25 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     return StopCardModel(context, stop.name, meta, chips, icon, askingLevel = level)
 }
 
+/**
+ * 다시 시도할 만한 경유지 실패. 실패한 곳을 이미 지나쳤으면(후보 목록이 준비됐는데 앞쪽 후보·추천·질문·급해 결과·계획
+ * 어디에도 없으면) 두지 않는다: 지나친 곳을 경유지로 넣으라는 버튼이 남았다(재검토 #4). 목록을 모르면 지나쳤다고 단정하지 않는다
+ */
+fun failedGoTo(state: CoachUiState): GoToResult? {
+    val r = state.goToResult?.takeIf { it.outcome == GoToOutcome.FAILED } ?: return null
+    if (state.candidatesState != CandidatesState.READY) return r
+    val id = r.stop.id
+    val stillAhead = state.ahead.any { it.id == id } || state.next?.stop?.id == id || state.promptStop?.id == id ||
+        state.urgent.orEmpty().any { it.stop.id == id } || livePlan(state).any { it.live && it.stop.id == id }
+    return r.takeIf { stillAhead }
+}
+
+/** 주행 화면 카드가 지금 [r]을 보이고 있는지 (그렇지 않으면 토스트로 알린다, 재검토 #10) */
+fun cardShowsGoTo(state: CoachUiState, driving: Boolean, r: GoToResult): Boolean {
+    val card = stopCard(state, driving)
+    return card.title == r.stop.name && card.context == goToContext(r.outcome)
+}
+
 /** 경유지·길안내 요청이 실패했다: 넣었다고 말하지 않고 다시 시도를 연다 (UI 감사 #3) */
 private fun failedGoToCard(r: GoToResult) = StopCardModel(
     context = "경유지를 넣지 못했어요",
@@ -266,8 +289,12 @@ private fun failedGoToCard(r: GoToResult) = StopCardModel(
 /** 정차 중 다음 계획: 지나친 정차는 빼고 지금 거리·도착 시간으로 (UI 감사 #4) */
 private fun planCard(state: CoachUiState, maxChips: Int): StopCardModel {
     val first = livePlan(state).first()
-    val distance = Labels.distance(first.distanceM).let { if (first.estimated) "약 $it" else it }
-    val meta = listOf(distance, "${Labels.minutesOf(first.etaS)} 뒤 도착", "${first.planned.dwellMin}분 정차").joinToString(" · ")
+    // 지금 후보가 없으면 계획 때 값임을 밝히고 도착 시간은 뺀다 (재검토 #5)
+    val meta = listOfNotNull(
+        plannedDistanceText(first),
+        first.etaS?.let { "${Labels.minutesOf(it)} 뒤 도착" },
+        "${first.planned.dwellMin}분 정차",
+    ).joinToString(" · ")
     val chips = Labels.sortedPurposes(first.planned.purposes).map(Labels::purposeName).take(maxChips)
     return StopCardModel("다음 계획", first.stop.name, meta, chips, ShimpyoIcons.Route, askingLevel = null)
 }
@@ -312,15 +339,25 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
 
 /** 엔진 추천이 없을 때 경로 앞 첫 화장실 (마지막 기회를 지난 정체 속에서 '고르는 중'에 멈춰 보이지 않게) */
 private fun nearestCard(a: StopCandidate, state: CoachUiState): StopCardModel {
-    val afterJam = a.routeDistanceM?.let { d -> state.congestion.any { it.startDistanceM in 0.0..d } } == true
     return StopCardModel(
         context = if (state.guiding) "다음 화장실" else "진행 방향 가까운 화장실",
         title = a.name,
         meta = Labels.stopMeta(a),
-        chips = if (afterJam) listOf("정체 뒤") else emptyList(),
+        chips = listOfNotNull(jamChip(a, state)),
         icon = ShimpyoIcons.Wc,
         askingLevel = null,
     )
+}
+
+/**
+ * 그곳까지 가는 길에 정체가 있으면: 정체가 그 앞에서 끝나면 "정체 뒤", 그곳을 지나서도 이어지면 "정체 구간 안".
+ * 차가 이미 정체 안(시작 거리 < 0)이어도 센다 (예전에는 앞에서 시작하는 정체만 봤다, 재검토 #17)
+ */
+private fun jamChip(a: StopCandidate, state: CoachUiState): String? {
+    val d = a.routeDistanceM ?: return null
+    val jams = state.congestion.filter { it.startDistanceM < d && it.startDistanceM + it.lengthM > 0.0 }
+    if (jams.isEmpty()) return null
+    return if (jams.any { it.startDistanceM + it.lengthM > d }) "정체 구간 안" else "정체 뒤"
 }
 
 /**
@@ -357,7 +394,7 @@ sealed interface DriveActions {
 
 fun driveActions(state: CoachUiState, driving: Boolean): DriveActions {
     val prompt = state.prompt
-    val failed = state.goToResult?.takeIf { it.outcome == GoToOutcome.FAILED }
+    val failed = failedGoTo(state)
     return when {
         // 서비스가 멈췄으면 받을 사람이 없는 버튼을 두지 않는다
         state.serviceRunning && prompt != null -> DriveActions.Answer(prompt, acceptLabel(prompt, state.cabinSupported))

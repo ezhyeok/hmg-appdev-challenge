@@ -4,7 +4,6 @@ import androidx.compose.runtime.Immutable
 import dev.hmg.pleoskit.UxRestrictionFlags
 import dev.hmg.pleoskit.UxRestrictions
 import dev.shimpyo.app.ui.theme.DriveLimits
-import dev.shimpyo.coach.CoachUiState
 
 /**
  * 화면이 지키는 주행 제한. 화면은 [UxRestrictions]를 서비스 없이 스스로 구독한다(Platform.kt의 프로세스 단위 구독).
@@ -29,12 +28,13 @@ data class DriveRestriction(
 }
 
 /**
- * 화면의 구독 값([ux])이 우선이다. 아직 모르면 서비스가 읽은 값(state.drivingRestricted, 기본 true)을 쓰고,
- * 서비스도 돌지 않으면 제한으로 본다. 어느 경우에도 모르면 제한이다 (fail closed).
+ * 화면의 구독 값([ux])만 믿는다. 모르면 제한이다 (fail closed). 서비스가 읽은 값(state.drivingRestricted)은 쓰지 않는다:
+ * 서비스가 다시 뜰 때 새 인스턴스가 자기 구독을 내기 전까지는 죽은 인스턴스의 옛 false가 CoachStore에 남아 있어서
+ * 그 틈에 정차 화면이 열릴 수 있다 (재검토 #12). 화면 구독은 실패하면 다시 연결한다(UxRestrictionWatcher).
  * 기능별 비트는 주행 중일 때만 본다: 문구 길이(LIMIT_STRING_LENGTH)와 항목 수(LIMIT_CONTENT)는 플랫폼 값이 앱 상한보다 작을 때만 줄인다.
  * NO_SETUP·NO_KEYBOARD·NO_VIDEO는 주행 중에 정차 화면을 모두 닫는 것으로 이미 지킨다.
  */
-fun driveRestriction(ux: UxRestrictions, state: CoachUiState): DriveRestriction = when (ux) {
+fun driveRestriction(ux: UxRestrictions): DriveRestriction = when (ux) {
     is UxRestrictions.Known -> {
         if (!ux.requiresDistractionOptimization) {
             DriveRestriction.PARKED
@@ -55,8 +55,7 @@ fun driveRestriction(ux: UxRestrictions, state: CoachUiState): DriveRestriction 
             )
         }
     }
-    is UxRestrictions.Unknown ->
-        if (state.serviceRunning && !state.drivingRestricted) DriveRestriction(driving = false, known = true) else DriveRestriction.UNKNOWN
+    is UxRestrictions.Unknown -> DriveRestriction.UNKNOWN
 }
 
 /** 주행 중 문구 길이 제한. 넘치면 말줄임표로 자른다 */
