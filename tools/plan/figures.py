@@ -704,7 +704,7 @@ def fig_hero(screen=None):
     sy = H - 46
     b.append(R(16, sy, W - 32, 36, 18, SURF2))
     parts = [("Pleos ", 700, INK2), ("NaviHelper · Vehicle · TTS/STT · FusedLocation", 500, INK2),
-             (" + AAOS Car API", 500, INK2), ("   |   ", 400, MUTED), ("판단 엔진 테스트 140개", 700, INK),
+             (" + AAOS Car API", 500, INK2), ("   |   ", 400, MUTED), ("판단 엔진 테스트 141개", 700, INK),
              ("   |   ", 400, MUTED), ("에뮬레이터 검증", 700, INK)]
     size = FS
     b.append(TS(W / 2, sy + 23.5, parts, size, "middle"))

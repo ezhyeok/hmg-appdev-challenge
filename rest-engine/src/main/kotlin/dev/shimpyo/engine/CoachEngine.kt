@@ -232,7 +232,9 @@ class CoachEngine(
                 userInitiated = true,
             )
         }
-        if (accepted == null) {
+        // 기어 P로 서 있는 동안에는 앞쪽 정차를 묻지 않는다 (이미 서 있다. 휴식은 15분, 화장실 시계는 3분 뒤에야 되돌아간다)
+        val moving = !stops.parked
+        if (accepted == null && moving) {
             if (lastChance != null) {
                 promptCands += PromptPolicy.Candidate(
                     PromptKind.LAST_CHANCE, lastChanceSpeech(lastChance), lastChance.opp.stop, lastChance.opp.distanceM,
@@ -261,7 +263,7 @@ class CoachEngine(
             }
         }
         val styleCheck = styleOut.persistent && !styleMuted && deviation >= config.styleAdvanceDeviation
-        if (!fatigue.sleepyVoiced && fatigueGauge.level < Level.NOW && (styleCheck || fatigueGauge.level >= Level.SOON)) {
+        if (moving && !fatigue.sleepyVoiced && fatigueGauge.level < Level.NOW && (styleCheck || fatigueGauge.level >= Level.SOON)) {
             val speech = when {
                 styleCheck -> texts.checkIn(floor(fatigue.drivingMin).toInt(), byStyle = true)
                 fat.sleepyCurveMin <= fat.rhythmMin -> texts.checkInBodyClock()
