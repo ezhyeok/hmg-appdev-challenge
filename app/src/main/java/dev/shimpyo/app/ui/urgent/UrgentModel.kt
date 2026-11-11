@@ -21,7 +21,10 @@ enum class UrgentStatus {
     READY,
     NO_LOCATION,
     NO_RESULT,
-    /** 코치가 요청을 받았다는 답이 [URGENT_ACK_TIMEOUT_MS] 동안 없다 */
+    /**
+     * 요청 뒤 [URGENT_ACK_TIMEOUT_MS] 동안 아무 진행이 없다. 코치가 응답하지 않았거나, 옛 코치가 위치를 몰라 결과 없이 끝냈다
+     * (요청을 받기 전의 코치 상태(번호 0, IDLE)는 둘이 같아서 구분할 수 없다): 어느 쪽이든 맞는 말로 알린다
+     */
     NO_RESPONSE,
     /** 코치 서비스가 돌지 않는다 */
     SERVICE_OFF,
@@ -49,9 +52,16 @@ private fun CoachUiState.legacy(): Boolean = urgentRequestId == 0L
 fun coachUrgentActive(id: Long, state: CoachUiState): Boolean =
     if (state.legacy()) id == 0L && state.urgent != null else state.urgentRequestId == id && state.urgentState != UrgentState.IDLE
 
-/** 닫은 번호는 코치가 그 요청을 끝내면 잊는다 (같은 번호가 다시 오지 않으므로 그 뒤로는 필요 없다) */
-fun settleDismissed(dismissed: Long?, state: CoachUiState): Long? =
-    dismissed?.takeIf { coachUrgentActive(it, state) }
+/**
+ * 닫은 번호를 언제 잊을지. 번호는 다시 쓰이지 않으므로 계속 들고 있는다: 일찍 잊으면 코치가 Urgent를 늦게 받아
+ * 그 번호로 진행을 알릴 때 닫은 화면이 다시 열린다(닫기 → 코치는 아직 앞 번호 → 잊음 → 코치가 우리 번호로 LOCATING).
+ * 옛 코치만 번호 0을 늘 다시 쓰므로 목록이 지워지면(그 요청이 끝나면) 잊는다.
+ */
+fun settleDismissed(dismissed: Long?, state: CoachUiState): Long? = when (dismissed) {
+    null -> null
+    0L -> dismissed.takeIf { state.legacy() && state.urgent != null }
+    else -> dismissed
+}
 
 /**
  * @param requested 화면이 보내고 아직 닫지 않은 요청 번호
@@ -77,8 +87,7 @@ fun urgentView(requested: Long?, dismissed: Long?, state: CoachUiState, ackExpir
         val status = when {
             r != null -> if (r.isEmpty()) UrgentStatus.NO_RESULT else UrgentStatus.READY
             picking != null -> return null
-            // 옛 코치는 위치가 없을 때만 결과 없이 끝난다
-            ackExpired -> UrgentStatus.NO_LOCATION
+            ackExpired -> UrgentStatus.NO_RESPONSE
             else -> UrgentStatus.LOCATING
         }
         return UrgentView(id, status, r.orEmpty())

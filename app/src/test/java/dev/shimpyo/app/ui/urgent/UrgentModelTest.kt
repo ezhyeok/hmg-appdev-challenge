@@ -57,9 +57,18 @@ class UrgentModelTest {
         // #7: 찾는 중에 닫았다. 코치가 아직 DismissUrgent를 처리하기 전에 결과를 냈다
         val late = coach(7, UrgentState.READY, listOf(r1))
         assertNull(urgentView(requested = null, dismissed = 7, state = late, ackExpired = false, picking = null))
-        // 코치가 그 요청을 끝내면 닫은 번호는 잊는다
         assertEquals(7L, settleDismissed(7, late))
-        assertNull(settleDismissed(7, coach(7, UrgentState.IDLE)))
+    }
+
+    @Test
+    fun closingBeforeTheCoachAcknowledgesDoesNotReopenOnTheLateAck() {
+        // 보낸 직후 닫았다. 코치는 아직 앞 번호(3, IDLE)를 보이고 있다 → 닫은 번호를 잊으면 안 된다
+        val before = coach(3, UrgentState.IDLE)
+        val kept = settleDismissed(7, before)
+        assertEquals(7L, kept)
+        // 코치가 늦게 Urgent(7)을 받아 LOCATING을 알린다: 닫은 화면이 다시 열리지 않는다
+        assertNull(urgentView(null, kept, coach(7, UrgentState.LOCATING), false, null))
+        assertEquals(7L, settleDismissed(kept, coach(7, UrgentState.IDLE)))
     }
 
     @Test
@@ -82,8 +91,8 @@ class UrgentModelTest {
         assertEquals(UrgentStatus.LOCATING, urgentView(7, null, on, false, null)!!.status)
         assertEquals(UrgentStatus.READY, urgentView(7, null, on.copy(urgent = listOf(r1)), false, null)!!.status)
         assertEquals(UrgentStatus.NO_RESULT, urgentView(7, null, on.copy(urgent = emptyList()), false, null)!!.status)
-        // 옛 코치는 위치가 없으면 결과 없이 끝난다
-        assertEquals(UrgentStatus.NO_LOCATION, urgentView(7, null, on, ackExpired = true, picking = null)!!.status)
+        // 옛 코치는 위치가 없으면 결과 없이 끝난다. 응답 없는 코치와 구분할 수 없으니 '위치 없음'이라고 단정하지 않는다
+        assertEquals(UrgentStatus.NO_RESPONSE, urgentView(7, null, on, ackExpired = true, picking = null)!!.status)
         // 고른 뒤 목록이 지워졌다 = 경유지를 넣었다
         assertNull(urgentView(7, null, on, false, picking = "u1"))
         // 음성으로 연 급해(번호 0)를 닫으면 목록이 지워질 때까지 다시 열지 않는다

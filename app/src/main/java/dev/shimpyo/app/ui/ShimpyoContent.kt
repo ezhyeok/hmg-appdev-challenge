@@ -340,6 +340,8 @@ private class ContentActions(
 
     /** 급해 요청. [replacing]은 다시 시도할 때 끝난 앞 요청 (코치 쪽 상태도 정리한다) */
     fun requestUrgent(replacing: Long? = null) {
+        // 급해 버튼을 한 프레임 안에 두 번 누르면 요청이 둘 간다: 진행 중인 요청이 있으면 다시 시도할 때만 새로 보낸다
+        if (replacing == null && ui.urgentRequested != null) return
         if (replacing != null) host.send(UiCommand.DismissUrgent(replacing))
         val id = UrgentRequestIds.next()
         ui.pickingId = null

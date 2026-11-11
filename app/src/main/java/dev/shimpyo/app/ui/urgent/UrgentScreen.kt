@@ -137,7 +137,7 @@ fun urgentNotice(status: UrgentStatus): UrgentNotice? = when (status) {
     UrgentStatus.READY -> null
     UrgentStatus.NO_LOCATION -> UrgentNotice("위치를 확인할 수 없어요", "잠시 후 다시 시도해 주세요", retry = true)
     UrgentStatus.NO_RESULT -> UrgentNotice("가까운 곳에 열린 화장실이 없어요", "조금 더 가서 다시 찾아 보세요", retry = true)
-    UrgentStatus.NO_RESPONSE -> UrgentNotice("응답이 없어요", "다시 시도해 주세요", retry = true)
+    UrgentStatus.NO_RESPONSE -> UrgentNotice("가까운 화장실을 찾지 못했어요", "위치를 확인하지 못했을 수 있어요. 다시 시도해 주세요", retry = true)
     UrgentStatus.SERVICE_OFF -> UrgentNotice("코치가 멈췄어요", "앱을 다시 열면 이어서 찾을 수 있어요", retry = false)
 }
 
@@ -265,6 +265,8 @@ private fun UrgentResultCard(
             }
         }
         add { Text(urgentMeta(r), style = DriveType.StopMeta, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
+        // 소요 구성은 시간 바로 아래에 두되, 높이가 모자라면 배지 줄보다 먼저 뺀다 (priority)
+        if (breakdown != null) add { Text(breakdown, style = DriveType.Minimum, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
         add {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 ChipFlow(Modifier.weight(1f), maxLines = 1) {
@@ -283,12 +285,12 @@ private fun UrgentResultCard(
                 if (!picking) Icon(ShimpyoIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(Dimens.Icon.base), tint = fg)
             }
         }
-        if (breakdown != null) add { Text(breakdown, style = DriveType.Minimum, color = fg2, maxLines = 1, overflow = TextOverflow.Ellipsis) }
     }
     FitColumn(
         rows = rows,
         gap = if (compact) Dimens.Space.xs else Dimens.Space.s,
         required = 2,
+        priority = if (breakdown != null) listOf(0, 1, 3, 2) else null,
         modifier = modifier
             .heightIn(min = Dimens.Drive.urgentResultCardMinHeight)
             .pressable(interaction, enabled = enabled && !picking, cornerRadius = Dimens.Radius.l, onClick = onClick)

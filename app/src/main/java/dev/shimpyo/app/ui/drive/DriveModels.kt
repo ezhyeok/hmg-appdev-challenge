@@ -342,6 +342,7 @@ private fun emptyCard(state: CoachUiState): StopCardModel = StopCardModel(
 )
 
 /** 행동 줄(높이 100). 주행 중에도 터치 요소는 마이크·왼쪽·오른쪽·급해 4개를 넘지 않는다 */
+@Immutable
 sealed interface DriveActions {
     /** 질문: [accept]가 null이면 [확인] 하나 */
     data class Answer(val prompt: Prompt, val accept: String?) : DriveActions

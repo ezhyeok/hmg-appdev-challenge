@@ -66,6 +66,7 @@ import dev.shimpyo.engine.StopCandidate
  */
 
 /** 타임라인 한 줄 */
+@Immutable
 sealed interface TimelineRow {
     val distanceM: Double
 
