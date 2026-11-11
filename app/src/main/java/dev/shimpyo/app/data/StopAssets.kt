@@ -26,6 +26,12 @@ object StopAssets {
     /** id → 영업 시간. openNow는 시각에 따라 바뀌므로 질의할 때 계산한다 */
     val hours = HashMap<String, Hours>()
 
+    /**
+     * id → 그 휴게소·졸음쉼터로 들어가는 차로의 진행 방위(도, 북 0 시계방향). 양방향 시설은 없다.
+     * 길안내 없이 달릴 때 반대 방향 차로의 휴게소를 거르는 데 쓴다 (tools/data/README.md `hdg`)
+     */
+    val laneHeading = HashMap<String, Int>()
+
     fun loadAll(context: Context): List<StopCandidate> {
         val out = ArrayList<StopCandidate>(110_000)
         read(context, "data/rest_areas.json") { o -> restArea(o) }?.let(out::addAll)
@@ -51,6 +57,7 @@ object StopAssets {
 
     private fun restArea(o: Map<String, Any?>): StopCandidate? {
         val c = base(o) ?: return null
+        o.num("hdg")?.let { laneHeading[c.first] = it.toInt() }
         hours[c.first] = Hours(o.bool("h24") ?: true, minutes(o.str("open")), minutes(o.str("close")))
         return StopCandidate(
             id = c.first, name = c.second, kind = StopKind.HIGHWAY_REST_AREA, lat = c.third.first, lon = c.third.second,
@@ -71,6 +78,7 @@ object StopAssets {
 
     private fun shelter(o: Map<String, Any?>): StopCandidate? {
         val c = base(o) ?: return null
+        o.num("hdg")?.let { laneHeading[c.first] = it.toInt() }
         // 졸음쉼터는 규정상 화장실·비상벨·CCTV를 갖춘다 (docs/research/ai-science.md 3-C). OSM에서 온 것은 모를 수 있다
         val wc = o.bool("wc") ?: true
         return StopCandidate(

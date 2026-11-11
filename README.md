@@ -25,7 +25,7 @@
 에뮬레이터는 실제로 달리지 않아서 위치 이동과 정체 구간은 앱의 시연 모드로 넣습니다.
 
 ```
-adb shell am start -n dev.shimpyo.app/.MainActivity --es demo holiday   # 귀성길 마지막 화장실 (아이 동승, 40분 정체)
+adb shell am start -n dev.shimpyo.app/.MainActivity --es demo holiday   # 귀성길 마지막 화장실 (7살 아이 동승, 옥산휴게소 뒤 1시간 정체)
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo fatigue   # 오후 졸음 (연속 주행 95분)
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo urgent    # 밤 11시 급해 모드 (영아 동승)
 ```

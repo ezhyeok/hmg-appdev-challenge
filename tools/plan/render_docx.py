@@ -41,7 +41,7 @@ def _spacer(pt=4):
 def render_heading(b):
     return X.para(X.run(b.text, size=11, bold=True, color=X.INK),
                   before=220, after=90, line=252, keep_next=True, keep_lines=True,
-                  border_left=(X.ACCENT, 24, 6), ind_left=150)
+                  border_left=(X.ACCENT, 24, 6), ind_left=150, page_break_before=b.page_break)
 
 
 def render_p(b):
@@ -84,7 +84,8 @@ def render_table(b, width=X.BOX_CONTENT_DXA):
             a = 'center' if align[i] == 'center' else ('right' if align[i] == 'right' else None)
             bold = (i == 0 and b.first_col_bold) or (r_i in b.highlight_rows and i > 0 and align[i] == 'right')
             cells.append(X.cell(_cell_paras(txt, b.size, bold=bold, align=a), widths[i], fill=fill))
-        rows.append(X.row(cells))
+        # rows may break across pages: LibreOffice mislays unsplittable rows of a table nested in the form's box
+        rows.append(X.row(cells, cant_split=False))
     borders = {'top': ('single', 8, X.INK2), 'bottom': ('single', 8, X.INK2), 'left': None, 'right': None,
                'insideH': ('single', 4, X.LINE), 'insideV': None}
     return X.table(rows, widths, borders=borders) + _spacer(5)
@@ -243,7 +244,7 @@ def render_storyboard(b, width=X.BOX_CONTENT_DXA):
         speech = user.startswith('“')
         user_xml = _cell_paras(user, 8.5, color=X.INK if not speech else "0050CC")
         rows.append(X.row([X.cell(step_xml, widths[0]), X.cell(_cell_paras(action, 8.5), widths[1]),
-                           X.cell(user_xml, widths[2])]))
+                           X.cell(user_xml, widths[2])], cant_split=False))
     borders = {'top': ('single', 6, X.LINE), 'bottom': ('single', 6, X.LINE), 'left': ('single', 6, X.LINE),
                'right': ('single', 6, X.LINE), 'insideH': ('single', 4, X.LINE_LIGHT), 'insideV': None}
     return X.table(rows, widths, borders=borders) + _spacer(8)

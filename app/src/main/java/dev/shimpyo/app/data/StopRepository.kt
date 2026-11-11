@@ -40,6 +40,7 @@ class StopRepository(private val context: Context) {
                     val b = Geo.bearingDeg(lat, lon, c.lat, c.lon)
                     if (Geo.angleDiff(b, heading.toDouble()) > maxAngle) return@mapNotNull null
                 }
+                if (oppositeLane(c, lat, lon, d, heading)) return@mapNotNull null
                 c.copy(straightDistanceM = d)
             }
             .sortedBy { it.straightDistanceM }
@@ -55,6 +56,8 @@ class StopRepository(private val context: Context) {
                 if (d > radiusM) return@mapNotNull null
                 val behind = heading != null && d > 150.0 &&
                     Geo.angleDiff(Geo.bearingDeg(lat, lon, c.lat, c.lon), heading.toDouble()) > 100.0
+                // 고속도로 반대 차로의 휴게소·졸음쉼터는 유턴 없이는 못 간다
+                if (oppositeLane(c, lat, lon, d, heading)) return@mapNotNull null
                 c.copy(straightDistanceM = d, directionOk = if (heading == null) null else !behind, openNow = c.openNow ?: StopAssets.openNow(c.id, now))
             }
             .sortedBy { it.straightDistanceM }
@@ -77,6 +80,17 @@ class StopRepository(private val context: Context) {
     }
 
     fun byId(id: String): StopCandidate? = index?.byId(id)
+
+    /**
+     * 차로 방위가 있는 시설(휴게소·졸음쉼터)이 내 진행 방향과 90도 넘게 다르면 반대 차로다.
+     * 2km보다 멀면 내 순간 방향 대신 '나 → 시설' 방위와 비교한다 (길이 굽어도 앞쪽 시설을 잘못 빼지 않게)
+     */
+    private fun oppositeLane(c: StopCandidate, lat: Double, lon: Double, d: Double, heading: Float?): Boolean {
+        if (heading == null) return false
+        val lane = StopAssets.laneHeading[c.id] ?: return false
+        val ref = if (d > 2_000.0) Geo.bearingDeg(lat, lon, c.lat, c.lon) else heading.toDouble()
+        return Geo.angleDiff(lane.toDouble(), ref) > 90.0
+    }
 }
 
 /** 위경도 격자(약 0.05도 ≈ 5km) 색인 */

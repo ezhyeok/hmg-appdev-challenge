@@ -17,8 +17,9 @@ import java.time.ZoneId
  * Virtual Console 시나리오(tools/vc/shimpyo-*.vc)로 바꾼다. 화면에는 시연 중임을 표시한다.
  *
  * 시나리오 (docs/product/SPEC.md 7장)
- * - holiday: 경부선 남행, 아이 동승, 안성휴게소 3km 뒤부터 40분 정체 → 마지막 화장실 질문
- * - fatigue: 오후 3시, 연속 주행 95분, 망향휴게소 약 8km 앞 → 피로 게이지와 휴식 제안
+ * - holiday: 경부선 남행, 7살 아이 동승(46분 전 화장실), 옥산휴게소 1km 뒤부터 20km·60분 정체.
+ *   옥산휴게소 다음 화장실은 죽암휴게소(약 21km, 정체 속 약 1시간) → 옥산휴게소 4km 전쯤 '마지막 화장실' 질문
+ * - fatigue: 오후 3시, 연속 주행 95분, 안성휴게소를 지나 졸음쉼터·망향휴게소 앞 → 피로 게이지와 휴식 제안
  * - urgent: 밤 11시 강남역 부근, 영아 동승 → 급해 모드
  * - stop: 시간을 10배로 돌려 휴게소 정차(15분 이상)와 게이지 회복을 짧게 보여 준다
  *
@@ -38,6 +39,8 @@ class DemoDirector {
         val timeOfDay: LocalTime?,
         /** 시작할 때 이미 달린 시간 (분) */
         val drivenMin: Int,
+        /** 시작할 때 모든 탑승자의 마지막 화장실이 몇 분 전인지 */
+        val lastRestroomMin: Int = drivenMin,
         /** 경로 위 정체: 경로 시작점 기준 시작 거리, 길이, 소요 시간 */
         val congestion: List<Triple<Double, Double, Double>>,
         val routeTotalM: Double,
@@ -60,8 +63,11 @@ class DemoDirector {
         return startedAtReal + clockOffsetMs + ((real - startedAtReal) * s.timeScale).toLong()
     }
 
-    /** 시나리오 시작. 탑승자와 '이미 달린 시간'을 돌려준다 (서비스가 엔진 프로필에 반영) */
-    fun start(name: String?, realNow: Long = System.currentTimeMillis()): Pair<List<Occupant>, Int>? {
+    /** 시연 시작 조건. 서비스가 새 엔진의 프로필로 쓴다 */
+    data class Start(val occupants: List<Occupant>, val drivenMin: Int, val lastRestroomMin: Int)
+
+    /** 시나리오 시작. 탑승자, 이미 달린 시간, 마지막 화장실을 돌려준다. 시연을 끄면 null */
+    fun start(name: String?, realNow: Long = System.currentTimeMillis()): Start? {
         val s = when (name) {
             "holiday" -> holiday()
             "fatigue" -> fatigue()
@@ -76,7 +82,7 @@ class DemoDirector {
             val target = LocalDate.now(zone).atTime(tod).atZone(zone).toInstant().toEpochMilli()
             target - realNow
         } ?: 0L
-        return s?.let { it.occupants to it.drivenMin }
+        return s?.let { Start(it.occupants, it.drivenMin, it.lastRestroomMin) }
     }
 
     /** 가상 위치와 진행 방향. 시연이 아니면 null */
@@ -92,7 +98,7 @@ class DemoDirector {
         val travelled = progressM(s)
         val congestion = s.congestion.mapNotNull { (start, len, dur) ->
             val fromCar = start - travelled
-            if (fromCar + len < 0) null else CongestionSegment(startDistanceM = fromCar, lengthM = len, durationS = dur, type = "HEAVY", roadName = "경부고속도로", startName = "시연 정체 시작", endName = "시연 정체 끝")
+            if (fromCar + len < 0) null else CongestionSegment(startDistanceM = fromCar, lengthM = len, durationS = dur, type = "HEAVY", roadName = "경부고속도로", startName = "청주IC", endName = "남이JC")
         }
         val remain = (s.routeTotalM - travelled).coerceAtLeast(0.0)
         val route = (input.route ?: RouteState(guiding = true)).copy(
@@ -121,36 +127,50 @@ class DemoDirector {
 
     private fun driver() = Occupant("driver", OccupantType.ADULT, label = "운전자")
 
-    /** 경부선 남행 (OpenStreetMap 휴게소 좌표를 잇는 단순화 경로) */
+    /**
+     * 경부선 남행. 앱에 든 공공데이터의 부산방향 휴게소·졸음쉼터 좌표를 잇는 단순화 경로라서,
+     * 시연 후보는 실제 데이터에서 나온다(반대 차로 시설은 차로 방위로 걸러진다)
+     */
     private val gyeongbuSouth = listOf(
-        Pt(37.3050, 127.0960),  // 신갈 부근
-        Pt(37.23518, 127.10509), // 기흥휴게소
-        Pt(37.1500, 127.1100),
-        Pt(37.07616, 127.13158), // 안성 부근
-        Pt(37.01354, 127.14516), // 안성휴게소(부산방향)
-        Pt(36.9300, 127.1650),
-        Pt(36.85461, 127.18136), // 망향휴게소(부산방향)
-        Pt(36.7600, 127.2100),
+        Pt(37.235125, 127.104595), // 기흥휴게소
+        Pt(37.156708, 127.087165), // 오산졸음쉼터
+        Pt(37.096192, 127.120738), // 남사졸음쉼터
+        Pt(37.013407, 127.144800), // 안성휴게소(부산방향)
+        Pt(36.954311, 127.183007), // 연곡졸음쉼터
+        Pt(36.914432, 127.188465), // 입장졸음쉼터
+        Pt(36.855650, 127.180929), // 망향휴게소(부산방향)
+        Pt(36.730226, 127.263879), // 천안호두휴게소(부산방향)
+        Pt(36.657743, 127.369817), // 옥산휴게소(부산방향)
+        Pt(36.486810, 127.429261), // 죽암휴게소(부산방향)
+        Pt(36.425354, 127.416697), // 신탄진졸음쉼터
+        Pt(36.328096, 127.540893), // 옥천졸음쉼터(부산방향)
+        Pt(36.296863, 127.595223), // 옥천휴게소(부산방향)
+        Pt(36.279148, 127.672231), // 금강휴게소
     )
+    private val oksan = Pt(36.657743, 127.369817)
 
     private fun holiday(): Scenario {
-        val anseong = alongPath(gyeongbuSouth, Pt(37.01354, 127.14516)) ?: 30_000.0
+        // 망향휴게소와 천안호두휴게소 사이(천안호두 약 6km 전)에서 출발
+        val start = Pt(36.7779, 127.2324)
+        val path = listOf(start) + gyeongbuSouth.dropWhile { it.lat > 36.75 }
+        val oksanAt = alongPath(path, oksan) ?: 18_400.0
         return Scenario(
             name = "holiday",
-            path = gyeongbuSouth,
-            // 실제 1초에 가상 200m. 시각도 7.2배로 흘러 가상 시속 100km와 맞는다 → 안성휴게소 앞까지 2분 안팎
+            path = path,
+            // 실제 1초에 가상 200m. 시각도 7.2배로 흘러 가상 시속 100km와 맞는다 → 옥산휴게소 4km 전까지 약 70초
             metersPerSecond = 200.0,
             timeScale = 7.2,
             occupants = listOf(driver(), Occupant("kid", OccupantType.CHILD, ageYears = 7, label = "7살 아이")),
-            timeOfDay = null,
-            drivenMin = 40,
-            congestion = listOf(Triple(anseong + 3_000.0, 18_000.0, 40 * 60.0)),
-            routeTotalM = 330_000.0,
+            timeOfDay = LocalTime.of(14, 0),
+            // 46분 전 안성휴게소에서 쉬고 출발했다 → 질문 지점에서 아이의 화장실 게이지 약 50분
+            drivenMin = 46,
+            congestion = listOf(Triple(oksanAt + 1_000.0, 20_000.0, 60 * 60.0)),
+            routeTotalM = 310_000.0,
         )
     }
 
     private fun fatigue(): Scenario {
-        val start = listOf(Pt(36.9200, 127.1680)) + gyeongbuSouth.dropWhile { it.lat > 36.9 }
+        val start = gyeongbuSouth.dropWhile { it.lat > 37.02 }
         return Scenario(
             name = "fatigue",
             path = start,

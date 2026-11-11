@@ -45,7 +45,7 @@ import dev.shimpyo.app.ui.theme.ShimpyoTheme
 data class DemoScenario(val key: String?, val title: String, val detail: String, val icon: ImageVector)
 
 val DemoScenarios: List<DemoScenario> = listOf(
-    DemoScenario("holiday", "귀성길 정체", "안성 앞 40분 정체", ShimpyoIcons.Traffic),
+    DemoScenario("holiday", "귀성길 정체", "옥산 뒤 1시간 정체", ShimpyoIcons.Traffic),
     DemoScenario("fatigue", "오후 휴식 권유", "오후 3시 · 95분째", ShimpyoIcons.Rest),
     DemoScenario("urgent", "도심 급해", "밤 11시 · 영아 동승", ShimpyoIcons.Wc),
     DemoScenario("stop", "휴게소 정차", "10배속 · 회복", ShimpyoIcons.Parking),

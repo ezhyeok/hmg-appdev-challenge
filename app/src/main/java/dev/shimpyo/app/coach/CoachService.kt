@@ -176,7 +176,7 @@ class CoachService : PleosForegroundService() {
                 publish(out, input)
                 react(out)
             }
-            if (t - lastMemorySave > 60_000) {
+            if (!director.active && t - lastMemorySave > 60_000) {
                 lastMemorySave = t
                 engineLock.withLock { app.memory.save(engine.memory()) }
             }
@@ -400,10 +400,20 @@ class CoachService : PleosForegroundService() {
         val t = now()
         oracle.enabled = director.oracleEnabled
         oracle.clear()
-        val occupants = r?.first ?: app.settings.occupants
-        val drivenMin = r?.second ?: 0
+        val occupants = r?.occupants ?: app.settings.occupants
         engineLock.withLock {
-            engine.setProfile(app.settings.tripProfile(t - drivenMin * 60_000L).copy(occupants = occupants))
+            engine = if (r != null) {
+                // 시연은 매번 같은 조건에서 시작하도록 빈 학습 상태의 새 엔진을 쓰고, 개인 학습 파일에는 쓰지 않는다
+                val restroomAt = t - r.lastRestroomMin * 60_000L
+                CoachEngine(
+                    profile = app.settings.tripProfile(t - r.drivenMin * 60_000L, occupants.associate { it.id to restroomAt })
+                        .copy(occupants = occupants),
+                    memory = dev.shimpyo.engine.PersonalMemory(),
+                )
+            } else {
+                // 시연을 끄면 실제 시각과 저장된 학습 상태로 돌아간다
+                CoachEngine(profile = profileFor(occupants), memory = app.memory.load())
+            }
         }
         CoachStore.update { copy(demo = director.name, occupants = occupants, urgent = null, plan = null) }
         if (r != null) refreshCandidates()
@@ -448,7 +458,7 @@ class CoachService : PleosForegroundService() {
         val log = StopLog(start = since, end = t, lat = null, lon = null, restroom = doorWhileParked, name = place)
         val history = app.stopHistory.append(log)
         CoachStore.update { copy(history = history, lastStop = log) }
-        serviceScope.launch { engineLock.withLock { app.memory.save(engine.memory()) } }
+        if (!director.active) serviceScope.launch { engineLock.withLock { app.memory.save(engine.memory()) } }
     }
 
     /** 지금 위치에서 300m 안의 알려진 정차지 이름 */
@@ -673,7 +683,7 @@ class CoachService : PleosForegroundService() {
     }
 
     override fun onDestroy() {
-        runCatching { app.memory.save(engine.memory()) }
+        if (!director.active) runCatching { app.memory.save(engine.memory()) }
         voice.stop()
         interpreter.release()
         car.release()

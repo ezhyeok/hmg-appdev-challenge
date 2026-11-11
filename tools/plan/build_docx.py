@@ -50,6 +50,12 @@ SCREENS = os.path.join(ASSETS, "screens")
 MD_OUT = os.path.join(PLAN_DIR, "planning-doc.md")
 
 FIGURES = {
+    "hero": "fig-hero.png",
+    "scene": "fig-scene.png",
+    "gapmap": "fig-gapmap.png",
+    "loop": "fig-loop.png",
+    "models": "fig-models.png",
+    "effect": "fig-effect.png",
     "gauge": "fig1-gauge.png",
     "storyboard": "fig2-storyboard.png",
     "architecture": "fig3-architecture.png",

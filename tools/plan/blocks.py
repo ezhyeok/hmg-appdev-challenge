@@ -8,8 +8,10 @@ from typing import List, Optional, Tuple
 
 @dataclass
 class H:
-    """Sub-heading inside a box."""
+    """Sub-heading inside a box. page_break starts it on a new page (for a table that would
+    otherwise begin in the last lines of a page)."""
     text: str
+    page_break: bool = False
 
 
 @dataclass

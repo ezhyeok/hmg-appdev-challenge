@@ -57,30 +57,41 @@ object Samples {
         return copy(routeDistanceM = d, etaS = d / 25.0)
     }
 
-    private val congestion = listOf(
-        CongestionSegment(startDistanceM = 7_200.0, lengthM = 18_000.0, durationS = 40 * 60.0, type = "HEAVY", roadName = "경부고속도로", startName = "안성IC", endName = "북천안IC"),
+    // 귀성길 장면 A (docs/product/SPEC.md 7장): 옥산휴게소 4km 전. 거리는 앱 데이터의 경부선 이정으로 계산한 값
+    private val oksanAhead = ra("ra-oksan", "옥산휴게소(부산방향)", 4.0)
+    private val jukamAhead = ra("ra-jukam", "죽암휴게소(부산방향)", 25.2).copy(etaS = 63 * 60.0)
+    private val holidayAhead = listOf(
+        oksanAhead,
+        jukamAhead,
+        ra("ds-sintanjin", "신탄진졸음쉼터", 32.3, StopKind.DROWSY_SHELTER, Facilities(restroom = true)).copy(etaS = 67 * 60.0),
+        ra("ra-okcheon", "옥천휴게소(부산방향)", 56.6).copy(etaS = 82 * 60.0),
+        ra("ra-geumgang", "금강휴게소", 64.1).copy(etaS = 86 * 60.0),
     )
 
-    /** 귀성길 정체: 아이 동승, 안성휴게소가 정체 전 마지막 화장실이라 묻는 중 (주행 중) */
+    private val congestion = listOf(
+        CongestionSegment(startDistanceM = 5_000.0, lengthM = 20_000.0, durationS = 60 * 60.0, type = "HEAVY", roadName = "경부고속도로", startName = "청주IC", endName = "남이JC"),
+    )
+
+    /** 귀성길 정체: 7살 아이 동승. 게이지는 50분 남았지만 옥산휴게소 뒤 화장실 공백(정체 포함 63분)이 더 길어 묻는 중 */
     val holidayPrompt = CoachUiState(
         serviceRunning = true,
-        restroom = Gauge(18, Level.SOON, listOf(Reason("RESTROOM_ELAPSED", "7살 아이 기준, 마지막 화장실 후 1시간 42분 지났어요")), drivenBy = "kid"),
-        fatigue = Gauge(72, Level.OK, listOf(Reason("FATIGUE_DRIVING", "48분째 쉬지 않고 운전 중이에요"))),
-        next = Recommendation(anseong, setOf(Purpose.RESTROOM), listOf(Reason("LAST_CHANCE_CONGESTION", "이곳을 지나면 40분 정체 구간에 화장실이 없어요"))),
-        prompt = Prompt("lc-anseong", PromptKind.LAST_CHANCE, "앞에 40분 정체가 있어요. 다음 안성휴게소가 정체 전 마지막 화장실이에요. 들를까요?", anseong, now + 45_000),
+        restroom = Gauge(50, Level.OK, listOf(Reason("RESTROOM_ELAPSED", "7살 아이 기준, 마지막 화장실 후 55분 지났어요")), drivenBy = "kid"),
+        fatigue = Gauge(62, Level.OK, listOf(Reason("FATIGUE_DRIVING", "55분째 쉬지 않고 운전 중이에요"))),
+        next = Recommendation(oksanAhead, setOf(Purpose.RESTROOM), listOf(Reason("LAST_CHANCE_CONGESTION", "이곳을 지나면 1시간 정체 구간에 화장실이 없어요"))),
+        prompt = Prompt("lc-oksan", PromptKind.LAST_CHANCE, "앞에 1시간 정체가 있어요. 옥산휴게소가 정체 전 마지막 화장실이에요. 들를까요?", oksanAhead, now + 45_000),
         parked = false,
         drivingRestricted = true,
         speedKph = 92f,
         guiding = true,
         destinationName = "부산역",
-        remainDistanceM = 312_000.0,
-        remainTimeS = 4 * 3600.0 + 10 * 60,
+        remainDistanceM = 322_000.0,
+        remainTimeS = 4 * 3600.0 + 40 * 60,
         congestion = congestion,
-        ahead = ahead,
+        ahead = holidayAhead,
         occupants = listOf(driver, kid),
         voice = VoiceState.LISTENING,
         demo = "holiday",
-        status = "정차 후보 데이터 18,412곳",
+        status = "정차 후보 데이터 60,084곳",
     )
 
     /** 평소 주행: 질문 없음, 다음 화장실만 보여 준다 */
@@ -154,20 +165,43 @@ object Samples {
         demo = "urgent",
     )
 
-    /** 정차 중 + 계획 (안성휴게소에서 쉬는 중) */
+    // 출발 전(서울) 경로 앞 기회. 거리는 앱 데이터의 경부선 이정(서울 기준 km)
+    private val departAhead = listOf(
+        ra("ra-giheung", "기흥휴게소(부산방향)", 27.4),
+        ra("ds-osan", "오산졸음쉼터", 36.4, StopKind.DROWSY_SHELTER, Facilities(restroom = true)),
+        ra("ds-namsa", "남사졸음쉼터", 44.2, StopKind.DROWSY_SHELTER, Facilities(restroom = true)),
+        ra("ra-anseong", "안성휴게소(부산방향)", 53.4),
+        ra("ra-manghyang", "망향휴게소(부산방향)", 72.4),
+        ra("ra-hodu", "천안호두휴게소(부산방향)", 92.7),
+        ra("ra-oksan", "옥산휴게소(부산방향)", 107.6),
+        ra("ra-jukam", "죽암휴게소(부산방향)", 128.8),
+    )
+    private val departAnseong = departAhead[3]
+    private val departOksan = departAhead[6]
+
+    /** 출발 전 정차 + 계획 (서울, 귀성길): 식사·주유는 안성휴게소, 정체 앞 화장실은 옥산휴게소로 묶는다 */
     val parkedPlan = holidayPrompt.copy(
-        restroom = Gauge(95, Level.OK, listOf(Reason("RESTROOM_ELAPSED", "7살 아이 기준, 마지막 화장실 후 25분 지났어요")), drivenBy = "kid"),
+        restroom = Gauge(95, Level.OK, listOf(Reason("RESTROOM_ELAPSED", "7살 아이 기준, 마지막 화장실 후 10분 지났어요")), drivenBy = "kid"),
         fatigue = Gauge(120, Level.OK, emptyList()),
         prompt = null,
-        next = Recommendation(cheonan, setOf(Purpose.RESTROOM), listOf(Reason("NEXT_NEAREST_RESTROOM", "가장 빨리 갈 수 있는 화장실이에요"))),
+        next = Recommendation(departAhead[0], setOf(Purpose.RESTROOM), listOf(Reason("NEXT_NEAREST_RESTROOM", "가장 빨리 갈 수 있는 화장실이에요"))),
         plan = PitStopPlan(
             stops = listOf(
-                PlannedStop(anseong, setOf(Purpose.RESTROOM, Purpose.MEAL, Purpose.FUEL), 20, 180.0),
-                PlannedStop(oksan, setOf(Purpose.RESTROOM, Purpose.REST), 10, 68_000 / 25.0 + 1_200 + 1_400),
+                PlannedStop(departAnseong, setOf(Purpose.RESTROOM, Purpose.MEAL, Purpose.FUEL), 20, 53_400 / 25.0),
+                PlannedStop(departOksan, setOf(Purpose.RESTROOM, Purpose.REST), 10, 107_600 / 25.0 + 20 * 60),
             ),
             totalStopMin = 30,
-            notes = listOf(Reason("PLAN_MEAL", "식사 시간에 맞춰 안성휴게소에서 식사해요")),
+            notes = listOf(
+                Reason("PLAN_MEAL", "식사 시간에 맞춰 안성휴게소에서 식사해요"),
+                Reason("PLAN_FUEL", "안성휴게소에서 주유해요"),
+            ),
         ),
+        congestion = listOf(
+            CongestionSegment(startDistanceM = 108_600.0, lengthM = 20_000.0, durationS = 60 * 60.0, type = "HEAVY", roadName = "경부고속도로", startName = "청주IC", endName = "남이JC"),
+        ),
+        ahead = departAhead,
+        remainDistanceM = 426_000.0,
+        remainTimeS = 5 * 3600.0 + 50 * 60,
         parked = true,
         drivingRestricted = false,
         speedKph = 0f,
