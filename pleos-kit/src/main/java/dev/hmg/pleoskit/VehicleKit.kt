@@ -41,20 +41,45 @@ import kotlin.math.abs
  * - 필요한 Manifest 권한은 각 함수 주석에 적었다.
  */
 class VehicleKit(context: Context) {
+    private val appContext = context.applicationContext
 
-    /** SDK 원본 객체. kit에 없는 API를 쓸 때 사용한다. 호출은 [call]/[observe] 안에서 할 것. */
-    val raw = Vehicle(context.applicationContext)
+    /**
+     * SDK 객체와 거기서 얻은 도메인 객체 한 벌. [reconnect]가 통째로 새로 만든다: 신호 객체([ReadSignal])는 호출할 때마다
+     * 지금 것을 쓰므로 다시 붙은 뒤에도 그대로 쓸 수 있다.
+     */
+    private class Link(context: Context) {
+        val vehicle = Vehicle(context)
+        val hvac by lazy { vehicle.getHVAC() }
+        val door by lazy { vehicle.getDoor() }
+        val window by lazy { vehicle.getWindow() }
+        val seat by lazy { vehicle.getSeat() }
+        val drivingMode by lazy { vehicle.getDrivingMode() }
+        val odometer by lazy { vehicle.getOdometer() }
+        val brake by lazy { vehicle.getBrake() }
+        val evBattery by lazy { vehicle.getEvBattery() }
+        val steering by lazy { vehicle.getSteeringWheel() }
+        val turnSignal by lazy { vehicle.getTurnSignal() }
+    }
 
-    private val hvac by lazy { raw.getHVAC() }
-    private val door by lazy { raw.getDoor() }
-    private val window by lazy { raw.getWindow() }
-    private val seat by lazy { raw.getSeat() }
-    private val drivingMode by lazy { raw.getDrivingMode() }
-    private val odometer by lazy { raw.getOdometer() }
-    private val brake by lazy { raw.getBrake() }
-    private val evBattery by lazy { raw.getEvBattery() }
-    private val steering by lazy { raw.getSteeringWheel() }
-    private val turnSignalDomain by lazy { raw.getTurnSignal() }
+    private val link = LazySdk("Vehicle") { Link(appContext) }
+
+    /**
+     * SDK 원본 객체. kit에 없는 API를 쓸 때 사용한다. 호출은 [call]/[observe] 안에서 할 것.
+     * 처음 쓰는 곳에서 만들어진다: [connect]를 먼저 부르면 SDK 전용 스레드에서 만들어진다 (메인 스레드에서 처음 쓰지 말 것).
+     * [reconnect] 뒤에는 새 객체다 (들고 있지 말고 쓸 때마다 읽는다).
+     */
+    val raw: Vehicle get() = link.value.vehicle
+
+    private val hvac get() = link.value.hvac
+    private val door get() = link.value.door
+    private val window get() = link.value.window
+    private val seat get() = link.value.seat
+    private val drivingMode get() = link.value.drivingMode
+    private val odometer get() = link.value.odometer
+    private val brake get() = link.value.brake
+    private val evBattery get() = link.value.evBattery
+    private val steering get() = link.value.steering
+    private val turnSignalDomain get() = link.value.turnSignal
 
     @Volatile
     private var connected = false
@@ -62,15 +87,29 @@ class VehicleKit(context: Context) {
     /** Vehicle 서비스에 연결한다. 다른 호출보다 먼저 한 번 부른다. 여러 번 불러도 된다. */
     suspend fun connect() = withContext(SdkThreads.vehicle) {
         if (!connected) {
-            raw.initialize()
+            link.value.vehicle.initialize()
             connected = true
         }
+    }
+
+    /**
+     * 연결이 죽었다고 보고 SDK 객체를 버린 뒤 새로 붙는다. 걸어 둔 리스너는 사라지므로 수집 중인 Flow는 다시 수집해야 한다.
+     *
+     * 2026-11-12 에뮬레이터: Pleos 차량 서비스가 죽었다 살아나면(`am crash`) SDK가 스스로 다시 붙고 리스너도 다시 걸어 준다.
+     * 서비스가 멈추면(`am force-stop`) SDK는 다시 붙지 않는다: 이벤트가 끊기고 값이 멈춘다. 그때 이것을 부른다
+     * (언제 부를지는 쓰는 쪽이 정한다. 쉼표는 읽기가 모두 실패하고 이벤트가 없을 때: coach 모듈 SignalCollector).
+     */
+    suspend fun reconnect() = withContext(SdkThreads.vehicle) {
+        connected = false
+        link.drop()?.let { old -> runCatching { old.vehicle.release() } }
+        link.value.vehicle.initialize()
+        connected = true
     }
 
     /** 진행 중인 호출이 끝난 뒤에 부를 것. 수집 중인 Flow는 먼저 취소한다. */
     fun release() {
         SdkThreads.vehicle.executor.execute {
-            runCatching { raw.release() }
+            link.ifCreated { runCatching { it.vehicle.release() } }
             connected = false
         }
     }
@@ -467,6 +506,17 @@ class VehicleKit(context: Context) {
         val temperatureMatches: (Float?, Float) -> Boolean = { actual, requested ->
             actual != null && abs(actual - requested) < 0.6f
         }
+
+        /**
+         * 이 차가 그 신호를 지원하지 않아서 난 실패인지 (다시 물어도 같다). 지원 영역 조회(`*Areas()`)가 이렇게 실패하면
+         * 그 기능은 없는 것으로 본다.
+         *
+         * 메시지에 든 오류 코드 이름으로 가린다. 문서의 `VehicleException.errorCode`는 2.3.2 jar에 난독화된 이름
+         * (`callback.exception.a`)으로 들어 있어 타입으로 쓸 수 없다. 에뮬레이터에서 주행 시간 조회가
+         * `ERROR_NOT_SUPPORTED_PROPERTY`로 실패했다 (docs/kit-selftest.md).
+         */
+        fun notSupported(e: Throwable): Boolean =
+            generateSequence(e) { it.cause }.take(8).any { it.message?.contains("ERROR_NOT_SUPPORTED") == true }
     }
 }
 

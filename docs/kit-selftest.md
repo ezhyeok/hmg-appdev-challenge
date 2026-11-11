@@ -17,6 +17,8 @@ ssh hmg-laptop 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\Use
 
 결과는 logcat 태그 `PleosApp`에 `TEST|항목|OK/FAIL|상세`로 남고, 노트북의 `logs\app-result.log`에도 저장된다.
 
+점검은 **debug 빌드에만 있다** (`app/src/debug/java/dev/shimpyo/app/devtools`, `run-app.ps1`은 debug를 설치한다). 점검은 운전석 등받이·창문·조명·설정 온도를 실제로 움직이고 `-Route`는 길안내를 새로 시작하므로, 제출용(release) APK에는 코드가 없고 `--ez selftest true`·`--ez verify true`를 받지 않는다 (`DevHooks`, `DevHooksTest`). release가 받는 인텐트 옵션은 시연 전환 `--es demo <이름|off>` 하나다. 제출용 APK를 만들면 `tools/laptop/devhooks-check.sh`로 확인한다 (2026-11-12: 예전 release는 `--ez selftest true`로 점검 27항목을 돌리고 공조 전원을 켠 채로 두었다).
+
 ## 결과
 
 | 항목 | 결과 | 비고 |

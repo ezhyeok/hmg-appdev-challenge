@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeout
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.atomic.AtomicInteger
 
@@ -348,27 +349,12 @@ class NaviTracker(
 
     // ------------------------------------------------------------ 연결·이벤트·호출
 
-    // 다시 시도 간격(2초부터 두 배씩 1분까지)은 병합 때 코치 모듈의 공용 재시도 도우미(Retry.kt, 앱 담당 브랜치)로 바꾼다
+    /** 내비에 붙을 때까지: 실패하거나 [CONNECT_TIMEOUT_MS] 안에 답이 없으면 간격을 늘려 가며 다시 한다 (공용 Retry) */
     private suspend fun connect() {
-        var wait = CONNECT_RETRY_MS
-        while (true) {
-            val error = try {
-                if (withTimeoutOrNull(CONNECT_TIMEOUT_MS) { navi.connect() } != null) null else "no answer in ${CONNECT_TIMEOUT_MS}ms"
-            } catch (e: TimeoutCancellationException) {
-                "timeout"
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                e.message ?: e.javaClass.simpleName
-            }
-            if (error == null) {
-                log.i("navi connected")
-                return
-            }
-            log.w("navi connect failed: $error; retry in ${wait / 1000}s")
-            delay(wait)
-            wait = (wait * 2).coerceAtMost(CONNECT_RETRY_MAX_MS)
+        Retry.untilSuccess("navi connect", log, Backoff(CONNECT_RETRY_MS, CONNECT_RETRY_MAX_MS)) {
+            withTimeout(CONNECT_TIMEOUT_MS) { navi.connect() }
         }
+        log.i("navi connected")
     }
 
     private suspend fun watchChanges() {

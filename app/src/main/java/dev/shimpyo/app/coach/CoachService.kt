@@ -11,9 +11,9 @@ import dev.hmg.pleoskit.PleosForegroundService
 import dev.hmg.pleoskit.SttKit
 import dev.hmg.pleoskit.TtsKit
 import dev.hmg.pleoskit.VehicleKit
+import dev.shimpyo.app.BuildConfig
 import dev.shimpyo.app.ShimpyoApp
-import dev.shimpyo.app.devtools.KitSelfTest
-import dev.shimpyo.app.devtools.SdkVerify
+import dev.shimpyo.app.devtools.DevToolRunner
 import dev.shimpyo.app.voice.PleosLlmInterpreter
 import dev.shimpyo.app.voice.VoiceAgent
 import dev.shimpyo.coach.CandidateProvider
@@ -27,18 +27,17 @@ import dev.shimpyo.coach.EngineFactory
 import dev.shimpyo.coach.NaviTracker
 import dev.shimpyo.coach.Odometer
 import dev.shimpyo.coach.PositionTracker
+import dev.shimpyo.coach.Retry
 import dev.shimpyo.coach.RouteOracle
 import dev.shimpyo.coach.SignalHub
 import dev.shimpyo.coach.UiCommand
 import dev.shimpyo.engine.CoachEngine
 import dev.shimpyo.engine.Gear
-import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
@@ -65,15 +64,20 @@ class CoachService : PleosForegroundService() {
     private var signals: CarSignals? = null
     private var signalsJob: Job? = null
     private var devJob: Job? = null
+    /** debug 빌드의 개발용 브로드캐스트 수신을 끄는 함수 (release는 받지 않는다, DevToolRunner.listen) */
+    private var stopDevListener: (() -> Unit)? = null
 
     override fun onServiceStarted() {
+        // 메인 스레드에서 쓴 시간을 남긴다 (서비스 감사 SV-N4: SDK 객체를 여기서 만들면 메인 스레드가 막힌다)
+        val startedAt = SystemClock.elapsedRealtime()
         // 같은 프로세스에서 다시 시작했으면 지난 서비스의 질문·급해 목록이 화면에 남아 있다 (다시 올리지 않는다)
         CoachStore.resetTransient()
         val scope = CoroutineScope(serviceScope.coroutineContext + coachThread)
         coachScope = scope
         val wall = CoachClock { System.currentTimeMillis() }
         val elapsed = ElapsedClock { SystemClock.elapsedRealtime() }
-        val hub = SignalHub()
+        // 허브는 코어와 같은 경과 시계로 표본을 받은 때를 적고, 틱마다 세계 시각으로 바꿔 준다 (리뷰 R-F6)
+        val hub = SignalHub(elapsed)
         val odometer = Odometer(elapsed)
         val positions = PositionTracker(elapsed) { PositionTracker.isMoving(hub.speedKph, hub.gear == Gear.PARK) }
         val gates = LoopInputs()
@@ -93,7 +97,7 @@ class CoachService : PleosForegroundService() {
             ),
         )
         core = c
-        signals = CarSignals(kits.car, kits.vehicle, kits.location, cabin, hub, positions, wall::now) { r -> CoachStore.update { copy(drivingRestricted = r) } }
+        signals = CarSignals(kits.car, kits.vehicle, kits.location, cabin, hub, positions, elapsed, AppLog) { r -> CoachStore.update { copy(drivingRestricted = r) } }
 
         scope.launch { c.run() }
         scope.launch { tracker.run() }
@@ -103,7 +107,7 @@ class CoachService : PleosForegroundService() {
             val n = app.stops.ensureLoaded()
             CoachStore.update { copy(status = "정차 후보 데이터 ${n}곳") }
         }
-        scope.launch { retrying("voice") { voice.connect() } }
+        scope.launch { Retry.untilSuccess("voice", AppLog) { voice.connect() } }
         startSignals()
         // 화면 명령 (CoachStore의 Channel: 서비스가 받기 전에 온 명령도 남아 있다)
         scope.launch {
@@ -112,6 +116,8 @@ class CoachService : PleosForegroundService() {
                 c.command(cmd)
             }
         }
+        stopDevListener = DevToolRunner.listen(this) { onCommand(it) }
+        Log.i(TAG, "onServiceStarted: ${SystemClock.elapsedRealtime() - startedAt} ms on the main thread")
     }
 
     /** 신호 수집을 (다시) 띄운다. 권한을 새로 받으면 Car 연결부터 다시 해야 차속 구독이 걸린다 */
@@ -129,24 +135,36 @@ class CoachService : PleosForegroundService() {
         }
     }
 
-    /** 개발용: `--ez verify true`(설계 확인), `--ez selftest true [--ez route true]`(kit 점검), `--es demo <이름|off>`(시연) */
+    /**
+     * 인텐트 extras로 온 요청. 무엇을 받아들일지는 [DevHooks]가 정한다 (닫힘 검증 N1: 제출용 빌드도 점검을 돌렸다).
+     * - `--es demo <이름|off>`(시연 전환): 어느 빌드에서나. 화면 시연 패널과 같은 명령 하나만 보낸다.
+     * - `--ez verify true`(설계 확인), `--ez selftest true [--ez route true]`(kit 점검), `--es probe <실험>`(SDK 동작 실험):
+     *   debug 빌드에서만. 차를 움직이는 점검 코드는 release APK에 없다 (app/src/debug의 devtools).
+     */
     override fun onCommand(intent: Intent?) {
         if (intent == null) return
-        if (devJob?.isActive != true) {
-            if (intent.getBooleanExtra("verify", false)) {
-                devJob = serviceScope.launch { SdkVerify(this@CoachService, kits.vehicle, kits.navi, kits.location).run() }
-            } else if (intent.getBooleanExtra("selftest", false)) {
-                devJob = serviceScope.launch { KitSelfTest(kits.vehicle, kits.navi, kits.tts, kits.stt, kits.location).run(intent.getBooleanExtra("route", false)) }
-            }
+        val request = DevHooks.request(
+            verify = intent.getBooleanExtra(DevHooks.EXTRA_VERIFY, false),
+            selftest = intent.getBooleanExtra(DevHooks.EXTRA_SELFTEST, false),
+            route = intent.getBooleanExtra(DevHooks.EXTRA_ROUTE, false),
+            demo = intent.getStringExtra(DevHooks.EXTRA_DEMO),
+            debugBuild = BuildConfig.DEBUG,
+            probe = intent.getStringExtra(DevHooks.EXTRA_PROBE),
+        )
+        if (request.refused) Log.w(TAG, "dev tool request ignored: not a debug build")
+        if (request.tool != null && devJob?.isActive != true) {
+            val devKits = DevToolRunner.Kits({ kits.vehicle }, { kits.navi }, { kits.tts }, { kits.stt }, { kits.location })
+            devJob = serviceScope.launch { DevToolRunner.run(request, this@CoachService, devKits) }
         }
-        intent.getStringExtra("demo")?.let {
-            Log.i(TAG, "demo requested: $it")
-            CoachStore.send(UiCommand.Demo(it))
+        request.demo?.let {
+            Log.i(TAG, "demo requested: ${it.scenario ?: "off"}")
+            CoachStore.send(UiCommand.Demo(it.scenario))
         }
     }
 
     /** 끝날 때: 루프를 먼저 멈추고(D11), 코어의 마지막 저장을 코치 스레드에서 하고, 만든 kit만 놓고, 화면의 진행 중 상태를 지운다 */
     override fun onDestroy() {
+        stopDevListener?.invoke()
         coachScope?.cancel()
         core?.let { c -> runBlocking { withTimeoutOrNull(SHUTDOWN_MS) { withContext(coachThread) { c.shutdown() } } } }
         kits.releaseMade()
@@ -155,23 +173,11 @@ class CoachService : PleosForegroundService() {
         super.onDestroy()
     }
 
-    private suspend fun retrying(name: String, block: suspend () -> Unit) {
-        var wait = CarSignals.RETRY_MIN_MS
-        while (true) {
-            try {
-                block()
-                return
-            } catch (e: CancellationException) {
-                throw e
-            } catch (e: Exception) {
-                Log.w(TAG, "$name: ${e.message} (retry in ${wait / 1000}s)")
-            }
-            delay(wait)
-            wait = (wait * 2).coerceAtMost(CarSignals.RETRY_MAX_MS)
-        }
-    }
-
-    /** kit는 처음 쓸 때 만든다. 끝날 때는 만든 것만 놓는다 (예전에는 놓으려고 SDK 객체를 새로 만들었다, D11) */
+    /**
+     * kit는 처음 쓸 때 만든다. 끝날 때는 만든 것만 놓는다 (예전에는 놓으려고 SDK 객체를 새로 만들었다, D11).
+     * kit 객체를 만드는 것은 가볍다: SDK 객체(NaviHelper, Vehicle, TTS, STT, FusedLocation)는 kit이 connect 할 때 SDK 전용
+     * 스레드에서 만든다. 그래서 onServiceStarted(메인 스레드)에서 조립해도 SDK를 메인 스레드에서 건드리지 않는다 (서비스 감사 SV-N4)
+     */
     private class Kits(context: Context) {
         private val made = ArrayList<() -> Unit>()
         private fun <T : Any> kit(make: () -> T, release: (T) -> Unit) = lazy {

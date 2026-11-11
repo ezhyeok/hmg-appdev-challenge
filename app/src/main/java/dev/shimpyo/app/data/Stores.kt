@@ -2,6 +2,7 @@ package dev.shimpyo.app.data
 
 import android.content.Context
 import android.util.Log
+import dev.shimpyo.coach.AcceptedStop
 import dev.shimpyo.coach.HistoryPort
 import dev.shimpyo.coach.MemoryPort
 import dev.shimpyo.coach.ParkState
@@ -86,39 +87,42 @@ fun parseOccupants(json: String): List<Occupant>? = runCatching {
     }
 }.getOrNull()
 
-/** 엔진의 개인 학습 상태(PersonalMemory)를 filesDir에 JSON으로 저장한다 */
-class MemoryStore(context: Context) : MemoryPort {
-    private val file = File(context.filesDir, "memory.json")
+/**
+ * 엔진의 개인 학습 상태(PersonalMemory)를 filesDir에 JSON으로 저장한다.
+ * 읽을 수 없는 파일은 `memory.json.corrupt`로 옮겨 두고 빈 학습으로 시작한다: 그대로 두면 다음 저장이 덮어쓴다 (리뷰 R-F14).
+ */
+class MemoryStore(file: File) : MemoryPort {
+    constructor(context: Context) : this(File(context.filesDir, "memory.json"))
+
     private val store = AtomicFile(file)
 
     /** 기록 지우기([clear])마다 오른다. 저장은 학습 상태를 꺼낼 때의 값을 들고 와서, 그 사이 지웠으면 쓰지 않는다 */
     override val generation: Long get() = store.generation
 
-    override fun load(): PersonalMemory = runCatching {
-        if (!file.exists()) return PersonalMemory()
-        val o = JSONObject(file.readText())
-        fun doubles(key: String): Map<String, List<Double>> = o.optJSONObject(key)?.let { m ->
-            m.keys().asSequence().associateWith { k ->
-                val a = m.getJSONArray(k)
-                (0 until a.length()).map { a.getDouble(it) }
-            }
-        } ?: emptyMap()
-        val intervals = doubles("restroomIntervalsMin")
-        val stats = o.optJSONObject("promptStats")?.let { m ->
-            m.keys().asSequence().associateWith { k ->
-                val s = m.getJSONObject(k)
-                PromptStat(accepted = s.optInt("a"), declined = s.optInt("d"))
-            }
-        } ?: emptyMap()
-        PersonalMemory(
-            restroomIntervalsMin = intervals,
-            promptStats = stats,
-            restroomCensoredMin = doubles("restroomCensoredMin"),
-            restroomSuggestedMin = doubles("restroomSuggestedMin"),
-        )
-    }.getOrDefault(PersonalMemory())
+    override fun load(): PersonalMemory {
+        val text = runCatching { store.readText() }.getOrElse { "" } ?: return PersonalMemory()
+        return MemoryJson.decode(text) ?: PersonalMemory().also {
+            val kept = store.quarantine()
+            Log.w(TAG, "memory.json unreadable: kept as ${kept?.name ?: "nothing (could not move)"}, starting with empty learning")
+        }
+    }
 
-    override fun save(memory: PersonalMemory, generationAtSnapshot: Long): Boolean {
+    // 쓰기는 AtomicFile이 한 번에 하나씩 한다. 예전에는 정차 기록 저장과 1분 저장이 같은 임시 파일을 동시에 써서
+    // memory.json이 깨질 수 있었다(2026-11-11 리뷰). 성공하면 true
+    override fun save(memory: PersonalMemory, generationAtSnapshot: Long): Boolean =
+        store.write(MemoryJson.encode(memory), generationAtSnapshot)
+
+    /** 학습 상태를 지운다. 이미 꺼내 둔 저장은 더 쓰지 않는다 */
+    override fun clear() = store.clear()
+
+    private companion object {
+        const val TAG = "Shimpyo"
+    }
+}
+
+/** 개인 학습 상태 JSON. 읽을 수 없으면 null */
+object MemoryJson {
+    fun encode(memory: PersonalMemory): String {
         val o = JSONObject()
         fun putDoubles(key: String, map: Map<String, List<Double>>) {
             o.put(key, JSONObject().apply { map.forEach { (k, v) -> put(k, JSONArray(v)) } })
@@ -129,13 +133,30 @@ class MemoryStore(context: Context) : MemoryPort {
         o.put("promptStats", JSONObject().apply {
             memory.promptStats.forEach { (k, v) -> put(k, JSONObject().put("a", v.accepted).put("d", v.declined)) }
         })
-        // 쓰기는 AtomicFile이 한 번에 하나씩 한다. 예전에는 정차 기록 저장과 1분 저장이 같은 임시 파일을 동시에 써서
-        // memory.json이 깨질 수 있었다(2026-11-11 리뷰). 성공하면 true
-        return store.write(o.toString(), generationAtSnapshot)
+        return o.toString()
     }
 
-    /** 학습 상태를 지운다. 이미 꺼내 둔 저장은 더 쓰지 않는다 */
-    override fun clear() = store.clear()
+    fun decode(text: String): PersonalMemory? = runCatching {
+        val o = JSONObject(text)
+        fun doubles(key: String): Map<String, List<Double>> = o.optJSONObject(key)?.let { m ->
+            m.keys().asSequence().associateWith { k ->
+                val a = m.getJSONArray(k)
+                (0 until a.length()).map { a.getDouble(it) }
+            }
+        } ?: emptyMap()
+        val stats = o.optJSONObject("promptStats")?.let { m ->
+            m.keys().asSequence().associateWith { k ->
+                val s = m.getJSONObject(k)
+                PromptStat(accepted = s.optInt("a"), declined = s.optInt("d"))
+            }
+        } ?: emptyMap()
+        PersonalMemory(
+            restroomIntervalsMin = doubles("restroomIntervalsMin"),
+            promptStats = stats,
+            restroomCensoredMin = doubles("restroomCensoredMin"),
+            restroomSuggestedMin = doubles("restroomSuggestedMin"),
+        )
+    }.getOrNull()
 }
 
 /**
@@ -143,9 +164,12 @@ class MemoryStore(context: Context) : MemoryPort {
  * 코치 스레드에서 부르므로 막지 않는다: 목록은 메모리에 두고, 쓰기·지우기는 앱의 쓰기 스레드([writer], 한 번에 하나)에 차례로 넘긴다.
  * 차례가 지켜지므로 지운 뒤에 덧붙인 기록이 지우기에 휩쓸리거나, 지우기 전 쓰기가 지운 뒤 파일을 되살리지 않는다.
  * 쓰기는 AtomicFile로 통째로 바꾼다 (서비스 감사 D14: 예전에는 바로 덮어쓰고, 지우기는 서비스가 파일 이름으로 지웠다).
+ * 읽을 수 없는 파일은 `stops.json.corrupt`로 옮겨 두고 빈 기록으로 시작한다: 예전에는 '기록 없음'으로 읽고 다음 정차가
+ * 그 파일을 한 건짜리로 덮어썼다 (리뷰 R-F14). StopHistoryStoreTest가 지킨다.
  */
-class StopHistoryStore(context: Context, private val writer: CoroutineScope) : HistoryPort {
-    private val file = File(context.filesDir, "stops.json")
+class StopHistoryStore(file: File, private val writer: CoroutineScope) : HistoryPort {
+    constructor(context: Context, writer: CoroutineScope) : this(File(context.filesDir, "stops.json"), writer)
+
     private val store = AtomicFile(file)
     private val lock = Any()
     private var cache: List<StopLog>? = null
@@ -154,7 +178,7 @@ class StopHistoryStore(context: Context, private val writer: CoroutineScope) : H
 
     override fun append(log: StopLog): List<StopLog> {
         val list = synchronized(lock) { (load() + log).takeLast(MAX).also { cache = it } }
-        writer.launch { if (!store.write(encode(list))) Log.w(TAG, "stops.json write failed") }
+        writer.launch { if (!store.write(StopHistoryJson.encode(list))) Log.w(TAG, "stops.json write failed") }
         return list
     }
 
@@ -163,8 +187,29 @@ class StopHistoryStore(context: Context, private val writer: CoroutineScope) : H
         writer.launch { store.clear() }
     }
 
-    private fun read(): List<StopLog> = runCatching {
-        val text = store.readText() ?: return emptyList()
+    private fun read(): List<StopLog> {
+        val text = runCatching { store.readText() }.getOrElse { "" } ?: return emptyList()
+        return StopHistoryJson.decode(text) ?: emptyList<StopLog>().also {
+            val kept = store.quarantine()
+            Log.w(TAG, "stops.json unreadable: kept as ${kept?.name ?: "nothing (could not move)"}, starting with an empty history")
+        }
+    }
+
+    companion object {
+        const val MAX = 200
+        private const val TAG = "Shimpyo"
+    }
+}
+
+/** 정차 기록 JSON. 읽을 수 없으면 null (빈 목록 `[]`과 다르다) */
+object StopHistoryJson {
+    fun encode(list: List<StopLog>): String = JSONArray().apply {
+        list.forEach { s ->
+            put(JSONObject().put("s", s.start).put("e", s.end).put("lat", s.lat ?: JSONObject.NULL).put("lon", s.lon ?: JSONObject.NULL).put("r", s.restroom).put("n", s.name ?: ""))
+        }
+    }.toString()
+
+    fun decode(text: String): List<StopLog>? = runCatching {
         val a = JSONArray(text)
         (0 until a.length()).map { i ->
             val o = a.getJSONObject(i)
@@ -177,26 +222,17 @@ class StopHistoryStore(context: Context, private val writer: CoroutineScope) : H
                 name = o.optString("n").ifEmpty { null },
             )
         }
-    }.getOrDefault(emptyList())
-
-    private fun encode(list: List<StopLog>): String = JSONArray().apply {
-        list.forEach { s ->
-            put(JSONObject().put("s", s.start).put("e", s.end).put("lat", s.lat ?: JSONObject.NULL).put("lon", s.lon ?: JSONObject.NULL).put("r", s.restroom).put("n", s.name ?: ""))
-        }
-    }.toString()
-
-    private companion object {
-        const val MAX = 200
-        const val TAG = "Shimpyo"
-    }
+    }.getOrNull()
 }
 
 /**
  * 여정 맥박 (trip.json, world.md 7장). 재시작 뒤 여정을 이어 가는 데 쓴다. 좌표는 담지 않는다.
  * [save]는 코치 스레드에서 1분에 한 번쯤 부른다: 막지 않고 쓰기 스레드에 넘긴다. 맥박은 전체 스냅숏이라 밀린 값은 마지막 것만 쓴다.
  */
-class TripStore(context: Context, private val writer: CoroutineScope) : TripStorePort {
-    private val store = AtomicFile(File(context.filesDir, "trip.json"))
+class TripStore(file: File, private val writer: CoroutineScope) : TripStorePort {
+    constructor(context: Context, writer: CoroutineScope) : this(File(context.filesDir, "trip.json"), writer)
+
+    private val store = AtomicFile(file)
     private val latest = AtomicReference<TripHeartbeat?>(null)
 
     override fun load(): TripHeartbeat? = store.readText()?.let(TripJson::decode)
@@ -219,6 +255,8 @@ object TripJson {
         .put("restroomFallbackAt", h.restroomFallbackAt)
         .put("continuousDrivingMin", h.continuousDrivingMin)
         .put("park", h.park?.let { JSONObject().put("since", it.since).put("doorSeen", it.doorSeen) } ?: JSONObject.NULL)
+        // 들르기로 한 곳: 주행 중 재시작 뒤에도 방금 대답한 질문을 다시 묻지 않게 (서비스 감사 SV-N7)
+        .put("accepted", h.accepted?.let { JSONObject().put("stopId", it.stopId).put("at", it.at) } ?: JSONObject.NULL)
         .toString()
 
     fun decode(text: String): TripHeartbeat? = runCatching {
@@ -232,6 +270,8 @@ object TripJson {
             continuousDrivingMin = o.getDouble("continuousDrivingMin"),
             park = if (o.isNull("park")) null else o.getJSONObject("park").let { ParkState(it.getLong("since"), it.getBoolean("doorSeen")) },
             version = o.getInt("version"),
+            // 예전 판의 맥박에는 없다. 없거나 읽을 수 없으면 '들르기로 한 곳 없음'으로 읽고 여정은 이어 간다
+            accepted = o.optJSONObject("accepted")?.let { a -> runCatching { AcceptedStop(a.getString("stopId"), a.getLong("at")) }.getOrNull() },
         )
     }.getOrNull()
 }
