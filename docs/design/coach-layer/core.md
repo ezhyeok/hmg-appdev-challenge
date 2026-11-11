@@ -154,8 +154,11 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 - **엔진에 알리기** (SV-D7): 성공한 들르기는 질문 수락이든 급해 목록이든 계획 화면이든 다시 시도든 `EngineAccepted.note(engine, stop,
   purposes, now)`를 한 번 부른다. 목적은 아는 만큼: 급해 목록이면 화장실, 엔진이 지금 그곳을 추천하면 그 목적, 계획에 있으면 계획의 목적,
   모르면 화장실 있는 곳은 화장실(`CoreRules.acceptedPurposes`). 다른 세계에서 시작한 들르기는 지금 엔진의 일이 아니라 알리지 않는다.
-  엔진 쪽 API는 `CoachEngine.noteAccepted(stop, purposes, now)`이고, 그것이 들어오기 전의 기본 구현(`EngineAccepted.PIN_ONLY`)은
-  아무것도 하지 않는다: 엔진이 스스로 물은 곳(질문 id로 보고)과 급해 목록에서 고른 곳(고정)만 추천이 유지된다.
+  실제 구현(`EngineAccepted.ENGINE`)은 `CoachEngine.noteAccepted(stop, purposes, now)` 그대로다. 엔진은 그곳을 들르기로 한 곳으로
+  두고(추천 이유 `NEXT_ACCEPTED`), 같은 곳을 묻던 질문은 수락으로, 다른 곳을 묻던 화장실 질문은 벌점 없이 끝내고, 그곳을 다시 묻지
+  않고, 30초 동안 먼저 말을 걸지 않는다. 엔진은 그곳이 후보 목록에서 1분 넘게 빠지면 잊으므로 경로 후보가 아닌 곳(급해 목록)은
+  코어가 후보에 계속 넣는다(5장의 고정). 이음매에 이름을 둔 것은 테스트가 "언제, 몇 번, 어떤 목적으로 알렸나"를 엔진 속을 보지 않고
+  확인하려는 것이다: 테스트의 `RecordingAccepted`는 적고 나서 실제 엔진에 그대로 넘기므로, 같은 테스트가 엔진의 다음 추천과 질문도 본다.
 - **재시작을 넘어** (SV-N7): 들르기로 한 곳의 id와 시각을 여정 맥박에 적는다(`TripSession.onAccepted`, world.md 4.4). 주행 중
   재시작으로 이어받았으면, 그 정차가 후보에 보이는 틱에 엔진 update 전에 다시 알린다(한 번). 2분 안에 보이지 않으면 잊는다.
 
@@ -253,7 +256,7 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 
 ## 11. 시나리오 → 테스트
 
-`CoachCoreTest` 29 (시나리오 끝까지):
+`CoachCoreTest` 30 (시나리오 끝까지):
 
 | 시나리오 | 테스트 |
 |---|---|
@@ -275,15 +278,17 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 | 파일 | 지키는 것 |
 |---|---|
 | `CoachCoreUrgentTest` 10 | R-F1, R-F7a~d, UI-7, UI-9a·b·c, UI-N4 (닫기 직후, 먼저 보낸 들르기, 다시 말하기, 엔진 초기화, 질문 전에 고름, 넣는 중, 2순위 고름, 닫고 기다림, 지나침, 번호) |
-| `CoachCoreGoToTest` 9 | UI-N2(넣는 중·대기·감시), SV-D9(닫기 뒤 다시 시도), SV-D7(엔진에 알리기: 성공만, 한 번, 세계가 같을 때), SV-N7(맥박에 적기) |
-| `CoachCoreVoiceTest` 19 | R-F3, R-F4, R-F8, R-F9, R-F11, UI-12, 멈추기(StopVoice), 말로 설정(DescribeOccupants) |
+| `CoachCoreGoToTest` 9 | UI-N2(넣는 중·대기·감시), SV-D9(닫기 뒤 다시 시도), SV-D7(엔진에 알리기: 성공만, 한 번, 세계가 같을 때, 그 뒤 추천이 `NEXT_ACCEPTED`이고 다른 곳을 묻지 않음), SV-N7(맥박에 적기) |
+| `CoachCoreVoiceTest` 20 | R-F2(마이크에서 학습 파일까지), R-F3, R-F4, R-F8, R-F9, R-F11, UI-12, 멈추기(StopVoice), 말로 설정(DescribeOccupants) |
 | `CoachCoreTripTest` 13 | SV-N2, SV-N3(재시작: 늦은 기어, 아직 P, 판정 전, 기어 없음, 시연 끄기), SV-N7(이어받은 수락), 새 여정, 종료(shutdown), 새 코어의 화면 초기화 |
 | `CoachCoreAsleepTest` 6 | U4 (화면·말·화장실 정차·탑승자 빠짐·세계 전환·07:00, 엔진의 `RESTROOM_ASLEEP` 이유) |
 | `StopRulesCrossCheckTest` 8 | 엔진의 정차 규칙과 `StopDetector`가 같은 신호 순서를 같게 본다 (prompt.md 4.4) |
 | `closure/UiSeamPinnedTest` 10 | 화면이 계약에서 기대하는 것 (그대로) |
 
-`closure/`에 아직 실패로 남아 있는 것은 다른 담당의 일이다: 말 해석(`ReviewIntentParserTest`, `ReviewCoachCoreTest`의 '얼마나 남았어'),
-표본 시각(`ReviewSampleClockTest`), 후보의 요청 한도(`ServiceClosureOpenTest`), 먼 쌍둥이 행(`ClosureOpenTest`), 엔진의 질문 이유(`UiSeamOpenTest`).
+다른 담당이 닫은 것 가운데 코어까지 이어서 보는 두 가지도 코어 테스트로 옮겼다: 묻는 말은 필요가 아니다(R-F2,
+`CoachCoreVoiceTest.askingHowLongToTheRestroomDoesNotMarkANeedOrTeachTheModel`), 카드 이유에 정체 전 마지막이 실린다(UI-6,
+`CoachCoreTest.aJamLastChanceAskedWhileTheGaugeIsNowIsStillPublishedAsAJamLastChance`). `closure/`에 실패로 남은 것은 하나다:
+시연에서 조향 표본의 시각(`ReviewSampleClockTest`, R-F6, 앱의 `CarSignals`·`SignalHub` 담당).
 
 ## 12. 닫은 결함
 
@@ -326,10 +331,12 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 
 ## 14. 남은 것과 다른 담당에게
 
-- **엔진 `noteAccepted`**: 들어오면 `CoachDeps.accepted`의 기본값을 `EngineAccepted { e, stop, purposes, now -> e.noteAccepted(stop, purposes, now) }`로
-  바꾼다(한 줄). 그 전에는 계획 화면에서 고른 곳과 재시작으로 이어받은 수락을 엔진이 모른다(코어는 알리고 있다: `CoachCoreGoToTest`가 가짜로 본다).
-- **말 해석 임시 파일**: `voice/SpokenTemp.kt`(`CardReply`, `Spoken`과 얇은 임시 `replyTo`·`parseSpoken`)는 IntentParser 담당의 브랜치를
-  합칠 때 지운다. `CoachCore.kt`의 `import dev.shimpyo.coach.voice.parseSpoken`·`replyTo` 두 줄도 함께 지운다(멤버 함수가 된다).
+- **급해 목록에서 다른 곳을 골랐는데 내비가 실패**: 떠 있던 급해 질문은 카드만 내려가고 엔진에서는 수명(45초)이 끝날 때 대답 없는
+  질문으로 센다. 엔진에 '수락 없이 끝내기'만 하는 길이 없다(`noteAccepted`는 성공한 선택만 알린다). 급해 화면은 그대로라 다시 고를 수 있다.
+- **질문이 생기기 전에 목록에서 고름** (UI-9b): 그 요청의 급해 의도는 엔진에 넣지 않는다(고른 곳을 `noteAccepted`로 알릴 뿐이다).
+  그래서 엔진은 이 필요를 '말한 것'으로 기록하지 않고, 그 정차는 '앱이 권해서 들른 정차'로 배운다.
+- **자는 중을 누구로 볼지**: 말이 아무도 가리키지 않았는데 아이가 여럿이면 코어는 고르지 않고 화면에서 표시해 달라고 답한다
+  (틀린 표시는 깨어 있는 아이의 게이지에 여유를 더 준다). 영아는 표시하지 않는다(엔진이 아이(CHILD)에게만 쓴다).
 - **앱(CoachService·저장소)이 바꿀 것**: `CoachGates` → `LoopInputs`, `CoachDeps(gates = …)` → `loopInputs = …`. `TripStore`(trip.json)에
   `accepted {stopId, at}`를 읽고 쓴다(없으면 null). `CoachStore.resetTransient`가 `goToPending`·`notice`도 지운다(코어도 시작할 때 지운다).
 - **화면이 바꿀 것**: `goToPending`으로 진행 표시(자기 시간 제한 없음), `notice` 표시, [다시 시도]는 `GoTo`만, 계획 화면을 떠나거나 주행을
