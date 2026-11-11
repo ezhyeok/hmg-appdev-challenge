@@ -18,6 +18,8 @@ import kotlin.random.Random
  * 흐름 (update 한 번):
  * 1. 단조 시계를 진행하고 표본을 운전 패턴 분석기·조용한 때 추적기에 넣는다.
  * 2. [StopTracker]가 기어·문으로 정차를 판정 → 화장실 시계(P 3분 + 문)·휴식 리듬(P 15분)을 0으로, 관측 간격을 기억에 남긴다.
+ *    P 20분이 넘으면 [MealStopRule]이 식사 정차인지 보고, 맞으면 그 정차에서 시작한 화장실 구간에 식사 배수를 건다.
+ *    [CoachInput.asleepOccupantIds](밤에 잠든 아이)를 화장실 시계에 반영한다 (화면 게이지에만, need-covariates.md 8장).
  * 3. 음성 의도 처리 (수락·거절, "화장실 급해", "아이가 화장실", "졸려", "쉬고 싶어", "배고파", "주유", "얼마나 남았어").
  *    사용자가 말한 것에는 바로 답한다(조용한 때·30초·쉼을 받지 않는다). 답이 둘이면 하나씩 차례로.
  * 4. 화장실 게이지([RestroomNeedModel]), 운전 패턴([DrivingStyleAnalyzer]), 피로 게이지([FatigueModel]).
@@ -55,7 +57,8 @@ class CoachEngine(
 
     // 여정 단위 상태 (새 여정이면 새로 만든다)
     private var stops = StopTracker(config)
-    private var needs = RestroomNeedModel(config)
+    private var meal = MealStopRule(config, local)
+    private var needs = RestroomNeedModel(config, local)
     private var style = DrivingStyleAnalyzer(config)
     private var fatigue = FatigueModel(config, local)
     // 질문 id는 엔진 인스턴스에 하나: 새 여정(새 PromptPolicy)에도 이어 쓴다
@@ -154,6 +157,9 @@ class CoachEngine(
         val ev = stops.update(mono, input.gear, speed, input.doorOpened)
         val moving = !stops.parked && movementKnown
         fatigue.advance(dtMs, moving, input.now, mono)
+        // 식사 정차 판단에 쓸 것(선 곳, 식사 목적)은 아래 정차 사건이 수락한 정차를 내리기 전에 본다
+        val wasMealStop = meal.factor != 1.0
+        meal.observe(mono, stops.sessionStart, stops.parked, stops.parked && mealIntent(mono), input.candidates, speed, dtMs)
         if (ev.restroomStopAt != NONE) {
             val acc = accepted
             val suggested = acc != null && (acc.kind == PromptKind.LAST_CHANCE || acc.kind == PromptKind.REST_SUGGESTION)
@@ -167,6 +173,18 @@ class CoachEngine(
             restAnswer.clear()
             accepted = null
         }
+        if (ev.mealLengthAt != NONE) meal.onMealLength(input.now - (mono - stops.sessionStart))
+        if (meal.factor != 1.0) {
+            if (!wasMealStop) {
+                // 식사 정차로 봤다: "배고파" 요청은 이 정차로 해결됐다 (바로 다음 정차까지 식사 정차가 되거나, 식사 뒤에 식사할 곳을 권하지 않게)
+                mealWantedAt = NONE
+                mealAnswer.clear()
+            }
+            // 그 정차에서 시계가 돌아간 사람의 구간에 건다. 다음 정차까지 매 update 다시 건다: 문이 늦게(떠나는 순간에) 열려 시계가
+            // 뒤에 돌아가도, 프로필이 그 정차 안의 다른 시각으로 시계를 옮겨도 그 구간에 남는다 (RestroomNeedModel.onMealStop)
+            needs.onMealStop(stops.sessionStart, meal.until, meal.factor)
+        }
+        needs.advance(mono, input.now, input.asleepOccupantIds)
         needs.tick(mono)
         fatigue.onCabin(input.cabin, mono)
 
@@ -454,6 +472,7 @@ class CoachEngine(
         val fatigueFirstS = (fe.gauge.minutes ?: 0) * 60.0
         val sleep = profile.driverSleepHours
         val awakeNow = fatigue.awakeHours(mono)
+        // 영아·반려견의 시계는 문맥 보정(식사·잠)을 받지 않으므로 지난 시간과 문턱을 그대로 쓴다
         val care = ArrayList<PitStopPlanner.Care>(2)
         needs.firstOf(OccupantType.INFANT)?.let { t ->
             care += PitStopPlanner.Care(
@@ -498,7 +517,8 @@ class CoachEngine(
         this.profile = profile
         if (newTrip) {
             stops = StopTracker(config)
-            needs = RestroomNeedModel(config)
+            meal = MealStopRule(config, local)
+            needs = RestroomNeedModel(config, local)
             style = DrivingStyleAnalyzer(config)
             fatigue = FatigueModel(config, local)
             policy = PromptPolicy(config, random, promptIds)
@@ -521,6 +541,9 @@ class CoachEngine(
 
     /** 저장용 스냅샷 */
     fun memory(): PersonalMemory = memory
+
+    /** 지금 문맥 보정(식사 뒤 구간, 잠든 아이)이 걸린 탑승자가 있는지. 효과 시뮬레이션이 '보정 없음' 가정을 지키는 데 쓴다 */
+    internal fun contextInEffect(): Boolean = needs.tracked.any { it.mealFactor != 1.0 || it.asleep }
 
     // ------------------------------------------------------------------
 
@@ -596,6 +619,21 @@ class CoachEngine(
     private fun requestMeal(mono: Long) {
         mealWantedAt = mono
         mealAnswer.request(Purpose.MEAL)
+    }
+
+    /**
+     * 지금 서면 식사하려는 정차로 볼 근거가 있는지 ([MealStopRule]): "배고파" 요청이 살아 있거나,
+     * 수락한 정차의 목적에 식사가 있고 그곳에 닿았다(도착하면 목록에서 빠진다. 아직 앞에 멀리 남아 있으면 다른 곳에 선 것이다).
+     */
+    private fun mealIntent(mono: Long): Boolean {
+        if (mealWantedAt != NONE && mono - mealWantedAt <= WANT_HOLD_MS) return true
+        val a = accepted ?: return false
+        if (Purpose.MEAL !in a.purposes) return false
+        val cur = currentCandidates.firstOrNull { it.id == a.stopId }
+        if (cur != null) return MealStopRule.proximityM(cur) <= config.mealPlaceRadiusM
+        // 목록에 없다: 도착해서 빠졌을 수 있다. 마지막으로 본 거리가 가까웠을 때만 그렇게 본다. 멀리 있던 곳이 목록에서 잠깐 빠진 것은
+        // (목록 깜빡임) 도착이 아니다
+        return MealStopRule.proximityM(a.stop) <= MealStopRule.ARRIVAL_MAX_TRAVEL_M
     }
 
     /**

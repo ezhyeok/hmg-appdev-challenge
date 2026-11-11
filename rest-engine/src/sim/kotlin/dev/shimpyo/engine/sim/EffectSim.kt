@@ -232,6 +232,12 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
                 ),
             )
             lastOut = out
+            // 이 시뮬레이션의 사람은 식사 효과가 없고 자지 않으며(groundTruth), 정차는 7·15분이라 식사 정차(20분)가 되지 않는다.
+            // 엔진이 문맥 보정(need-covariates.md 8장)을 걸었다면 그 가정이 깨진 것이다: 발표한 수치를 조용히 바꾸지 않고 멈춘다.
+            // 정차 시간을 늘리는 등으로 여기에 걸리면, 실제 사람에게도 식사 효과를 넣을지 엔진의 배수를 끌지(CoachConfig) 정하고 가정에 적는다
+            check(!e.contextInEffect()) {
+                "효과 시뮬레이션에 없는 문맥 보정이 걸렸다: ${out.restroom.reasons.map { it.code }} (t=${t / 60.0}분, x=${x}km)"
+            }
             val p = out.prompt ?: return
             if (!seen.add(p.id)) return
             log(t, x, "PROMPT ${p.kind} → ${p.stop?.name} : ${p.speech}")
@@ -420,8 +426,12 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
                 futures[ci to policy] = pool.submit(Callable { Array(trips) { simulate(c, setups[ci][it], policy) } })
             }
         }
-        val results = futures.mapValues { it.value.get() }
-        pool.shutdown()
+        // 여정 하나라도 실패하면(위의 문맥 보정 점검 등) 남은 일을 버리고 끝낸다. 예전에는 스레드 풀이 남아 프로세스가 끝나지 않았다
+        val results = try {
+            futures.mapValues { it.value.get() }
+        } finally {
+            pool.shutdownNow()
+        }
 
         val out = ArrayList<Map<String, Any?>>()
         conditions.forEachIndexed { ci, c ->
