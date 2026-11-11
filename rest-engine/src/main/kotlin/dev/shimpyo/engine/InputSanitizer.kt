@@ -81,7 +81,8 @@ internal object InputSanitizer {
         return out ?: list
     }
 
-    private fun candidate(c: StopCandidate): StopCandidate {
+    /** 후보 하나 정리 (update 밖에서 받는 후보에도 쓴다: CoachEngine.noteAccepted) */
+    fun candidate(c: StopCandidate): StopCandidate {
         val route = finite(c.routeDistanceM)
         val straight = finite(c.straightDistanceM)
         val eta = nonNegative(c.etaS)
