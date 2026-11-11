@@ -135,8 +135,8 @@ class CoachService : PleosForegroundService() {
     /**
      * 인텐트 extras로 온 요청. 무엇을 받아들일지는 [DevHooks]가 정한다 (닫힘 검증 N1: 제출용 빌드도 점검을 돌렸다).
      * - `--es demo <이름|off>`(시연 전환): 어느 빌드에서나. 화면 시연 패널과 같은 명령 하나만 보낸다.
-     * - `--ez verify true`(설계 확인), `--ez selftest true [--ez route true]`(kit 점검): debug 빌드에서만.
-     *   차를 움직이는 점검 코드는 release APK에 없다 (app/src/debug의 devtools).
+     * - `--ez verify true`(설계 확인), `--ez selftest true [--ez route true]`(kit 점검), `--es probe <실험>`(SDK 동작 실험):
+     *   debug 빌드에서만. 차를 움직이는 점검 코드는 release APK에 없다 (app/src/debug의 devtools).
      */
     override fun onCommand(intent: Intent?) {
         if (intent == null) return
@@ -146,12 +146,12 @@ class CoachService : PleosForegroundService() {
             route = intent.getBooleanExtra(DevHooks.EXTRA_ROUTE, false),
             demo = intent.getStringExtra(DevHooks.EXTRA_DEMO),
             debugBuild = BuildConfig.DEBUG,
+            probe = intent.getStringExtra(DevHooks.EXTRA_PROBE),
         )
         if (request.refused) Log.w(TAG, "dev tool request ignored: not a debug build")
-        request.tool?.let { tool ->
-            if (devJob?.isActive == true) return@let
+        if (request.tool != null && devJob?.isActive != true) {
             val devKits = DevToolRunner.Kits({ kits.vehicle }, { kits.navi }, { kits.tts }, { kits.stt }, { kits.location })
-            devJob = serviceScope.launch { DevToolRunner.run(tool, request.withRoute, this@CoachService, devKits) }
+            devJob = serviceScope.launch { DevToolRunner.run(request, this@CoachService, devKits) }
         }
         request.demo?.let {
             Log.i(TAG, "demo requested: ${it.scenario ?: "off"}")

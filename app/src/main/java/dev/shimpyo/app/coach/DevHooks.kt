@@ -11,7 +11,7 @@ import dev.shimpyo.coach.DemoScenario
  * 새로 시작한다)을 돌린다는 것을 찾았다. 빌드 종류도 주행 여부도 보지 않았다.
  *
  * 규칙
- * - `selftest`·`route`·`verify`(개발용 점검)는 debug 빌드에서만 받는다. release에는 점검 코드도 없다
+ * - `selftest`·`route`·`verify`·`probe`(개발용 점검)는 debug 빌드에서만 받는다. release에는 점검 코드도 없다
  *   (app/src/debug의 devtools, release는 아무것도 하지 않는 DevToolRunner).
  * - `demo`(시연 전환)는 release에서도 받는다: 2차 PT 시연에 쓴다. 하는 일은 화면 시연 패널과 같은 UiCommand.Demo 하나뿐이고,
  *   시연 이름([DemoScenario.NAMES])이 아닌 값은 모두 '끄기'다. 받은 문자열을 그대로 넘기지 않는다.
@@ -22,9 +22,10 @@ object DevHooks {
     const val EXTRA_SELFTEST = "selftest"
     const val EXTRA_ROUTE = "route"
     const val EXTRA_VERIFY = "verify"
+    const val EXTRA_PROBE = "probe"
 
     /** 서비스가 읽는 extra 전부. 여기 없는 이름은 어느 빌드에서도 읽지 않는다 */
-    val EXTRAS = listOf(EXTRA_DEMO, EXTRA_SELFTEST, EXTRA_ROUTE, EXTRA_VERIFY)
+    val EXTRAS = listOf(EXTRA_DEMO, EXTRA_SELFTEST, EXTRA_ROUTE, EXTRA_VERIFY, EXTRA_PROBE)
 
     /** 개발용 점검 (debug 빌드에만 있다) */
     enum class Tool {
@@ -32,6 +33,8 @@ object DevHooks {
         VERIFY,
         /** pleos-kit 점검 (KitSelfTest): 좌석·창문·조명·온도를 움직인다 */
         SELFTEST,
+        /** SDK 동작 실험 하나 (SdkProbe): 경유지를 넣고 빼거나 음성을 끊어 보고 SDK가 실제로 어떻게 하는지 로그로 남긴다 */
+        PROBE,
     }
 
     /** 시연 전환 요청. [scenario]가 null이면 끄기 */
@@ -41,30 +44,39 @@ object DevHooks {
      * 인텐트 하나에서 받아들인 것. 아무것도 없으면 [tool]·[demo] 모두 null.
      * [refused]: 점검을 요청했지만 이 빌드에서는 받지 않았다 (로그용)
      */
-    data class Request(val tool: Tool? = null, val withRoute: Boolean = false, val demo: DemoSwitch? = null, val refused: Boolean = false)
+    data class Request(
+        val tool: Tool? = null,
+        val withRoute: Boolean = false,
+        val demo: DemoSwitch? = null,
+        val refused: Boolean = false,
+        /** [Tool.PROBE]의 실험 이름과 인자 (예: "wp-add:FIRST:37.01,127.14:안성휴게소") */
+        val probe: String? = null,
+    )
 
     /** [extra]를 이 빌드에서 읽어도 되는지 */
     fun allowed(extra: String, debugBuild: Boolean): Boolean = when (extra) {
         EXTRA_DEMO -> true
-        EXTRA_SELFTEST, EXTRA_ROUTE, EXTRA_VERIFY -> debugBuild
+        EXTRA_SELFTEST, EXTRA_ROUTE, EXTRA_VERIFY, EXTRA_PROBE -> debugBuild
         else -> false
     }
 
     /**
-     * 인텐트에서 읽은 값(없으면 false·null)으로 할 일을 정한다. 점검은 한 번에 하나: verify가 selftest보다 먼저다.
+     * 인텐트에서 읽은 값(없으면 false·null)으로 할 일을 정한다. 점검은 한 번에 하나: verify, selftest, probe 순서다.
      * `route`는 selftest에 딸린 옵션이라 혼자서는 아무것도 하지 않는다.
      */
-    fun request(verify: Boolean, selftest: Boolean, route: Boolean, demo: String?, debugBuild: Boolean): Request {
+    fun request(verify: Boolean, selftest: Boolean, route: Boolean, demo: String?, debugBuild: Boolean, probe: String? = null): Request {
         val tool = when {
             verify && allowed(EXTRA_VERIFY, debugBuild) -> Tool.VERIFY
             selftest && allowed(EXTRA_SELFTEST, debugBuild) -> Tool.SELFTEST
+            probe != null && allowed(EXTRA_PROBE, debugBuild) -> Tool.PROBE
             else -> null
         }
         return Request(
             tool = tool,
             withRoute = tool == Tool.SELFTEST && route && allowed(EXTRA_ROUTE, debugBuild),
             demo = demo?.takeIf { allowed(EXTRA_DEMO, debugBuild) }?.let { DemoSwitch(it.takeIf { name -> name in DemoScenario.NAMES }) },
-            refused = tool == null && (verify || selftest),
+            refused = tool == null && (verify || selftest || probe != null),
+            probe = probe?.takeIf { tool == Tool.PROBE },
         )
     }
 }

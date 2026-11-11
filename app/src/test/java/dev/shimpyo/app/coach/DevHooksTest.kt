@@ -18,25 +18,26 @@ import org.junit.Test
  * 기기 확인은 tools/laptop/devhooks-check.sh (release APK: selftest가 아무것도 하지 않고 demo는 된다).
  */
 class DevHooksTest {
-    private fun release(verify: Boolean = false, selftest: Boolean = false, route: Boolean = false, demo: String? = null) =
-        DevHooks.request(verify, selftest, route, demo, debugBuild = false)
+    private fun release(verify: Boolean = false, selftest: Boolean = false, route: Boolean = false, demo: String? = null, probe: String? = null) =
+        DevHooks.request(verify, selftest, route, demo, debugBuild = false, probe = probe)
 
-    private fun debug(verify: Boolean = false, selftest: Boolean = false, route: Boolean = false, demo: String? = null) =
-        DevHooks.request(verify, selftest, route, demo, debugBuild = true)
+    private fun debug(verify: Boolean = false, selftest: Boolean = false, route: Boolean = false, demo: String? = null, probe: String? = null) =
+        DevHooks.request(verify, selftest, route, demo, debugBuild = true, probe = probe)
 
     @Test
     fun aReleaseBuildNeverRunsADevToolWhateverTheExtrasSay() {
         for (verify in listOf(false, true)) for (selftest in listOf(false, true)) for (route in listOf(false, true)) {
-            for (demo in listOf(null, "holiday", "off", "selftest")) {
-                val r = release(verify, selftest, route, demo)
-                assertEquals("verify=$verify selftest=$selftest route=$route demo=$demo", null, r.tool)
+            for (demo in listOf(null, "holiday", "off", "selftest")) for (probe in listOf(null, "wp-rm:ALL")) {
+                val r = release(verify, selftest, route, demo, probe)
+                assertEquals("verify=$verify selftest=$selftest route=$route demo=$demo probe=$probe", null, r.tool)
                 assertFalse(r.withRoute)
-                assertEquals("점검을 요청했으면 거절을 남긴다", verify || selftest, r.refused)
+                assertEquals(null, r.probe)
+                assertEquals("점검을 요청했으면 거절을 남긴다", verify || selftest || probe != null, r.refused)
             }
         }
-        assertFalse(DevHooks.allowed(DevHooks.EXTRA_SELFTEST, debugBuild = false))
-        assertFalse(DevHooks.allowed(DevHooks.EXTRA_VERIFY, debugBuild = false))
-        assertFalse(DevHooks.allowed(DevHooks.EXTRA_ROUTE, debugBuild = false))
+        for (extra in listOf(DevHooks.EXTRA_SELFTEST, DevHooks.EXTRA_VERIFY, DevHooks.EXTRA_ROUTE, DevHooks.EXTRA_PROBE)) {
+            assertFalse(extra, DevHooks.allowed(extra, debugBuild = false))
+        }
     }
 
     @Test
@@ -69,6 +70,8 @@ class DevHooksTest {
         assertEquals("둘 다 오면 설계 확인만 (예전과 같다)", Request(tool = Tool.VERIFY), debug(verify = true, selftest = true, route = true))
         assertEquals("route는 selftest에 딸린 옵션이다", Request(), debug(route = true))
         assertEquals(Request(tool = Tool.SELFTEST, demo = DemoSwitch("urgent")), debug(selftest = true, demo = "urgent"))
+        assertEquals(Request(tool = Tool.PROBE, probe = "wp"), debug(probe = "wp"))
+        assertEquals("점검이 먼저다. 밀린 실험은 버린다", Request(tool = Tool.SELFTEST), debug(selftest = true, probe = "wp"))
     }
 
     @Test
@@ -77,7 +80,7 @@ class DevHooksTest {
             assertFalse(DevHooks.allowed("anything", debugBuild))
             assertFalse(DevHooks.allowed("", debugBuild))
         }
-        assertEquals(setOf("demo", "selftest", "route", "verify"), DevHooks.EXTRAS.toSet())
+        assertEquals(setOf("demo", "selftest", "route", "verify", "probe"), DevHooks.EXTRAS.toSet())
     }
 
     // ------------------------------------------------------------ 소스 구조 (시험은 app 모듈 폴더에서 돈다)

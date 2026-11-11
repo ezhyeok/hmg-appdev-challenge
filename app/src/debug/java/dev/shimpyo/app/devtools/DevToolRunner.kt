@@ -26,10 +26,12 @@ object DevToolRunner {
     )
 
     /** 점검 하나를 끝까지 돌린다. 결과는 logcat `PleosApp` */
-    suspend fun run(tool: DevHooks.Tool, withRoute: Boolean, context: Context, kits: Kits) {
-        when (tool) {
+    suspend fun run(request: DevHooks.Request, context: Context, kits: Kits) {
+        when (request.tool) {
             DevHooks.Tool.VERIFY -> SdkVerify(context, kits.vehicle(), kits.navi(), kits.location()).run()
-            DevHooks.Tool.SELFTEST -> KitSelfTest(kits.vehicle(), kits.navi(), kits.tts(), kits.stt(), kits.location()).run(withRoute)
+            DevHooks.Tool.SELFTEST -> KitSelfTest(kits.vehicle(), kits.navi(), kits.tts(), kits.stt(), kits.location()).run(request.withRoute)
+            DevHooks.Tool.PROBE -> SdkProbe(kits.vehicle, kits.navi, kits.tts, kits.stt).run(request.probe.orEmpty())
+            null -> Unit
         }
     }
 }

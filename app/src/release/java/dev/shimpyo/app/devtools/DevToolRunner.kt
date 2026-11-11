@@ -26,5 +26,5 @@ object DevToolRunner {
     )
 
     @Suppress("UNUSED_PARAMETER", "RedundantSuspendModifier")
-    suspend fun run(tool: DevHooks.Tool, withRoute: Boolean, context: Context, kits: Kits) = Unit
+    suspend fun run(request: DevHooks.Request, context: Context, kits: Kits) = Unit
 }
