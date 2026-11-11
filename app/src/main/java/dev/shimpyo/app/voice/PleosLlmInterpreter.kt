@@ -5,6 +5,7 @@ import ai.pleos.playground.llm.constant.Mode
 import ai.pleos.playground.llm.listener.ResultListener
 import android.content.Context
 import android.util.Log
+import dev.shimpyo.coach.IntentInterpreter
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.Purpose
@@ -23,14 +24,14 @@ import org.json.JSONObject
  * 에뮬레이터(2026-11-11)에서는 ON_DEVICE 모드가 응답하지 않았다. 처음 호출에서 [FIRST_TIMEOUT_MS] 안에 답이 없으면
  * 이번 실행 동안은 쓰지 않고 규칙 기반으로만 동작한다.
  */
-class PleosLlmInterpreter(private val context: Context) {
+class PleosLlmInterpreter(private val context: Context) : IntentInterpreter {
     enum class State { UNKNOWN, READY, UNAVAILABLE }
 
     @Volatile var state = State.UNKNOWN
         private set
     private var llm: LLM? = null
 
-    val label: String
+    override val label: String
         get() = when (state) {
             State.READY -> "Pleos LLM (온디바이스)"
             State.UNAVAILABLE -> "규칙 기반 (LLM 응답 없음)"
@@ -38,13 +39,13 @@ class PleosLlmInterpreter(private val context: Context) {
         }
 
     /** 발화 → 엔진 의도. 해석하지 못하면 null */
-    suspend fun interpret(text: String, occupants: List<Occupant>, activePromptId: String?): VoiceIntent? {
+    override suspend fun interpret(text: String, occupants: List<Occupant>, activePromptId: String?): VoiceIntent? {
         val raw = generate(intentPrompt(text)) ?: return null
         return runCatching { parseIntent(JSONObject(extractJson(raw)), occupants, activePromptId) }.getOrNull()
     }
 
     /** "아이 둘이랑 강아지" → 탑승자 목록. 해석하지 못하면 null */
-    suspend fun occupants(text: String): List<Occupant>? {
+    override suspend fun occupants(text: String): List<Occupant>? {
         val raw = generate(occupantPrompt(text)) ?: return null
         return runCatching {
             val arr = JSONArray(extractJson(raw))

@@ -2,6 +2,9 @@ package dev.shimpyo.app.coach
 
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.UiCommand
+import dev.shimpyo.coach.UiSink
+import dev.shimpyo.coach.UrgentState
+import dev.shimpyo.coach.VoiceState
 import kotlinx.coroutines.channels.BufferOverflow
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.flow.Flow
@@ -26,6 +29,20 @@ object CoachStore {
     val commands: Flow<UiCommand> = _commands.receiveAsFlow()
 
     fun update(transform: CoachUiState.() -> CoachUiState) = _state.update(transform)
+
+    /** 코치 계층이 화면 상태를 바꾸는 길 (UiSink 포트) */
+    val sink = UiSink { transform -> update(transform) }
+
+    /**
+     * 서비스가 끝날 때: 진행 중이던 것(질문·급해·들르기 결과·음성 표시)을 지운다. 그대로 두면 서비스가 없는데 화면에 살아 있는
+     * 질문 버튼이 남는다 (서비스 감사 D11). 기록·탑승자처럼 다시 켜도 같은 값은 둔다
+     */
+    fun resetTransient() = update {
+        copy(
+            serviceRunning = false, prompt = null, promptStop = null, promptReasons = emptyList(), goToResult = null,
+            urgent = null, urgentState = UrgentState.IDLE, voice = VoiceState.IDLE, plan = null,
+        )
+    }
 
     fun send(command: UiCommand) {
         _commands.trySend(command)

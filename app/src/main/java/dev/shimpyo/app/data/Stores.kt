@@ -1,13 +1,23 @@
 package dev.shimpyo.app.data
 
 import android.content.Context
+import android.util.Log
+import dev.shimpyo.coach.HistoryPort
+import dev.shimpyo.coach.MemoryPort
+import dev.shimpyo.coach.ParkState
+import dev.shimpyo.coach.SettingsPort
 import dev.shimpyo.coach.StopLog
+import dev.shimpyo.coach.TripHeartbeat
+import dev.shimpyo.coach.TripStorePort
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.PersonalMemory
 import dev.shimpyo.engine.PromptStat
 import dev.shimpyo.engine.TripProfile
 import java.io.File
+import java.util.concurrent.atomic.AtomicReference
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.launch
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -15,19 +25,19 @@ import org.json.JSONObject
  * 사용자 설정. 탑승자, 자동 환기 허용, 음성 사용, 시연 모드.
  * 개인 정보는 기기 안(SharedPreferences, filesDir)에만 둔다. 서버로 보내지 않는다.
  */
-class Settings(context: Context) {
+class Settings(context: Context) : SettingsPort {
     private val prefs = context.getSharedPreferences("shimpyo", Context.MODE_PRIVATE)
 
-    var occupants: List<Occupant>
+    override var occupants: List<Occupant>
         get() = prefs.getString(KEY_OCCUPANTS, null)?.let(::parseOccupants) ?: listOf(Occupant("driver", OccupantType.ADULT, label = "운전자"))
         set(value) = prefs.edit().putString(KEY_OCCUPANTS, occupantsJson(value)).apply()
 
     /** 피로가 오르면 묻지 않고 외기로 바꿀지 (기본: 묻고 바꾼다) */
-    var autoFreshAir: Boolean
+    override var autoFreshAir: Boolean
         get() = prefs.getBoolean(KEY_AUTO_FRESH_AIR, false)
         set(value) = prefs.edit().putBoolean(KEY_AUTO_FRESH_AIR, value).apply()
 
-    var voiceEnabled: Boolean
+    override var voiceEnabled: Boolean
         get() = prefs.getBoolean(KEY_VOICE, true)
         set(value) = prefs.edit().putBoolean(KEY_VOICE, value).apply()
 
@@ -36,9 +46,13 @@ class Settings(context: Context) {
         get() = prefs.getFloat(KEY_SLEEP, 0f)
         set(value) = prefs.edit().putFloat(KEY_SLEEP, value).apply()
 
-    fun tripProfile(now: Long, lastRestroomAt: Map<String, Long> = emptyMap()) = TripProfile(
+    /** 건강 관련 탑승자 유형 저장 동의. 화면(HealthConsent)이 같은 키에 쓴다 (개인정보 보호법 제23조) */
+    override val healthConsent: Boolean
+        get() = prefs.getBoolean(KEY_HEALTH_CONSENT, false)
+
+    override fun tripProfile(start: Long, lastRestroomAt: Map<String, Long>) = TripProfile(
         occupants = occupants,
-        tripStart = now,
+        tripStart = start,
         driverSleepHours = driverSleepHours.takeIf { it > 0f },
         lastRestroomAt = lastRestroomAt,
     )
@@ -48,6 +62,7 @@ class Settings(context: Context) {
         const val KEY_AUTO_FRESH_AIR = "autoFreshAir"
         const val KEY_VOICE = "voice"
         const val KEY_SLEEP = "sleepHours"
+        const val KEY_HEALTH_CONSENT = "healthConsent"
     }
 }
 
@@ -72,14 +87,14 @@ fun parseOccupants(json: String): List<Occupant>? = runCatching {
 }.getOrNull()
 
 /** 엔진의 개인 학습 상태(PersonalMemory)를 filesDir에 JSON으로 저장한다 */
-class MemoryStore(context: Context) {
+class MemoryStore(context: Context) : MemoryPort {
     private val file = File(context.filesDir, "memory.json")
     private val store = AtomicFile(file)
 
     /** 기록 지우기([clear])마다 오른다. 저장은 학습 상태를 꺼낼 때의 값을 들고 와서, 그 사이 지웠으면 쓰지 않는다 */
-    val generation: Long get() = store.generation
+    override val generation: Long get() = store.generation
 
-    fun load(): PersonalMemory = runCatching {
+    override fun load(): PersonalMemory = runCatching {
         if (!file.exists()) return PersonalMemory()
         val o = JSONObject(file.readText())
         fun doubles(key: String): Map<String, List<Double>> = o.optJSONObject(key)?.let { m ->
@@ -103,7 +118,7 @@ class MemoryStore(context: Context) {
         )
     }.getOrDefault(PersonalMemory())
 
-    fun save(memory: PersonalMemory, generationAtSnapshot: Long = generation): Boolean {
+    override fun save(memory: PersonalMemory, generationAtSnapshot: Long): Boolean {
         val o = JSONObject()
         fun putDoubles(key: String, map: Map<String, List<Double>>) {
             o.put(key, JSONObject().apply { map.forEach { (k, v) -> put(k, JSONArray(v)) } })
@@ -120,16 +135,37 @@ class MemoryStore(context: Context) {
     }
 
     /** 학습 상태를 지운다. 이미 꺼내 둔 저장은 더 쓰지 않는다 */
-    fun clear() = store.clear()
+    override fun clear() = store.clear()
 }
 
-/** 정차 기록 (최근 200건) */
-class StopHistoryStore(context: Context) {
+/**
+ * 정차 기록 (stops.json, 최근 200건). 좌표는 남기지 않는다(StopRecorder가 null로 넘긴다).
+ * 코치 스레드에서 부르므로 막지 않는다: 목록은 메모리에 두고, 쓰기·지우기는 앱의 쓰기 스레드([writer], 한 번에 하나)에 차례로 넘긴다.
+ * 차례가 지켜지므로 지운 뒤에 덧붙인 기록이 지우기에 휩쓸리거나, 지우기 전 쓰기가 지운 뒤 파일을 되살리지 않는다.
+ * 쓰기는 AtomicFile로 통째로 바꾼다 (서비스 감사 D14: 예전에는 바로 덮어쓰고, 지우기는 서비스가 파일 이름으로 지웠다).
+ */
+class StopHistoryStore(context: Context, private val writer: CoroutineScope) : HistoryPort {
     private val file = File(context.filesDir, "stops.json")
+    private val store = AtomicFile(file)
+    private val lock = Any()
+    private var cache: List<StopLog>? = null
 
-    fun load(): List<StopLog> = runCatching {
-        if (!file.exists()) return emptyList()
-        val a = JSONArray(file.readText())
+    override fun load(): List<StopLog> = synchronized(lock) { cache ?: read().also { cache = it } }
+
+    override fun append(log: StopLog): List<StopLog> {
+        val list = synchronized(lock) { (load() + log).takeLast(MAX).also { cache = it } }
+        writer.launch { if (!store.write(encode(list))) Log.w(TAG, "stops.json write failed") }
+        return list
+    }
+
+    override fun clear() {
+        synchronized(lock) { cache = emptyList() }
+        writer.launch { store.clear() }
+    }
+
+    private fun read(): List<StopLog> = runCatching {
+        val text = store.readText() ?: return emptyList()
+        val a = JSONArray(text)
         (0 until a.length()).map { i ->
             val o = a.getJSONObject(i)
             StopLog(
@@ -143,17 +179,59 @@ class StopHistoryStore(context: Context) {
         }
     }.getOrDefault(emptyList())
 
-    fun append(log: StopLog): List<StopLog> {
-        val list = (load() + log).takeLast(MAX)
-        val a = JSONArray()
+    private fun encode(list: List<StopLog>): String = JSONArray().apply {
         list.forEach { s ->
-            a.put(JSONObject().put("s", s.start).put("e", s.end).put("lat", s.lat ?: JSONObject.NULL).put("lon", s.lon ?: JSONObject.NULL).put("r", s.restroom).put("n", s.name ?: ""))
+            put(JSONObject().put("s", s.start).put("e", s.end).put("lat", s.lat ?: JSONObject.NULL).put("lon", s.lon ?: JSONObject.NULL).put("r", s.restroom).put("n", s.name ?: ""))
         }
-        runCatching { file.writeText(a.toString()) }
-        return list
-    }
+    }.toString()
 
     private companion object {
         const val MAX = 200
+        const val TAG = "Shimpyo"
     }
+}
+
+/**
+ * 여정 맥박 (trip.json, world.md 7장). 재시작 뒤 여정을 이어 가는 데 쓴다. 좌표는 담지 않는다.
+ * [save]는 코치 스레드에서 1분에 한 번쯤 부른다: 막지 않고 쓰기 스레드에 넘긴다. 맥박은 전체 스냅숏이라 밀린 값은 마지막 것만 쓴다.
+ */
+class TripStore(context: Context, private val writer: CoroutineScope) : TripStorePort {
+    private val store = AtomicFile(File(context.filesDir, "trip.json"))
+    private val latest = AtomicReference<TripHeartbeat?>(null)
+
+    override fun load(): TripHeartbeat? = store.readText()?.let(TripJson::decode)
+
+    override fun save(heartbeat: TripHeartbeat) {
+        // 쓰기를 기다리는 값이 없을 때만 새 쓰기를 띄운다 (있으면 그 쓰기가 이 값을 가져간다)
+        if (latest.getAndSet(heartbeat) == null) {
+            writer.launch { latest.getAndSet(null)?.let { if (!store.write(TripJson.encode(it))) Log.w("Shimpyo", "trip.json write failed") } }
+        }
+    }
+}
+
+/** 여정 맥박 JSON. 읽을 수 없거나 판이 다르면 null (새 여정으로 시작한다, TripSession.open) */
+object TripJson {
+    fun encode(h: TripHeartbeat): String = JSONObject()
+        .put("version", h.version)
+        .put("savedAt", h.savedAt)
+        .put("tripStart", h.tripStart)
+        .put("lastRestroomAt", JSONObject().apply { h.lastRestroomAt.forEach { (k, v) -> put(k, v) } })
+        .put("restroomFallbackAt", h.restroomFallbackAt)
+        .put("continuousDrivingMin", h.continuousDrivingMin)
+        .put("park", h.park?.let { JSONObject().put("since", it.since).put("doorSeen", it.doorSeen) } ?: JSONObject.NULL)
+        .toString()
+
+    fun decode(text: String): TripHeartbeat? = runCatching {
+        val o = JSONObject(text)
+        val restroom = o.getJSONObject("lastRestroomAt")
+        TripHeartbeat(
+            savedAt = o.getLong("savedAt"),
+            tripStart = o.getLong("tripStart"),
+            lastRestroomAt = restroom.keys().asSequence().associateWith { restroom.getLong(it) },
+            restroomFallbackAt = o.getLong("restroomFallbackAt"),
+            continuousDrivingMin = o.getDouble("continuousDrivingMin"),
+            park = if (o.isNull("park")) null else o.getJSONObject("park").let { ParkState(it.getLong("since"), it.getBoolean("doorSeen")) },
+            version = o.getInt("version"),
+        )
+    }.getOrNull()
 }
