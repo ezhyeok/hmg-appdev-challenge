@@ -1,0 +1,4 @@
+# 휴게소 출발: 기어 D, 고속 주행으로 복귀
+gear Drive
+sleep 2
+speed 80 20

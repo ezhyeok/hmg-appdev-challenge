@@ -1,0 +1,13 @@
+# 쉼표 시연 4: 휴게소 정차. 기어 P → 문 열림 → 닫힘 → (시간 경과) → D. 정차 기록과 게이지 회복을 확인한다.
+speed 0
+brake 60
+sleep 2
+gear Park
+sleep 2
+door fl open
+sleep 3
+door fl close
+sleep 5
+door rl open
+sleep 3
+door rl close

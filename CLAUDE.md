@@ -69,6 +69,12 @@
 - NaviHelper 정보 조회(`getTBTInfo`, `getWaypointInfo`, `getDestinationInfo`, `getRouteStateInfo`, `getChargerOperatorInfo`)는 호출해야 응답 이벤트가 온다. 길안내 중 `onTBTInfo`는 앞으로의 회전 목록(type, distance, description)을 준다. `onRouteCancelled`, `onNavigationStatus`, `onDrivingInfo`, `onCurrentRoadSpeedLimit`는 내비가 먼저 보낸다. `onRouteStarted`는 내비 앱 로그에 `notifyRouteStarted`가 찍혀도 앱에서 받지 못했다(원인 미확인). 길안내 여부는 `RouteStateInfo.naviMode`(`ROUTE_GUIDING`/`SAFE_GUIDING`)로 판단할 것
 - `requestTrip(TripRequest)`는 길안내를 시작하지 않고 `onTripInfo`로 거리(m), ETA(초), 도착 시 예상 SOC(%), 소모 에너지, 구간별 교통 정보를 준다 (성남→서울역: 27.5km, 약 31분, SOC 95%)
 - 내비 요청을 1초 안에 연달아 보내면(trip, route, waypoint) 시작된 경로가 곧바로 취소되는 일이 있었다. 요청 사이에 응답을 기다릴 것
+- **TBT(`getTBTInfo`)에 경로 위 휴게소(`TURN_ENTER_SERVICEAREA`)와 졸음쉼터(`TURN_RESTAREA`)가 이름과 함께 온다. 거리(`TBTInfo.distance`)는 직전 항목부터의 거리라서 누적해야 경로 거리가 된다** (2026-11-11 확인: 경유지 누적 47.1km = 내비 경유지 남은 거리 47.0km)
+- 정체 구간(`RouteStateInfo.trafficStatus.congestionItemList`)은 길안내 중 실제로 온다. `trafficCongestionTime` 단위는 초. `offset`의 기준(출발지/현재 위치)은 미확인
+- 길안내 중 `requestTrip`은 경로를 방해하지 않는다. 휴게소 좌표로 `addWaypoint` 하면 가는 방향 휴게소로 잡힌다
+- `adb emu geo fix`는 FusedLocation만 바꾸고 Pleos 내비의 위치는 바꾸지 않는다 (내비는 판교 고정)
+- 조향각 리스너 값은 Virtual Console 값과 부호가 반대이고, 변화가 없어도 약 3초마다 온다
+- Pleos LLM SDK 2.1.3.2: ON_DEVICE 모드는 에뮬레이터에서 응답하지 않았다(40초). 문서의 `getOnDeviceModelPromptsContents`는 jar에 없다
 - NaviHelper에는 POI 검색 API가 없다. 목적지·경유지의 좌표와 poiId는 앱이 외부에서 구해야 한다. 요청은 Pleos 내비 앱으로 전달되고, 어떤 이벤트가 오는지는 내비 앱 구현에 따라 다르다
 - 에뮬레이터에서 재현할 수 있는 차량 상태는 `docs/contest/02_Pleos_개발가이드/pleos-connect/app-test-guide/virtual-console-guide.md`의 카드 목록이 기준이다
 - Virtual Console은 에뮬레이터 8088 포트의 HTTP API로도 조작할 수 있다 (`adb forward tcp:8088 tcp:8088`). 시연 시나리오를 스크립트로 재생할 수 있다

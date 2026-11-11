@@ -1,0 +1,279 @@
+# 쉼표 시연 2: 오후 졸음. 앱 시연 모드(--es demo fatigue, 10배속, 오후 3시, 연속 주행 95분)와 함께 재생한다.
+# 앞 2분 30초는 작은 조향으로 운전 스타일 기준선을 만들고(가상 25분), 뒤 1분은 큰 조향 수정과 차속 출렁임을 넣는다.
+# 재생: tools/vc/vc.sh up 다음 tools/vc/vc.sh play tools/vc/shimpyo-fatigue.vc
+gear Drive
+sleep 1
+speed 90 25
+recirc on
+hvac-power on
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=2
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=0
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=-2
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=2
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=0
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=-2
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=2
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=0
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-2
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=2
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=0
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=-2
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=2
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=0
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=-2
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=2
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=0
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-2
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=2
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=0
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=-2
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=2
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=0
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=-2
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=2
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=0
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-2
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=89 accelerator=25 brake=0 steering=1
+sleep 2
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-1
+sleep 2
+put /vehicle/controls speed=91 accelerator=25 brake=0 steering=2
+sleep 2
+# 흐트러짐
+put /vehicle/controls speed=86 accelerator=10 brake=0 steering=7
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=93 accelerator=30 brake=0 steering=6
+sleep 1
+put /vehicle/controls speed=85 accelerator=0 brake=10 steering=-8
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=10
+sleep 1
+put /vehicle/controls speed=94 accelerator=30 brake=0 steering=-7
+sleep 1
+put /vehicle/controls speed=84 accelerator=0 brake=15 steering=8
+sleep 1
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-6
+sleep 1
+put /vehicle/controls speed=92 accelerator=25 brake=0 steering=5
+sleep 1
+put /vehicle/controls speed=87 accelerator=10 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=86 accelerator=10 brake=0 steering=7
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=93 accelerator=30 brake=0 steering=6
+sleep 1
+put /vehicle/controls speed=85 accelerator=0 brake=10 steering=-8
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=10
+sleep 1
+put /vehicle/controls speed=94 accelerator=30 brake=0 steering=-7
+sleep 1
+put /vehicle/controls speed=84 accelerator=0 brake=15 steering=8
+sleep 1
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-6
+sleep 1
+put /vehicle/controls speed=92 accelerator=25 brake=0 steering=5
+sleep 1
+put /vehicle/controls speed=87 accelerator=10 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=86 accelerator=10 brake=0 steering=7
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=93 accelerator=30 brake=0 steering=6
+sleep 1
+put /vehicle/controls speed=85 accelerator=0 brake=10 steering=-8
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=10
+sleep 1
+put /vehicle/controls speed=94 accelerator=30 brake=0 steering=-7
+sleep 1
+put /vehicle/controls speed=84 accelerator=0 brake=15 steering=8
+sleep 1
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-6
+sleep 1
+put /vehicle/controls speed=92 accelerator=25 brake=0 steering=5
+sleep 1
+put /vehicle/controls speed=87 accelerator=10 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=86 accelerator=10 brake=0 steering=7
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=93 accelerator=30 brake=0 steering=6
+sleep 1
+put /vehicle/controls speed=85 accelerator=0 brake=10 steering=-8
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=10
+sleep 1
+put /vehicle/controls speed=94 accelerator=30 brake=0 steering=-7
+sleep 1
+put /vehicle/controls speed=84 accelerator=0 brake=15 steering=8
+sleep 1
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-6
+sleep 1
+put /vehicle/controls speed=92 accelerator=25 brake=0 steering=5
+sleep 1
+put /vehicle/controls speed=87 accelerator=10 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=86 accelerator=10 brake=0 steering=7
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=93 accelerator=30 brake=0 steering=6
+sleep 1
+put /vehicle/controls speed=85 accelerator=0 brake=10 steering=-8
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=10
+sleep 1
+put /vehicle/controls speed=94 accelerator=30 brake=0 steering=-7
+sleep 1
+put /vehicle/controls speed=84 accelerator=0 brake=15 steering=8
+sleep 1
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-6
+sleep 1
+put /vehicle/controls speed=92 accelerator=25 brake=0 steering=5
+sleep 1
+put /vehicle/controls speed=87 accelerator=10 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=86 accelerator=10 brake=0 steering=7
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=-9
+sleep 1
+put /vehicle/controls speed=93 accelerator=30 brake=0 steering=6
+sleep 1
+put /vehicle/controls speed=85 accelerator=0 brake=10 steering=-8
+sleep 1
+put /vehicle/controls speed=88 accelerator=30 brake=0 steering=10
+sleep 1
+put /vehicle/controls speed=94 accelerator=30 brake=0 steering=-7
+sleep 1
+put /vehicle/controls speed=84 accelerator=0 brake=15 steering=8
+sleep 1
+put /vehicle/controls speed=90 accelerator=25 brake=0 steering=-6
+sleep 1
+put /vehicle/controls speed=92 accelerator=25 brake=0 steering=5
+sleep 1
+put /vehicle/controls speed=87 accelerator=10 brake=0 steering=-9
+sleep 1
