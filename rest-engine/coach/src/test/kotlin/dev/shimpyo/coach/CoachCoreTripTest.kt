@@ -154,6 +154,61 @@ class CoachCoreTripTest {
         assertTrue("실제 엔진도 2분 정차로 센다: 화장실 시계가 돌아가지 않았다 ($before → $after)", after <= before)
     }
 
+    // ------------------------------------------------------------ 재시작: 들르기로 한 곳 (서비스 닫힘 검증 N7)
+
+    /** 달리던 중 10초 전에 꺼졌다가 다시 켜진 코어. 꺼지기 [acceptedMinAgo]분 전에 입장졸음쉼터에 들르기로 했다 */
+    private fun resumedMidDrive(scope: TestScope, acceptedMinAgo: Long?, gapMs: Long = 10_000L): CoreRig {
+        val rig = CoreRig(scope, settings = FakeSettings(listOf(DRIVER)), wallBase = wall)
+        rig.savedTrip(
+            TripHeartbeat(
+                savedAt = wall - gapMs, tripStart = wall - 100 * min, lastRestroomAt = mapOf("driver" to wall - 100 * min),
+                restroomFallbackAt = wall - 100 * min, continuousDrivingMin = 100.0, park = null,
+                accepted = acceptedMinAgo?.let { AcceptedStop("ipjang", wall - gapMs - it * min) },
+            ),
+        )
+        rig.drive(100f)
+        rig.fix(37.0, 127.19) // 입장졸음쉼터 10km 전
+        return rig
+    }
+
+    @Test
+    fun aStopAcceptedBeforeAMidDriveRestartIsNotedToTheNewEngineOnce() = runTest {
+        // 주행 중 재시작하면 새 엔진은 방금 수락한 정차를 모른다: 같은 곳을 다시 물을 수 있었다. 맥박이 이어받은 곳이 후보에 보이면
+        // 엔진에 '들르기로 한 곳'으로 다시 알린다 (EngineAccepted: 엔진의 noteAccepted가 들어오면 엔진이 그곳을 묻지 않는다)
+        val rig = resumedMidDrive(this, acceptedMinAgo = 3)
+        rig.start()
+        rig.runUntil(30_000) { rig.accepted.notes.isNotEmpty() } ?: error("다시 알리지 않았다: ${rig.log.lines.takeLast(10)}")
+        assertEquals("ipjang", rig.accepted.notes.single().stopId)
+        assertTrue("후보에 보인 틱에 알린다", rig.state.ahead.any { it.id == "ipjang" })
+        rig.run(60_000)
+        assertEquals("한 번만", 1, rig.accepted.notes.size)
+        assertEquals("맥박에는 처음 수락한 때가 그대로 남는다", wall - 10_000L - 3 * min, rig.trips.stored!!.accepted?.at)
+    }
+
+    @Test
+    fun nothingIsNotedAfterABreakOrWhenTheStopNeverShowsUpAgain() = runTest {
+        // 15분 넘게 꺼져 있었으면 그사이 섰던 것이다
+        val afterBreak = resumedMidDrive(this, acceptedMinAgo = 3, gapMs = 20 * min)
+        afterBreak.start()
+        afterBreak.run(60_000)
+        assertTrue(afterBreak.accepted.notes.isEmpty())
+
+        // 그곳이 후보에 없다 (지나쳤다, 경로 후보가 아니었다): 2분 기다리고 잊는다. 나중에 같은 id가 보여도 알리지 않는다
+        val passed = resumedMidDrive(this, acceptedMinAgo = 3)
+        passed.fix(36.0, 127.4) // 입장졸음쉼터에서 100km: 가짜 표의 앞쪽 검색(반경 60km)에 들지 않는다
+        passed.start()
+        passed.run(CoachCore.ACCEPT_RESTORE_MS + 5_000)
+        passed.fix(37.0, 127.19)
+        passed.run(60_000)
+        assertTrue("지나친 뒤에는 알리지 않는다: ${passed.accepted.notes}", passed.accepted.notes.none { it.stopId == "ipjang" })
+
+        // 수락한 곳이 없던 여정
+        val none = resumedMidDrive(this, acceptedMinAgo = null)
+        none.start()
+        none.run(60_000)
+        assertTrue(none.accepted.notes.isEmpty())
+    }
+
     // ------------------------------------------------------------ 새 여정
 
     @Test

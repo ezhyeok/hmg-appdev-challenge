@@ -94,6 +94,12 @@ class CoachCore(private val d: CoachDeps) {
     private var healthConsentSeen: Boolean? = null
     /** 되돌린 정차의 판정을 기다리는 동안 열린 문. 판정 뒤 첫 엔진 입력에 싣는다 (엔진도 그 문을 본다) */
     private var doorWhileWaiting = false
+    /**
+     * 재시작 전에 들르기로 한 곳의 id (맥박). 그 정차가 후보에 보이면 엔진에 다시 알린다: 새 엔진은 수락한 곳을 모른다
+     * (서비스 닫힘 검증 N7). 끝내 보이지 않으면(지나쳤다, 경로 후보가 아니었다) [restoredAcceptUntilMs]에 버린다
+     */
+    private var restoredAccept: String? = null
+    private var restoredAcceptUntilMs = 0L
 
     /** 내비에 넣는 중인 들르기 (한 번에 하나다, PromptMachine). 어느 세계에서 시작했고 급해 목록에서 고른 것인지 */
     private class GoToStart(val generation: Int, val urgentPick: Boolean)
@@ -172,6 +178,10 @@ class CoachCore(private val d: CoachDeps) {
         memorySaver.loaded(loaded.memory)
         enterWorld(a)
         enforceHealthConsent()
+        a.session.restoredAccepted?.let {
+            restoredAccept = it.stopId
+            restoredAcceptUntilMs = d.elapsed.elapsedMs() + ACCEPT_RESTORE_MS
+        }
         started = true
         val shown = shownHistory(now)
         ui.update {
@@ -256,6 +266,7 @@ class CoachCore(private val d: CoachDeps) {
 
         recorder.onTick(t, gear, speed, door, pos, a.world.persistsHistory)?.let { r ->
             worlds.onStop(r.log, t)
+            restoredAccept = null
             if (r.log.restroom) asleepChanged(asleep.onRestroomStop())
             val shown = StopHistory.sanitize(r.history, t)
             ui.update { copy(history = shown, lastStop = r.log) }
@@ -299,6 +310,8 @@ class CoachCore(private val d: CoachDeps) {
             ),
         )
         d.loopInputs.request = CandidateRequest(CoreRules.searchFix(pos, real, heading), navi, a.world.candidatePolicy)
+        // 엔진이 한 번이라도 돌았으면, 이번 update 전에 알린다 (엔진이 그 정차를 먼저 묻지 않게)
+        if (!waiting && lastInput != null) restoreAccepted(a, input, el)
         val out = if (waiting) null else try {
             a.engine.update(input)
         } catch (e: Exception) {
@@ -479,11 +492,31 @@ class CoachCore(private val d: CoachDeps) {
         // 성공한 들르기는 모두 엔진의 '들르기로 한 곳'이다. 세계가 바뀌기 전에 보낸 것은 지금 엔진의 일이 아니다
         val a = worlds.active
         if (!ok || start == null || start.generation != a.generation || lastInput == null) return
+        noteAccepted(a, r.stop, start.urgentPick)
+        // 여정에도 적는다 (맥박): 주행 중 재시작해도 이어받는다. 새로 고른 곳이 이어받던 곳을 대신한다
+        worlds.onAccepted(r.stop.id)
+        restoredAccept = null
+    }
+
+    private fun noteAccepted(a: ActiveWorld, stop: StopCandidate, urgentPick: Boolean) {
         try {
-            d.accepted.note(a.engine, r.stop, CoreRules.acceptedPurposes(r.stop, start.urgentPick, lastOutput?.next, lastPlan), a.clock.now())
+            d.accepted.note(a.engine, stop, CoreRules.acceptedPurposes(stop, urgentPick, lastOutput?.next, lastPlan), a.clock.now())
         } catch (x: Exception) {
             log.w("noteAccepted failed: ${x.message}")
         }
+    }
+
+    /** 재시작 전에 들르기로 한 곳이 지금 후보에 보이면 엔진에 다시 알린다 (한 번). 기다리는 시간이 지나면 잊는다 */
+    private fun restoreAccepted(a: ActiveWorld, input: CoachInput, el: Long) {
+        val id = restoredAccept ?: return
+        val stop = input.candidates.firstOrNull { it.id == id }
+        if (stop == null) {
+            if (el >= restoredAcceptUntilMs) restoredAccept = null
+            return
+        }
+        restoredAccept = null
+        log.i("accepted stop restored: ${stop.name}")
+        noteAccepted(a, stop, urgentPick = false)
     }
 
     // ------------------------------------------------------------ 음성
@@ -723,6 +756,7 @@ class CoachCore(private val d: CoachDeps) {
                 resetPrompts()
                 urgent.onEngineReset()
                 plans.engineChanged()
+                restoredAccept = null
             }
             WorldChange.Kind.WORLD -> {
                 resetPrompts()
@@ -732,6 +766,7 @@ class CoachCore(private val d: CoachDeps) {
                 urgent.reset()
                 plans.worldChanged()
                 asleep.clear()
+                restoredAccept = null
                 lastInput = null
                 lastOutput = null
                 lastPlan = null
@@ -873,5 +908,7 @@ class CoachCore(private val d: CoachDeps) {
         const val MAX_PENDING_INTENTS = 4
         /** 화면 알림을 보여 두는 시간 (틱이 거두므로 6~7초) */
         const val NOTICE_MS = 6_000L
+        /** 재시작 전에 들르기로 한 곳이 후보에 다시 보이기를 기다리는 시간 (후보는 20초 안에 다시 만든다) */
+        const val ACCEPT_RESTORE_MS = 2 * 60_000L
     }
 }

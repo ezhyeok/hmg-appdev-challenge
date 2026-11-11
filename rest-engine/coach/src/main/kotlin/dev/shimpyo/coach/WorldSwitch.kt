@@ -214,6 +214,12 @@ class WorldSwitch(
         a.world.endPark(a.engine, endedAt)
     }
 
+    /** 운전자가 고른 정차를 내비에 넣었다: 지금 세계의 여정에 적는다 (실제 세계면 맥박에 저장된다) */
+    fun onAccepted(stopId: String) {
+        val a = active
+        a.session.onAccepted(stopId, a.clock.now())
+    }
+
     /** 정차 기록 (StopRecorder). 기록 파일에 덧붙일지는 코어가 world.persistsHistory로 정한다 */
     fun onStop(log: StopLog, now: Long) = active.session.onStop(log, now)
 

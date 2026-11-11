@@ -132,6 +132,23 @@ class CoachCoreGoToTest {
     }
 
     @Test
+    fun aConfirmedStopIsWrittenToTheTripHeartbeatAndAFailedOneIsNot() = runTest {
+        // 주행 중 재시작해도 이어받게 여정 맥박에 적는다 (서비스 닫힘 검증 N7)
+        val rig = drivingRig(this)
+        rig.fakeNavi.faults["startRoute"] = FakeNaviPort.Fault.THROW
+        rig.command(UiCommand.GoTo(Gyeongbu.oksan))
+        rig.runUntil(30_000) { rig.state.goToResult != null } ?: error("결과 없음")
+        assertNull("실패한 들르기는 적지 않는다", rig.trips.stored?.accepted)
+        rig.fakeNavi.faults.remove("startRoute")
+        rig.command(UiCommand.GoTo(Gyeongbu.oksan))
+        rig.runUntil(10_000) { rig.state.goToResult?.outcome == GoToOutcome.ROUTE_STARTED } ?: error("결과 없음")
+        assertEquals("oksan", rig.trips.stored?.accepted?.stopId)
+        rig.command(UiCommand.GoTo(Gyeongbu.jukam))
+        rig.runUntil(10_000) { rig.state.goToResult?.stop?.id == "jukam" } ?: error("결과 없음")
+        assertEquals("새로 고른 곳이 대신한다", "jukam", rig.trips.stored?.accepted?.stopId)
+    }
+
+    @Test
     fun aFailedGoToIsNotNoted() = runTest {
         val rig = drivingRig(this)
         rig.fakeNavi.faults["startRoute"] = FakeNaviPort.Fault.THROW

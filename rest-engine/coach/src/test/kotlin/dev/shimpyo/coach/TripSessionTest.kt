@@ -335,6 +335,81 @@ class TripSessionTest {
         assertEquals("15분 정차는 휴식", 0.0, s.anchor.continuousDrivingMin, 0.0)
     }
 
+    // ------------------------------------------------------------ 들르기로 한 곳 (서비스 닫힘 검증 N7)
+
+    @Test
+    fun theAcceptedStopIsSavedAtOnceAndResumedOnlyWithoutABreak() {
+        // 주행 중 재시작하면 엔진의 '들르기로 한 곳'이 사라져 방금 답한 정차를 다시 물을 수 있었다. 맥박에 담아 이어받는다
+        val clock = WorldClock(t0)
+        val store = InMemoryTripStore()
+        val s = open(clock, store)
+        s.drive(clock, 30)
+        val saves = store.saves.size
+        val at = clock.now()
+        s.onAccepted("kex:oksan", at)
+        assertEquals("바로 저장한다", saves + 1, store.saves.size)
+        assertEquals(AcceptedStop("kex:oksan", at), store.stored!!.accepted)
+
+        clock.advance(20_000) // 프로세스 재시작
+        val resumed = open(clock, store)
+        assertEquals(TripOrigin.RESUMED, resumed.origin)
+        assertEquals(AcceptedStop("kex:oksan", at), resumed.restoredAccepted)
+        assertEquals("다음 맥박에도 남는다", AcceptedStop("kex:oksan", at), resumed.heartbeat(clock.now()).accepted)
+
+        clock.advance(20 * min) // 15분 넘게 꺼져 있었다: 그사이 섰던 것이다
+        val afterBreak = open(clock, store)
+        assertEquals(TripOrigin.RESUMED_AFTER_BREAK, afterBreak.origin)
+        assertNull(afterBreak.restoredAccepted)
+        assertNull(afterBreak.accepted)
+    }
+
+    @Test
+    fun theAcceptedStopEndsWithARestroomStopARestANewTripOrNinetyMinutes() {
+        fun session(clock: WorldClock): TripSession = open(clock, InMemoryTripStore()).also {
+            it.drive(clock, 10)
+            it.onAccepted("kex:oksan", clock.now())
+        }
+        fun stop(clock: WorldClock, minutes: Int, restroom: Boolean) =
+            StopLog(clock.now() - minutes * min, clock.now(), null, null, restroom = restroom)
+
+        WorldClock(t0).let { c -> session(c).let { s -> s.onStop(stop(c, 5, restroom = true), c.now()); assertNull("화장실 정차", s.accepted) } }
+        WorldClock(t0).let { c -> session(c).let { s -> s.onStop(stop(c, 16, restroom = false), c.now()); assertNull("휴식", s.accepted) } }
+        WorldClock(t0).let { c ->
+            session(c).let { s ->
+                s.onStop(stop(c, 5, restroom = false), c.now())
+                assertEquals("문도 열지 않은 5분 정차는 그곳에 들른 것이 아니다 (엔진도 수락한 곳을 내리지 않는다)", "kex:oksan", s.accepted?.stopId)
+            }
+        }
+        WorldClock(t0).let { c ->
+            session(c).let { s ->
+                s.park(c, minutes = 5 * 60, stepMs = 60_000L)
+                c.advance(1_000)
+                assertTrue(s.onTick(c.now(), null) is TripEvent.NewTrip)
+                assertNull("새 여정", s.accepted)
+            }
+        }
+        WorldClock(t0).let { c ->
+            val store = InMemoryTripStore()
+            val s = open(c, store)
+            s.onAccepted("kex:oksan", c.now())
+            s.drive(c, 91)
+            assertNull("90분이 지난 수락은 맥박에 담지 않는다 (엔진도 90분 뒤 내린다)", store.stored!!.accepted)
+            c.advance(20_000)
+            assertNull(open(c, store).restoredAccepted)
+        }
+    }
+
+    @Test
+    fun aHeartbeatWhoseAcceptedStopIsFromTheFutureIsNotTrusted() {
+        val now = t0 + 5 * hour
+        val hb = heartbeat(savedAt = now - min).copy(accepted = AcceptedStop("kex:oksan", now + hour))
+        assertEquals(TripOrigin.NEW, TripSession.open(hb, emptyList(), now, WorldClock(now), null).origin)
+        val old = heartbeat(savedAt = now - min).copy(accepted = AcceptedStop("kex:oksan", now - 2 * hour))
+        val s = TripSession.open(old, emptyList(), now, WorldClock(now), null)
+        assertEquals(TripOrigin.RESUMED, s.origin)
+        assertNull("90분 넘은 수락은 이어받지 않는다", s.restoredAccepted)
+    }
+
     @Test
     fun aSessionStartedFromAnAnchorKeepsCountingFromIt() {
         val clock = WorldClock(t0)
