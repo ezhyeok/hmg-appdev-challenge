@@ -3,11 +3,12 @@
 **차에는 연료 경고등이 있는데, 사람에게는 없다.** 쉼표는 차에 탄 사람의 '주행가능시간'(다음 화장실·휴식이 필요해질 때까지 남은 시간)을 계산하고, 그 시간이 바닥나기 전에 갈 수 있는 곳을 먼저 알려 주는 Pleos Connect 앱입니다.
 
 - 화장실 게이지와 피로 게이지
-- 정체·화장실 공백 구간 앞에서 '마지막 화장실' 알림
+- 정체·화장실 공백 구간 앞에서 '마지막 화장실' 질문 (진입로 2~5km 전에 한 번, "응" 하면 내비 경유지)
 - 급해 모드: 진행 방향, 주차 가능, 지금 영업 중인 화장실
-- 탑승자 설정(아이, 영아, 임신부, 어르신, 과민성 방광, 과민성 장, 반려견)
+- 탑승자 설정(아이, 영아, 임신부, 어르신, 과민성 방광, 과민성 장, 반려견)과 평소 화장실 간격
 - 운전 스타일 변화와 연속 주행 시간으로 휴식 권유, 원하면 외기 전환
 - 기어 P와 문 열림으로 정차 자동 기록, 개인 학습은 기기 안에서만
+- 근거가 있는 문맥만 보정: 식사 정차 뒤, 밤에 잠든 아이 (근거 조사: `docs/research/need-covariates.md`)
 
 ## APK
 
@@ -28,7 +29,11 @@
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo holiday   # 귀성길 마지막 화장실 (7살 아이 동승, 옥산휴게소 뒤 1시간 정체)
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo fatigue   # 오후 졸음 (연속 주행 95분)
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo urgent    # 밤 11시 급해 모드 (영아 동승)
+adb shell am start -n dev.shimpyo.app/.MainActivity --es demo stop      # 휴게소 정차: 자동 기록과 피트스톱 계획
+adb shell am start -n dev.shimpyo.app/.MainActivity --es demo off       # 시연 끄기 (실제 신호로 돌아간다)
 ```
+
+시연은 기어 D + 차속이 있을 때 질문이 나옵니다(주차 중에는 주행 질문을 거둡니다). 시연 중의 정차·학습은 실제 기록에 남지 않습니다.
 
 차량 신호는 Virtual Console 시나리오로 함께 바꿉니다: `tools/vc/vc.sh up` 다음 `tools/vc/vc.sh play tools/vc/shimpyo-fatigue.vc` (Virtual Console HTTP API, 에뮬레이터 8088 포트).
 
@@ -45,9 +50,12 @@ adb shell am start -n dev.shimpyo.app/.MainActivity --es demo urgent    # 밤 11
 ## 빌드
 
 ```
-./gradlew :app:assembleRelease      # 서명 설정은 저장소에 없음 (keystore.properties)
-./gradlew -p rest-engine test       # 판단 엔진 단위 테스트 (JVM)
+./gradlew :app:assembleRelease                              # 서명 설정은 저장소에 없음 (keystore.properties)
+./gradlew -p rest-engine test                               # 판단 엔진 + 코치 계층 테스트 (JVM, 안드로이드 불필요)
+./gradlew :app:testDebugUnitTest :pleos-kit:testDebugUnitTest   # 화면 모델·저장소·SDK 규칙 테스트
 ```
+
+release 빌드에는 개발용 점검 도구(SDK 자가 점검 등)와 그 권한이 들어가지 않습니다(`app/src/debug`).
 
 ## 기획서 수치와 그림 재현
 
@@ -62,7 +70,8 @@ python3 -I tools/plan/figures.py         # 기획서 그림 → docs/plan/assets
 
 ## 구조
 
-- `rest-engine/` 판단 엔진 (순수 Kotlin, 단위 테스트) — 설명: `rest-engine/README.md`
+- `rest-engine/` 판단 엔진 (순수 Kotlin) — 설명: `rest-engine/README.md`
+- `rest-engine/coach/` 코치 계층 (순수 Kotlin): 엔진을 차에서 돌리는 실행 계층. 코치 액터, 내비 추적, 정차 후보, 질문 상태기계, 시연/실제 전환 — 설명: `docs/design/coach-layer/`
 - `pleos-kit/` Pleos SDK를 코루틴으로 감싼 공통 모듈 — 설명: `pleos-kit/README.md`
-- `app/` 앱 (`dev.shimpyo.app`) — 구조: `docs/ARCHITECTURE.md`, 사양: `docs/product/SPEC.md`
+- `app/` 안드로이드 껍데기 (`dev.shimpyo.app`): 화면(Compose), 포그라운드 서비스, 코치 계층의 포트를 SDK로 구현한 어댑터 — 구조: `docs/ARCHITECTURE.md`, 사양: `docs/product/SPEC.md`
 - 데이터 출처와 라이선스: `tools/data/README.md`
