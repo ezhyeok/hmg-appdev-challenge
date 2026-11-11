@@ -11,9 +11,9 @@ import dev.hmg.pleoskit.PleosForegroundService
 import dev.hmg.pleoskit.SttKit
 import dev.hmg.pleoskit.TtsKit
 import dev.hmg.pleoskit.VehicleKit
+import dev.shimpyo.app.BuildConfig
 import dev.shimpyo.app.ShimpyoApp
-import dev.shimpyo.app.devtools.KitSelfTest
-import dev.shimpyo.app.devtools.SdkVerify
+import dev.shimpyo.app.devtools.DevToolRunner
 import dev.shimpyo.app.voice.PleosLlmInterpreter
 import dev.shimpyo.app.voice.VoiceAgent
 import dev.shimpyo.coach.CandidateProvider
@@ -129,19 +129,30 @@ class CoachService : PleosForegroundService() {
         }
     }
 
-    /** 개발용: `--ez verify true`(설계 확인), `--ez selftest true [--ez route true]`(kit 점검), `--es demo <이름|off>`(시연) */
+    /**
+     * 인텐트 extras로 온 요청. 무엇을 받아들일지는 [DevHooks]가 정한다 (닫힘 검증 N1: 제출용 빌드도 점검을 돌렸다).
+     * - `--es demo <이름|off>`(시연 전환): 어느 빌드에서나. 화면 시연 패널과 같은 명령 하나만 보낸다.
+     * - `--ez verify true`(설계 확인), `--ez selftest true [--ez route true]`(kit 점검): debug 빌드에서만.
+     *   차를 움직이는 점검 코드는 release APK에 없다 (app/src/debug의 devtools).
+     */
     override fun onCommand(intent: Intent?) {
         if (intent == null) return
-        if (devJob?.isActive != true) {
-            if (intent.getBooleanExtra("verify", false)) {
-                devJob = serviceScope.launch { SdkVerify(this@CoachService, kits.vehicle, kits.navi, kits.location).run() }
-            } else if (intent.getBooleanExtra("selftest", false)) {
-                devJob = serviceScope.launch { KitSelfTest(kits.vehicle, kits.navi, kits.tts, kits.stt, kits.location).run(intent.getBooleanExtra("route", false)) }
-            }
+        val request = DevHooks.request(
+            verify = intent.getBooleanExtra(DevHooks.EXTRA_VERIFY, false),
+            selftest = intent.getBooleanExtra(DevHooks.EXTRA_SELFTEST, false),
+            route = intent.getBooleanExtra(DevHooks.EXTRA_ROUTE, false),
+            demo = intent.getStringExtra(DevHooks.EXTRA_DEMO),
+            debugBuild = BuildConfig.DEBUG,
+        )
+        if (request.refused) Log.w(TAG, "dev tool request ignored: not a debug build")
+        request.tool?.let { tool ->
+            if (devJob?.isActive == true) return@let
+            val devKits = DevToolRunner.Kits({ kits.vehicle }, { kits.navi }, { kits.tts }, { kits.stt }, { kits.location })
+            devJob = serviceScope.launch { DevToolRunner.run(tool, request.withRoute, this@CoachService, devKits) }
         }
-        intent.getStringExtra("demo")?.let {
-            Log.i(TAG, "demo requested: $it")
-            CoachStore.send(UiCommand.Demo(it))
+        request.demo?.let {
+            Log.i(TAG, "demo requested: ${it.scenario ?: "off"}")
+            CoachStore.send(UiCommand.Demo(it.scenario))
         }
     }
 
