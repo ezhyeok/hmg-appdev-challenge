@@ -12,8 +12,13 @@ for f in "$ROOT"/tools/*/*.ps1 "$ROOT"/tools/*/*/*.ps1; do
 done
 DEST="${LAPTOP_REPO:-repo}"
 case "$DEST" in repo|repo-[a-z0-9]*) ;; *) echo "LAPTOP_REPO는 repo 또는 repo-이름" >&2; exit 1;; esac
+# 폴더마다 tar·임시 폴더 이름을 따로 쓴다 (여러 작업 트리를 동시에 복사하면 같은 repo.tar를 서로 덮어썼다).
+# 풀어 놓은 뒤 robocopy /MIR로 맞춘다: 서버에서 지우거나 옮긴 파일이 노트북에 남아 옛 테스트가 계속 돌던 문제
+# (2026-11-12, 코치 계층으로 옮긴 NaviPollTest 등이 app/에 남았다). build·.gradle·local.properties는 그대로 둔다
 TMP="$(mktemp -d)"
-tar -C "$ROOT" --exclude=.git --exclude=./docs --exclude='*/build' --exclude='*/.gradle' --exclude=local.properties --exclude='./*.md' --exclude='./*.docx' -cf "$TMP/repo.tar" .
-scp -q "$TMP/repo.tar" hmg-laptop:hmg-appdev-challenge/repo.tar
-ssh hmg-laptop "Set-Location \$env:USERPROFILE\\hmg-appdev-challenge; New-Item -ItemType Directory -Force $DEST | Out-Null; tar -xf repo.tar -C $DEST; Remove-Item repo.tar; 'synced to $DEST'"
+TAR="sync-$DEST.tar"
+STAGE="sync-stage-$DEST"
+tar -C "$ROOT" --exclude=.git --exclude=./docs --exclude='*/build' --exclude='*/.gradle' --exclude=local.properties --exclude='./*.md' --exclude='./*.docx' -cf "$TMP/$TAR" .
+scp -q "$TMP/$TAR" "hmg-laptop:hmg-appdev-challenge/$TAR"
 rm -rf "$TMP"
+ssh hmg-laptop "Set-Location \$env:USERPROFILE\\hmg-appdev-challenge; if (Test-Path $STAGE) { Remove-Item -Recurse -Force $STAGE }; New-Item -ItemType Directory -Force $STAGE, $DEST | Out-Null; tar -xf $TAR -C $STAGE; Remove-Item $TAR; robocopy $STAGE $DEST /MIR /XD build .gradle .kotlin /XF local.properties /NFL /NDL /NJH /NJS /NP | Out-Null; \$rc = \$LASTEXITCODE; Remove-Item -Recurse -Force $STAGE; if (\$rc -ge 8) { 'robocopy failed: ' + \$rc; exit 1 }; 'synced to $DEST (mirrored)'"
