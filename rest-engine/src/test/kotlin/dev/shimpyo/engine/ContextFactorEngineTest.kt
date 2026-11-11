@@ -354,7 +354,7 @@ class ContextFactorEngineTest {
             t.destM = t.posM + 100 * km
             return (0 until 50).map { t.step() }
         }
-        // 식사 배수가 있으면 묶음 마감이 0.8 × 83 − 27 = 40분: 47분 공백을 못 넘긴다
+        // 식사 배수가 있으면 묶음 마감이 0.8 × 84.1 − 27 = 40분: 47분 공백을 못 넘긴다
         val withMeal = run(noLearning)
         val asked = assertNotNull(withMeal.firstNotNullOfOrNull { it.prompt }, "마지막 기회 질문")
         assertEquals(PromptKind.LAST_CHANCE, asked.kind)

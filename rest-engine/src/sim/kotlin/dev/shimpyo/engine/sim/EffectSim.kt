@@ -426,8 +426,12 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
                 futures[ci to policy] = pool.submit(Callable { Array(trips) { simulate(c, setups[ci][it], policy) } })
             }
         }
-        val results = futures.mapValues { it.value.get() }
-        pool.shutdown()
+        // 여정 하나라도 실패하면(위의 문맥 보정 점검 등) 남은 일을 버리고 끝낸다. 예전에는 스레드 풀이 남아 프로세스가 끝나지 않았다
+        val results = try {
+            futures.mapValues { it.value.get() }
+        } finally {
+            pool.shutdownNow()
+        }
 
         val out = ArrayList<Map<String, Any?>>()
         conditions.forEachIndexed { ci, c ->

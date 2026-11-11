@@ -76,6 +76,7 @@ internal class LocalClock(private val zone: ZoneId) {
  *
  * 구간과 창이 겹친 길이를 경계까지 정확히 센다. update가 1초마다 오든 몇 분 만에 오든 같은 값이 나와야
  * 창의 경계(20시, 07시)를 지나는 구간의 유효 시간이 맞는다 (RestroomNeedModel).
+ * 다음 경계까지는 시간대 오프셋이 그대로라고 본다. 서머타임이 바뀌는 날에는 그 구간 하나가 한 시간 어긋날 수 있다(한국에는 없다).
  */
 internal class DailyWindow(private val local: LocalClock, startHour: Int, endHour: Int) {
     private val start = Math.floorMod(startHour, 24) * HOUR_MS

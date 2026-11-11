@@ -475,7 +475,7 @@ class ContextFactorTest {
         val deadline = m.deadlineMin(at, 0.3)!!
         val anyNeed = 1.0 - m.tracked.fold(1.0) { s, t -> s * t.posterior.survival((27 + deadline) / 0.8) }
         approx(0.3, anyNeed, 1e-6, "마감에서 누군가 필요할 확률")
-        val fromReset = plain.deadlineMin(noon, 0.3, fromReset = true)!! // 어른 둘 약 83분
+        val fromReset = plain.deadlineMin(noon, 0.3, fromReset = true)!! // 어른 둘 84.1분
         approx(0.8 * fromReset - 27, deadline, 1e-4, "기준 조건 마감 × 0.8 − 경과")
         approx(0.8 * m.who("a1").posterior.quantile(0.3) - 27, m.soloDeadlineMin(at, 0.3)!!, 1e-9)
         assertTrue(deadline < m.soloDeadlineMin(at, 0.3)!!)
