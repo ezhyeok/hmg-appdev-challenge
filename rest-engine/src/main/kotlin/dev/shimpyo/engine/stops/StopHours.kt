@@ -11,7 +11,10 @@ import java.time.Month
  * - `05:00-24:20`: 자정을 넘겨 다음 날 00:20에 닫는다 → [Open] (300, 20). until < from이면 자정을 넘는 구간이다.
  * - `09:00-09:00`(open == close): 24시간. 이런 화장실은 경찰서·지구대·소방서·주유소라 교대 시각을 적은 것이다.
  *   주차장의 `00:00-00:00`은 운영 요일이 아닌 날에만 나와서 그날은 [Closed]다(요일 규칙이 먼저 적용된다).
+ *   `23:59-23:59`도 같다 (닫는 23:59를 먼저 하루 끝으로 바꾸면 23:59부터 1분만 여는 것으로 읽힌다. 주차장 11칸이 그랬다).
  * - `23:59`로 닫는 것은 그날 끝(24:00)으로 본다 (원천이 하루 끝을 23:59로 적는다).
+ * - 24시간 이상을 덮는 구간(`00:00-24:01`, `09:00-33:20`)은 24시간이다. 넘친 몇 분을 다음 날의 닫는 시각으로 읽으면
+ *   하루 1분만 여는 곳이 된다.
  */
 sealed interface DayHours {
     /** 그날 운영하지 않는다 (주차장의 운영 요일 밖) */
@@ -33,11 +36,16 @@ sealed interface DayHours {
     companion object {
         const val DAY = 24 * 60
 
-        /** 여는 시각·닫는 시각(분, 닫는 시각은 다음 날로 넘어가면 1440 이상)을 하루 구간으로. 하나라도 모르면 null */
+        /**
+         * 여는 시각·닫는 시각(분, 닫는 시각은 다음 날로 넘어가면 1440 이상)을 하루 구간으로. 하나라도 모르면 null.
+         * 여는 시각 == 닫는 시각이거나 구간이 24시간 이상이면 24시간(from == until)이다 (2026-11-12 닫힘 검증, 데이터 감사 #8의 남은 행)
+         */
         fun of(open: Int?, close: Int?): Open? {
             if (open == null || close == null || open < 0 || close < 0 || open > 2 * DAY || close > 2 * DAY) return null
-            val until = if (close == DAY - 1) 0 else close % DAY
-            return Open(open % DAY, until)
+            val from = open % DAY
+            val end = if (close == DAY - 1) DAY else close // 23:59 = 하루 끝
+            if (open == close || end - open >= DAY) return Open(from, from)
+            return Open(from, end % DAY)
         }
     }
 }
