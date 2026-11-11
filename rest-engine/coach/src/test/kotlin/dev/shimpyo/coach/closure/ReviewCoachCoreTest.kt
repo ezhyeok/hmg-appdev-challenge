@@ -56,7 +56,7 @@ class ReviewCoachCoreTest {
 
     @Test
     fun answeringNoNotUrgentDoesNotOpenUrgentMode() = runTest {
-        // OPEN: "아니 안 급해"는 거절인데, 같은 말이 IntentParser에서 UrgentRestroom("급해" 포함)으로 읽혀 Forward된다.
+        // 닫힘(IntentParser가 부정을 본다, voice.md 2장): "아니 안 급해"는 거절인데, 같은 말이 IntentParser에서 UrgentRestroom("급해" 포함)으로 읽혀 Forward됐다.
         // 코어가 급해 요청(음수 번호)을 열고, 엔진은 급해 질문("바로 안내할까요?")을 또 묻는다. 거절한 운전자에게 정반대로 움직인다.
         val rig = CoreRig(this, voice = replyOnce("아니 안 급해"))
         rig.drive(100f)
@@ -70,7 +70,7 @@ class ReviewCoachCoreTest {
 
     @Test
     fun askingHowLongToTheRestroomDoesNotMarkANeedOrTeachTheModel() = runTest {
-        // OPEN: 엔진 계약의 HowLong 예문 "화장실까지 얼마나 남았어?"가 IntentParser에서 OccupantNeed(null, RESTROOM)로 읽힌다
+        // 닫힘(IntentParser: 묻는 말은 필요가 아니다, voice.md 3장): 엔진 계약의 HowLong 예문 "화장실까지 얼마나 남았어?"가 OccupantNeed(null, RESTROOM)로 읽혔다
         // ('화장실'을 '얼마나 남'보다 먼저 본다, ReviewIntentParserTest). 코어는 그대로 엔진에 넘기고, 엔진은 운전자가 화장실이
         // 필요하다고 말한 것으로 본다: 게이지가 70분/OK에서 0분/NOW로 뛰고, 80분 간격이 관측으로 학습 파일에 저장되고,
         // 답 대신 "다음 화장실은 …에 들를까요?"를 묻는다.
