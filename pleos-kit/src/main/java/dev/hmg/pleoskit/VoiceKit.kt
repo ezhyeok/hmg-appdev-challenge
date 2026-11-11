@@ -38,8 +38,12 @@ interface SpeechOutput {
 interface SpeechInput {
     suspend fun connect()
 
-    /** 한 번 듣고 인식한 문장을 돌려준다. 아무 말도 없었으면 null */
-    suspend fun listen(timeoutMs: Long): String?
+    /**
+     * 한 번 듣고 인식한 문장을 돌려준다. 아무 말도 없었으면 null.
+     * [timeoutMs]는 마이크가 열린 뒤부터 듣는 시간이다. 마이크가 열리면 [onMicOpen]을 부른다 ('듣는 중' 표시는 이때 켠다):
+     * STT는 요청을 받고 몇 초 뒤에야 녹음을 시작할 수 있다.
+     */
+    suspend fun listen(timeoutMs: Long, onMicOpen: () -> Unit = {}): String?
 
     /** 듣는 중이면 멈춘다 */
     fun stop()
@@ -178,9 +182,12 @@ class SttKit(
     }
 
     /** 듣기 한 번이 받은 문장. 최종 결과(completed)가 오면 끝남 이벤트를 기다리지 않고 돌려준다 */
-    private class Heard {
+    private class Heard(micOpen: Boolean = false) {
         @Volatile var last: String? = null
         val completed = CompletableDeferred<Unit>()
+
+        /** 녹음을 시작할 준비가 됐다 (onReady). 마이크를 쓰지 않는 인식(PCM 입력)은 처음부터 열린 것으로 본다 */
+        val ready = CompletableDeferred<Unit>().apply { if (micOpen) complete(Unit) }
     }
 
     // 멈춘 듣기의 끝남 이벤트는 짧게만 기다린다: 에뮬레이터의 STT는 request 뒤 약 8초에 Ready를 주고, 그 전에 stop 하면
@@ -195,10 +202,18 @@ class SttKit(
     private var heard: Heard? = null
 
     private val listener = object : ResultListener {
-        override fun onReady() = Unit
-        override fun onStartedRecognition() = Unit
+        override fun onReady() {
+            heard?.ready?.complete(Unit)
+        }
+
+        override fun onStartedRecognition() {
+            // 말소리가 시작됐다: 준비 이벤트를 놓쳤어도 마이크는 열려 있다
+            heard?.ready?.complete(Unit)
+        }
+
         override fun onUpdated(stt: String, completed: Boolean) {
             val h = heard ?: return
+            h.ready.complete(Unit)
             if (stt.isNotBlank()) h.last = stt
             if (completed) h.completed.complete(Unit)
         }
@@ -239,10 +254,14 @@ class SttKit(
     }
 
     /**
-     * 차량 마이크로 한 번 듣고 인식한 문장을 돌려준다. [timeoutMs] 안에 인식이 끝나지 않으면 그때까지의
+     * 차량 마이크로 한 번 듣고 인식한 문장을 돌려준다. 마이크가 열린 뒤 [timeoutMs] 안에 인식이 끝나지 않으면 그때까지의
      * 중간 결과를 돌려준다(아무 말도 없었으면 null).
+     *
+     * 듣는 시간은 마이크가 열린 뒤(SDK의 onReady)부터 잰다 ([listenWindow]). 에뮬레이터의 STT 서비스는 request 뒤 약 5~8초에
+     * 녹음을 시작해서, request부터 재면 6초 듣기가 1초 남짓이었다(2026-11-12). [MIC_OPEN_WAIT_MS] 안에 열리지 않으면 null.
      */
-    override suspend fun listen(timeoutMs: Long): String? = recognize("SpeechToText.request", timeoutMs) { raw.request() }
+    override suspend fun listen(timeoutMs: Long, onMicOpen: () -> Unit): String? =
+        recognize("SpeechToText.request", timeoutMs, Heard(), onMicOpen) { raw.request() }
 
     suspend fun listen(): String? = listen(LISTEN_TIMEOUT_MS)
 
@@ -251,7 +270,7 @@ class SttKit(
      * 마이크가 없는 에뮬레이터에서 음성 대화 흐름을 시험할 때 쓴다.
      */
     suspend fun recognizePcm(pcm: ByteArray, timeoutMs: Long = 20_000): String? =
-        recognize("SpeechToText.sendAudio", timeoutMs) {
+        recognize("SpeechToText.sendAudio", timeoutMs, Heard(micOpen = true)) {
             raw.sendAudio(pcm)
             raw.completeAudioSend()
         }
@@ -262,13 +281,12 @@ class SttKit(
         data object TimedOut : Outcome
     }
 
-    private suspend fun recognize(name: String, timeoutMs: Long, start: () -> Unit): String? {
-        val h = Heard()
+    private suspend fun recognize(name: String, timeoutMs: Long, h: Heard, onMicOpen: () -> Unit = {}, start: () -> Unit): String? {
         val outcome = turns.run(send = {
             heard = h
             start()
         }) { turn ->
-            withTimeoutOrNull(timeoutMs) {
+            listenWindow(h.ready, MIC_OPEN_WAIT_MS, timeoutMs, onMicOpen) {
                 select<Outcome> {
                     turn.end.onAwait { Outcome.Finished(it) }
                     // 최종 결과가 왔다. 끝남 이벤트는 다음 요청을 보내기 전에 기다린다 (TurnRunner.settle)
@@ -277,6 +295,7 @@ class SttKit(
                 }
             } ?: Outcome.TimedOut
         }
+        if (outcome == Outcome.TimedOut && !h.ready.isCompleted) KitLog.w("$name: the microphone did not open in ${MIC_OPEN_WAIT_MS}ms")
         if (outcome is Outcome.Finished && outcome.end is End.Failed && h.last == null) {
             throw PleosSdkException(name, outcome.end.type.name)
         }
@@ -302,5 +321,8 @@ class SttKit(
         const val CONNECT_TIMEOUT_MS = 30_000L
         const val LISTEN_TIMEOUT_MS = 10_000L
         const val STOP_CONFIRM_MS = 400L
+
+        /** request 뒤 마이크가 열리기(onReady)를 기다리는 시간. 에뮬레이터에서 4.8~8초였다 */
+        const val MIC_OPEN_WAIT_MS = 12_000L
     }
 }

@@ -55,12 +55,17 @@ class VoiceAgentTest {
         var listens = 0
         var stops = 0
 
+        /** 요청 뒤 마이크가 열리기까지 (STT 서비스가 인식기를 준비하는 시간) */
+        var micOpensAfterMs = 0L
+
         override suspend fun connect() {
             connectError?.let { throw it }
         }
 
-        override suspend fun listen(timeoutMs: Long): String? {
+        override suspend fun listen(timeoutMs: Long, onMicOpen: () -> Unit): String? {
             listens++
+            delay(micOpensAfterMs)
+            onMicOpen()
             delay(500)
             return answer
         }
@@ -93,6 +98,22 @@ class VoiceAgentTest {
         assertEquals(1, stt.listens)
         assertEquals(listOf(VoiceState.IDLE, VoiceState.SPEAKING, VoiceState.IDLE, VoiceState.LISTENING, VoiceState.IDLE), ui.voices)
         assertEquals("응", ui.state.lastHeard)
+    }
+
+    @Test
+    fun theListeningIndicatorComesOnWhenTheMicOpens() = runTest {
+        // 회귀(2026-11-12 에뮬레이터): STT는 요청 뒤 4.8초에 녹음을 시작했는데 '듣는 중'은 요청하자마자 켜졌다.
+        // 표시를 보고 한 대답은 마이크가 열리기 전이라 들리지 않았다
+        agent.connect()
+        stt.micOpensAfterMs = 5_000
+        val asking = async { agent.ask("쉬어 갈까요?", listenMs = 6_000) }
+        advanceTimeBy(1_000 + 4_000) // 말하기 1초 + 마이크를 기다리는 4초
+        assertEquals(1, stt.listens)
+        assertEquals("마이크가 열리기 전에는 '듣는 중'이 아니다", VoiceState.IDLE, ui.state.voice)
+        advanceTimeBy(1_100)
+        assertEquals(VoiceState.LISTENING, ui.state.voice)
+        assertEquals("응", asking.await())
+        assertEquals(VoiceState.IDLE, ui.state.voice)
     }
 
     @Test

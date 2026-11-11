@@ -81,11 +81,15 @@ class VoiceAgent(private val tts: SpeechOutput, private val stt: SpeechInput, pr
         }
     }
 
+    /**
+     * [listenMs]는 마이크가 열린 뒤부터 듣는 시간이다 (kit이 잰다). '듣는 중' 표시도 마이크가 열렸을 때 켠다: STT는 요청 뒤
+     * 몇 초가 지나야 녹음을 시작해서(에뮬레이터 5~8초), 요청하자마자 켜면 표시를 보고 한 대답이 들리지 않는다.
+     */
     private suspend fun listenLocked(listenMs: Long): String? {
         if (!sttReady) return null
-        ui.update { copy(voice = VoiceState.LISTENING) }
         return try {
-            stt.listen(timeoutMs = listenMs)?.also { heard -> ui.update { copy(lastHeard = heard) } }
+            stt.listen(timeoutMs = listenMs, onMicOpen = { ui.update { copy(voice = VoiceState.LISTENING) } })
+                ?.also { heard -> ui.update { copy(lastHeard = heard) } }
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {

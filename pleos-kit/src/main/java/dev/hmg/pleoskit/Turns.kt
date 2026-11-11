@@ -3,6 +3,9 @@ package dev.hmg.pleoskit
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.CoroutineDispatcher
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -163,5 +166,41 @@ internal class TurnRunner<E : Any>(
     companion object {
         /** 멈춘 요청의 끝남 이벤트를 기다리는 시간 */
         const val STOP_CONFIRM_MS = 1_500L
+    }
+}
+
+/**
+ * 듣기 한 번의 시간 규칙: 듣는 시간([openMs])은 마이크가 열린 뒤([opened])부터 잰다.
+ *
+ * STT 서비스는 request를 받고 인식기를 준비한 뒤에야 녹음을 시작한다(onReady). 에뮬레이터에서는 그 준비가 약 5~8초였다
+ * (2026-11-12). 듣는 시간을 request부터 재면 준비 시간이 듣는 시간을 먹어서, 6초 듣기가 실제로는 1초 남짓이거나 0초였다.
+ *
+ * - [opened]가 [openWaitMs] 안에 오지 않으면 null (마이크가 열리지 않았다. 듣는 시간만큼 더 기다리지 않는다)
+ * - 열리면 [onOpen]을 부르고 [finish]를 [openMs]까지 기다린다. 그 안에 끝나지 않으면 null
+ * - [finish]가 열리기 전에 끝나면(오류, 멈춤) 곧바로 그 값. [finish]의 예외는 그대로 던진다
+ *
+ * @param finish 듣기가 끝나기를 기다린다 (끝남 이벤트, 최종 결과, 멈춤 요청). 시간 제한 없이 기다리게 쓴다
+ */
+internal suspend fun <T : Any> listenWindow(
+    opened: Deferred<Unit>,
+    openWaitMs: Long,
+    openMs: Long,
+    onOpen: () -> Unit = {},
+    finish: suspend () -> T,
+): T? = coroutineScope {
+    val done = async { finish() }
+    try {
+        val isOpen: Boolean = withTimeoutOrNull(openWaitMs) {
+            select<Boolean> {
+                // 끝난 것을 먼저 본다: 열림과 끝이 함께 와 있으면 끝난 값을 잃지 않는다
+                done.onAwait { false }
+                opened.onAwait { true }
+            }
+        } ?: return@coroutineScope null
+        if (!isOpen) return@coroutineScope done.await()
+        onOpen()
+        withTimeoutOrNull(openMs) { done.await() }
+    } finally {
+        done.cancel()
     }
 }
