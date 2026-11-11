@@ -4,6 +4,10 @@
 코드: `rest-engine/coach/src/main/kotlin/dev/shimpyo/coach/` 의 `DemoRun.kt`, `DemoDirector.kt`(호환용), `CoachWorld.kt`, `TripSession.kt`, `WorldSwitch.kt`.
 모두 안드로이드 없는 순수 Kotlin이고 JVM 테스트로 검증한다.
 
+2026-11-12 닫힘 검증 뒤 바뀐 것: 저장된 정차는 마지막 맥박이 본 만큼만 센다(4.1, 4.3), 되돌린 정차가 끝났다는 판정을 엔진에도
+알린다(`restoredParkEnded`, 4.3), 들르기로 한 곳을 맥박에 적는다(4.4), 건강 정보 동의를 거두면 모든 세계에서 건강 유형 탑승자를 뺀다
+(`dropHealthOccupants`, 6장). 코어 쪽 이음매는 `core.md` 8·10장.
+
 ## 1. 왜 필요한가
 
 예전 `CoachService`는 시연과 실제를 이렇게 다뤘다 (구조 리뷰 2.3c·2.3d·2.4, 서비스 감사 D3·D4·D8·D10·D12·D15, UI 감사 #15).
@@ -32,14 +36,14 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 | `DemoScenario` | 시나리오 정의 (불변) | `NAMES`, `byName(name)` |
 | `DemoRun` | 시작된 시연 한 번 (불변, `CoachClock`) | `start(name, wallNow, elapsed, elapsedNow?, zone?)`, `now()`, `travelledM()`, `position(): Fix`, `apply(input)`, `candidates(list)`, `alongM(pt)`, `anchor` |
 | `DemoDirector` | 옛 서비스용 호환 겉면. 불변 `DemoRun` 참조 하나만 바꾼다 | 예전 API 그대로 (`start`, `now`, `position`, `apply`, `candidates`, `active`, `name`, `oracleEnabled`) |
-| `CoachWorld` | 세계별 정책과 변환 | `name`, `clock`, `candidatePolicy`, `oracleEnabled`, `persistsLearning`, `persistsHistory`, `persistsTrip`, `usesNaviLocationFallback`, `occupants(settings)`, `position(real)`, `apply(input)`, `candidates(live)`, `profile(settings, anchor)`, `newEngine(factory, settings, memory, anchor, park?)`; `Demo.withOccupants(list)` |
+| `CoachWorld` | 세계별 정책과 변환 | `name`, `clock`, `candidatePolicy`, `oracleEnabled`, `persistsLearning`, `persistsHistory`, `persistsTrip`, `usesNaviLocationFallback`, `engineConfig`, `occupants(settings)`, `position(real)`, `apply(input)`, `candidates(live)`, `profile(settings, anchor)`, `newEngine(factory, settings, memory, anchor, park?)`, `endPark(engine, endedAt)`; `Demo.withOccupants(list)`, `Demo.occupantsEdited` |
 | `TripAnchor` | 여정 기준점 | `tripStart`, `lastRestroomAt`(탑승자별), `restroomFallbackAt`(나중에 탄 사람), `continuousDrivingMin`, `lastRestroomFor(occupants)`, `withRestroomAt(at)` |
 | `ParkState` | 지금 정차 (`since`, `doorSeen`) | prompt 트랙 정차 감지기와 합칠 최소 타입 |
-| `TripHeartbeat` / `TripStorePort` | 여정 맥박과 그 저장소 (새 포트) | `load()`(시작 때 IO에서), `save(h)`(막지 않음) |
+| `TripHeartbeat` / `TripStorePort` | 여정 맥박과 그 저장소 (새 포트). 맥박에는 정차(`park`)와 들르기로 한 곳(`accepted: AcceptedStop(stopId, at)?`)도 담긴다 | `load()`(시작 때 IO에서), `save(h)`(막지 않음) |
 | `TripRules` | 임계값 | 4절 |
 | `StopHistory` | 저장된 정차 기록 읽기 규칙 | `sanitize(history, now)`, `restroomAt(log)`, `lastRestroomAt(history)` |
-| `TripSession` | 한 세계의 여정 | `open(saved, history, now, elapsed, store)`, `started(anchor, now, elapsed)`, `onTick(now, park): TripEvent?`, `onStop(log, now)`, `flush(now)`, `anchor`, `park`, `restoredPark`, `origin` |
-| `WorldSwitch` | 세계 전환 | `open(heartbeat, memory, history)`, `enterDemo(name)`, `exitDemo()`, `setOccupants(list)`, `profileChanged()`, `clearLearning()`, `onTick(now, park)`, `onStop(log, now)`, `memoryToSave()`, `flush()`, `active`, `real` |
+| `TripSession` | 한 세계의 여정 | `open(saved, history, now, elapsed, store)`, `started(anchor, now, elapsed)`, `onTick(now, park): TripEvent?`, `onStop(log, now)`, `onAccepted(stopId, now)`, `flush(now)`, `anchor`, `park`, `restoredPark`, `accepted`, `restoredAccepted`, `origin` |
+| `WorldSwitch` | 세계 전환 | `open(heartbeat, memory, history)`, `enterDemo(name)`, `exitDemo()`, `setOccupants(list)`, `dropHealthOccupants()`, `profileChanged()`, `clearLearning()`, `onTick(now, park)`, `restoredParkEnded(endedAt)`, `onAccepted(stopId)`, `onStop(log, now)`, `memoryToSave()`, `flush()`, `active`, `real` |
 | `WorldChange` | 전환 결과 | `active`, `kind`(NONE/ENGINE/WORLD), `saveMemory: MemorySave?`, `restorePark: ParkState?` |
 
 ## 3. 세계별 정책
@@ -74,6 +78,7 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 | 맥박 간격 `heartbeatEveryMs` | 1분 (경과 시간) | 재시작은 수 초~1분이다. 정차 사건은 기다리지 않고 바로 저장한다 |
 | 미래 허용 `futureToleranceMs` | 1분 | NTP 보정으로 저장 시각이 조금 앞설 수 있다 |
 | 정차 기록 상한 `maxStopMs` | 24시간 | 그보다 긴 기록은 시계가 섞인 것으로 본다 |
+| 들르기로 한 곳 유지 `acceptedHoldMs` | 90분 | 엔진이 들르기로 한 곳을 두는 시간과 같다. 그보다 오래된 수락은 맥박에 싣지도 이어받지도 않는다 |
 
 ### 4.1 시작 (`TripSession.open`)
 
@@ -81,13 +86,21 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 |---|---|---|
 | 맥박 없음 (첫 실행) | 새 여정. 마지막 화장실 = max(최근 정차 기록, 지금−60분) | `firstStartIsANewTripWithTheRestroomUnknownSixtyMinutesBack` |
 | 맥박 < 15분, 달리던 중 (sticky 재시작) | 이어 감(RESUMED). 출발 시각·화장실 유지. 연속 주행 = 저장값 + 공백. 재시작 동안에도 차는 달렸다 | `stickyRestartMidDriveResumesTheTripAndItsFatigue`, `aStickyRestartMidDriveKeepsTheFatigueGauge` |
-| 맥박 < 15분, 정차 중 | 이어 감. 정차(`restoredPark`)를 감지기와 엔진에 되돌린다 | `restartWhileParkedRestoresTheParkAndItsDoor`, `aRestartWhileParkedResumesTheStopInTheEngine` |
-| 맥박 ≥ 15분 (헤드유닛 꺼짐), 정차 < 4시간 | 같은 여정(RESUMED_AFTER_BREAK). 저장된 정차가 없으면 마지막 맥박부터 정차로 본다. 정차 ≥ 15분이므로 휴식(연속 0). 화장실은 모름 규칙(지금−60분과 저장값 중 늦은 쪽) | `headUnitOffForABreakKeepsTheTripCountsARestAndForgetsTheRestroom` |
+| 맥박 < 15분, 정차 중 | 이어 감. 정차(`restoredPark`)를 감지기와 엔진에 되돌린다. 화장실·휴식은 **마지막 맥박이 본 만큼만** 센다 (아래) | `restartWhileParkedRestoresTheParkAndItsDoor`, `aSavedParkIsCreditedOnlyAsFarAsTheLastHeartbeatSawIt`, `aRestartWhileParkedResumesTheStopInTheEngine` |
+| 맥박 ≥ 15분 (헤드유닛 꺼짐), 정차 < 4시간 | 같은 여정(RESUMED_AFTER_BREAK). 저장된 정차가 없으면 마지막 맥박부터 정차로 본다. 15분 넘게 꺼져 있었으므로 휴식(연속 0). 화장실은 모름 규칙(지금−60분과 저장값 중 늦은 쪽). 들르기로 한 곳은 잊는다 | `headUnitOffForABreakKeepsTheTripCountsARestAndForgetsTheRestroom` |
 | 정차가 4시간 이상 (꺼져 있던 시간 포함) | 새 여정 | `aLongParkStartsANewTrip` |
 | 자정을 넘겨 재시작(< 15분) | 같은 여정. 어제 출발 시각이 남아 기상 추정이 맞다 | `dayRollover` (a) |
 | 어젯밤 맥박으로 아침 시작 | 새 여정 | `dayRollover` (c) |
 | 맥박을 믿을 수 없음 (저장 시각이 미래, 출발·화장실·정차 시각이 저장 뒤, NaN, 다른 판) | 새 여정 | `anUntrustworthyHeartbeatStartsANewTrip` |
 | 정차 기록에 미래 시각·시계가 섞인 기록·하루 넘는 기록 | 버린다. 마지막 화장실이 되지 않는다 | `futureDatedOrBrokenHistoryNeverBecomesTheLastRestroom` |
+
+저장된 정차를 얼마나 선 것으로 세나 (서비스 닫힘 검증 N3): 맥박의 정차는 `since`부터 `savedAt`까지만 본 것이다. 예전에는 `open`이
+'지금까지 서 있었다'로 세서, 12분 전에 세우고 맥박 2분 뒤 떠난 차가 다시 켜지면 화장실 정차(3분 + 문)로 게이지가 찼는데 정차
+기록에는 그 정차가 없었다(감지기는 2분 정차로 봤다). 이제 `open`은 `savedAt − since`만 센다: 그때 이미 3분 + 문이었으면 화장실,
+이미 15분이었으면 휴식이다. 차가 지금도 P인지는 첫 틱이 안다. P면 `onTick`이 그 사이를 이어 세고(정차 시작이 그대로라 3분·15분이
+그 틱에 잡힌다), 떠나 있으면 정차는 마지막 맥박 때 끝난 것이다. 정차 감지기(prompt.md 4.2)·엔진(4.3)과 같은 규칙이다.
+15분 넘게 꺼져 있던 경우의 추정(휴식, 화장실 모름, 4시간이면 새 여정)은 그대로다: 그때는 본 것이 없어서 헤드유닛이 시동과 함께
+꺼진다는 사실로 추정한다.
 
 서비스 감사 스케치(TripResumeTest)와 다른 점이 하나 있다. 스케치는 15분 넘게 지난 맥박을 모두 새 여정으로 봤다. 여기서는 30분 점심처럼 시동을 끈 휴식도 같은 여정으로 이어 간다. 그래야 새벽에 출발한 운전자의 기상 추정(출발 시각 기준)이 점심 뒤에도 남는다. 대신 휴식과 화장실 모름을 반영한다.
 
@@ -108,13 +121,48 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 
 연속 주행을 엔진 밖에서 따로 세는 이유: 엔진이 이 값을 내놓지 않는다. 엔진을 새로 만들 때(재시작, 기록 지우기) 휴식 리듬을 채울 값(`TripProfile.continuousDrivingMin`)이 필요하다. 그래서 규칙을 엔진 FatigueModel과 똑같이 맞췄다.
 
-### 4.3 재시작 때 정차 이어 가기 (D12)
+### 4.3 재시작 때 정차 이어 가기 (D12, 닫힘 검증 N2·N3)
 
-맥박에 정차(`ParkState`)를 저장한다. 다시 시작할 때 두 곳에 되돌린다.
-1. 정차 감지기(prompt 트랙 StopDetector): `WorldChange.restorePark`로 받는다. 출발하면 원래 시작 시각으로 정차를 기록한다.
-2. 엔진: `CoachWorld.newEngine(..., park)`가 정차 시작 시각에 P 입력을 한 번 넣는다. 그러면 엔진 StopTracker가 원래 시작부터 정차를 센다. 재시작 전 문 열림과 정차 시간이 이어져 화장실 정차(3분)와 휴식(15분)이 제때 잡힌다. P에서는 엔진이 질문을 내지 않으므로 이 입력의 출력은 버린다. 공개 엔진 API(update)만 쓴다.
+맥박에 정차(`ParkState`)를 저장한다. 다시 시작할 때 세 곳이 같은 정차를 같은 규칙으로 본다.
+1. 정차 감지기(StopDetector): `WorldChange.restorePark`로 받는다. 차가 아직 P인지 떠났는지는 **기어를 아는 첫 틱**에 정한다
+   (prompt.md 4.2). P면 원래 시작 시각부터 이어 세고, 떠나 있으면 마지막 맥박 때 끝난 정차로 확정한다.
+2. 엔진: `CoachWorld.newEngine(..., park)`가 정차 시작 시각에 P 입력을 한 번 넣는다. 그러면 엔진 StopTracker가 원래 시작부터 정차를
+   센다. P에서는 엔진이 질문을 내지 않으므로 이 입력의 출력은 버린다. 공개 엔진 API(update)만 쓴다.
+3. 여정(TripSession): 4.1대로 마지막 맥박이 본 만큼만 세고, 그 뒤는 `onTick`이 감지기의 지금 정차로 이어 센다.
+
+감지기가 판정하는 동안(최대 10초) 코어는 여정 틱과 엔진 update를 하지 않는다. 판정이 '떠났다'면 코어가 `WorldSwitch.restoredParkEnded
+(endedAt)`을 그 뒤 첫 엔진 update 전에 부르고, `CoachWorld.endPark(engine, endedAt)`가 엔진에도 그 시각에 떠난 것으로 알린다:
+`endedAt − 1`의 P 입력으로 정차를 거기까지 세고, `endedAt`의 D 입력으로 끝낸다. D 입력에는 제동 표본을 실어 엔진이 이 입력으로
+질문을 내지 않게 한다(조용한 때 규칙: 아무도 보지 못할 질문에 시간당 횟수를 쓰지 않는다). 이것이 없으면 엔진은 다음 update까지 서
+있던 것으로 세어, 보지 못한 30분을 화장실 정차·휴식으로 잡았다(게이지는 찼는데 기록은 10분 정차). 시연을 끌 때 옆에 둔 실제
+엔진도 같은 길이다: 시연 동안 떠났으면 시연을 켠 실제 시각에 끝난 것으로 알린다.
 
 정차 중 이미 화장실 문턱을 넘었으면 기준점이 정차 시작 + 3분이다. 그래서 엔진이 다시 잡아도 간격이 0이라 학습에 중복으로 들어가지 않는다.
+
+테스트: `CoachWorldTest.anEnginePrimedWithAParkCountsTheStopFromItsStart`, `anEngineToldTheParkEndedCountsItOnlyUntilThen`,
+`tellingTheEngineTheParkEndedDoesNotSpendAQuestionNobodySaw`, 감지기·엔진·여정을 함께 보는 `StopRulesCrossCheckTest.aRestoredStopAfterARestart`,
+코어까지 조립한 `CoachCoreTripTest`의 재시작 다섯 가지.
+
+### 4.4 들르기로 한 곳 (닫힘 검증 N7)
+
+운전자가 고른 정차를 내비에 넣는 데 성공하면 코어가 `WorldSwitch.onAccepted(stopId)`를 부르고, 여정이 `AcceptedStop(stopId, at)`을
+바로 맥박에 저장한다(실제 세계만). 주행 중 재시작(15분 안)으로 이어받으면 `TripSession.restoredAccepted`가 그것이고, 코어는 그 정차가
+후보에 보이는 틱에 새 엔진에 `noteAccepted`로 다시 알린다(core.md 6장). 예전에는 새 엔진이 방금 수락한 곳을 몰라 같은 곳을 다시 물었다.
+
+| 끝나는 때 | 왜 |
+|---|---|
+| 화장실 정차나 15분 넘는 정차가 기록됨 (`onStop`), 정차 중 그 문턱을 넘음 (`onTick`) | 그곳에 섰거나 다른 곳에서 해결했다. 엔진도 같은 때 내린다 |
+| 새 여정 | 지난 여정의 약속이다 |
+| 90분(`acceptedHoldMs`) | 엔진이 들르기로 한 곳을 두는 시간 |
+| 15분 넘게 꺼져 있다가 재시작 | 그사이 섰던 것이다 |
+| 새로 고른 곳 | 한 번에 한 곳이다 |
+
+저장하는 것은 정차 id와 시각뿐이다(좌표는 저장하지 않는다). 거절한 질문은 저장하지 않는다: 재시작 뒤 같은 곳의 질문을 대신 거절해
+버리면 운전자가 다시 물은 것까지 삼킨다. 맥박의 `accepted.at`이 저장 시각보다 뒤면 그 맥박은 믿지 않는다.
+
+테스트: `TripSessionTest.theAcceptedStopIsSavedAtOnceAndResumedOnlyWithoutABreak`, `theAcceptedStopEndsWithARestroomStopARestANewTripOrNinetyMinutes`,
+`aHeartbeatWhoseAcceptedStopIsFromTheFutureIsNotTrusted`, `CoachCoreGoToTest.aConfirmedStopIsWrittenToTheTripHeartbeatAndAFailedOneIsNot`,
+`CoachCoreTripTest.aStopAcceptedBeforeAMidDriveRestartIsNotedToTheNewEngineOnce`, `nothingIsNotedAfterABreakOrWhenTheStopNeverShowsUpAgain`.
 
 ## 5. 시계 (어떤 상태가 어떤 시계를 쓰나)
 
@@ -147,10 +195,16 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 2. 같은 엔진을 되돌리고, 시연 중 바뀐 설정을 넘긴다 (같은 tripStart라 이어진다)
 3. 실제 여정의 마지막 정차를 `restorePark`로 → `WORLD`
 
-코어가 `WorldChange.kind`에 따라 할 일
-- `WORLD`: 질문 상태 초기화(`PromptMachine` Reset, 음성 중지), 후보 초기화 후 `world.position(real)`로 바로 다시 만들기(시연 위치는 시작 즉시 정해진다), 정차 감지기를 `restorePark`로 되돌리기, `TripEstimator.enabled = world.oracleEnabled` + `clear()`, 화면 `demo`·`occupants`·`history` 갱신, `saveMemory`가 있으면 IO에서 저장
-- `ENGINE`: 질문 상태 초기화
-- 세대(`generation`)가 다른 질문·결과는 버린다
+코어가 `WorldChange.kind`에 따라 할 일 (부품마다 무엇을 지우는지는 core.md 8장의 표)
+- `WORLD`: 질문 상태 초기화(`PromptMachine` Reset, 음성 작업 모두 취소), 급해 요청·고정, 계획, 자는 중 표시, 이어받던 수락을 버림, 후보 초기화 후 `world.position(real)`로 바로 다시 만들기(시연 위치는 시작 즉시 정해진다), 정차 감지기를 `restorePark`로 되돌리기(끌 때는 시연을 켠 실제 시각을 '마지막으로 본 때'로), `TripEstimator.enabled = world.oracleEnabled` + `clear()`, 화면 `demo`·`occupants`·`history` 갱신, `saveMemory`가 있으면 IO에서 저장
+- `ENGINE` (새 여정, 기록 지우기): 질문 상태 초기화, 음성 작업 취소, 계획을 새 엔진으로 다시, 급해 요청이 살아 있으면 새 엔진에 다시 알림
+- 세대(`generation`)가 다른 질문·음성 결과·들르기 결과의 엔진 알림은 버린다
+
+`dropHealthOccupants()` (UI 닫힘 검증 N3): 건강 정보 동의는 세계와 무관한 설정 하나인데 탑승자는 세계마다 따로다. 시연 중에 동의를
+끄면 옆에 둔 실제 세계의 임신부·과민성 방광·과민성 장 탑승자가 시연을 끈 뒤 동의 없이 돌아와 게이지의 기준이 됐다. 동의가 꺼진 것을
+코어가 보면(시작할 때와 매 틱, `Crew.enforceConsent`) 설정에 저장된 실제 탑승자와, 시연에서 사용자가 고친 탑승자(`Demo.occupantsEdited`)
+에서 건강 유형을 빼고 두 엔진에 프로필을 다시 넘긴다. 시나리오가 정한 시연 탑승자는 사용자의 정보가 아니라 그대로 둔다.
+테스트: `WorldSwitchTest.withdrawingHealthConsentRemovesHealthOccupantsFromEveryWorld`, `scenarioOccupantsOfADemoAreNotTheUsersHealthData`.
 
 ## 7. 코어가 CoachService/CoachCore에서 바꿀 것 (병합 체크리스트)
 
@@ -162,8 +216,9 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 - 명령: `Demo(name)` → `enterDemo(name)`, `SetOccupants` → `setOccupants`, `ProfileChanged` → `profileChanged()`, `ClearRecords` → `memory.clear()` + `history.clear()` + `worlds.clearLearning()`
 - 위치 보충: `active.world.usesNaviLocationFallback`. 후보: `active.world.candidatePolicy`
 - 종료: `worlds.flush()`, `memoryToSave()` 저장
-- 앱 어댑터 `TripStore : TripStorePort`: `filesDir/trip.json`, AtomicFile + org.json. 필드: `savedAt, tripStart, lastRestroomAt{id:ms}, restroomFallbackAt, continuousDrivingMin, park{since, doorSeen}|null, version`. `save`는 IO 코루틴으로 넘기고(conflate) 막지 않는다
+- 앱 어댑터 `TripStore : TripStorePort`: `filesDir/trip.json`, AtomicFile + org.json. 필드: `savedAt, tripStart, lastRestroomAt{id:ms}, restroomFallbackAt, continuousDrivingMin, park{since, doorSeen}|null, accepted{stopId, at}|null, version`. `accepted`는 2026-11-12에 더했다(없는 파일은 null로 읽는다. 앱의 `Stores.kt`가 읽고 써야 재시작을 넘는다). `save`는 IO 코루틴으로 넘기고(conflate) 막지 않는다
 - prompt 트랙 병합: `ParkState`를 정차 감지기의 정차 타입과 합친다. 감지기에 `restore(ParkState?)`와 지금 정차 조회가 필요하다
+- (2026-11-12) 감지기가 되돌린 정차를 판정하는 동안(`recorder.restorePending`) `worlds.onTick`과 엔진 update를 건너뛰고, `recorder.takeRestoredEnd()`가 시각을 주면 `worlds.restoredParkEnded(그 시각)`. 들르기 성공에 `worlds.onAccepted(stopId)`. 틱마다 동의가 꺼졌는지 보고 `worlds.dropHealthOccupants()`
 
 ## 8. 닫은 결함
 
@@ -181,6 +236,9 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 | 서비스 D10, 구조 B7 | 시연을 끄면 실제 엔진을 파일에서 연속 0으로 재생성 | 실제 엔진을 옆에 두고 되돌림 | `aDemoKeepsTheRealEngineAsideAndExitRestoresIt` |
 | 서비스 D15, 구조 Q9 | 시연 전 실제 학습 미저장 | `MemorySave` 효과 | `enteringADemoSavesTheRealLearningAndTripFirst` |
 | (새로 찾음) | 시연 중 기록 지우기 뒤 시연을 끄면 옆에 있던 실제 엔진이 지운 학습을 자동 저장으로 되살림 | 옆의 실제 엔진도 교체 | `clearingLearningDuringADemoAlsoClearsTheKeptRealEngine` |
+| 닫힘 검증 SV-N2·N3 | 재시작 뒤 정차가 신호 순서에 따라 다르고, 여정·엔진은 보지 못한 시간을 선 것으로 세어 게이지와 기록이 어긋남 | 마지막 맥박이 본 만큼만(4.1), 판정을 기어를 알 때까지 미루고 엔진에도 알림(4.3) | `aSavedParkIsCreditedOnlyAsFarAsTheLastHeartbeatSawIt`, `anEngineToldTheParkEndedCountsItOnlyUntilThen`, `StopRulesCrossCheckTest.aRestoredStopAfterARestart` |
+| 닫힘 검증 SV-N7 | 주행 중 재시작 뒤 방금 수락한 곳을 다시 물음 | 맥박의 `accepted` (4.4) | `theAcceptedStopIsSavedAtOnceAndResumedOnlyWithoutABreak` 외 |
+| 닫힘 검증 UI-N3 | 시연 중 동의를 거둬도 실제 세계의 건강 유형 탑승자가 남음 | `dropHealthOccupants` (6장) | `withdrawingHealthConsentRemovesHealthOccupantsFromEveryWorld` |
 | 구조 D11·D6 일부 | 전환이 엔진·시계·후보를 다른 순간에 바꿈 | `ActiveWorld` 통째 교체 + `WorldChange.kind` (코어가 틱 사이에 적용) | `rapidDemoTogglesEndOnTheOriginalRealWorld` |
 
 ## 9. 동작이 같다는 확인
@@ -195,14 +253,15 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 - 시연 세계도 같은 규칙이라, 정차 시연을 가상 4시간(10배속에서 실제 24분) 넘게 세워 두면 새 여정이 된다. 무해하다.
 - 시연 중에는 실제 여정이 멈춘다(맥박 저장도 멈춘다). 시연이 15분 넘게 이어지다 앱이 재시작하면 실제 여정은 "휴식 뒤 재개"가 된다. 실제 차에서는 서 있을 때만 시연한다.
 - 예전 버그로 과거 시각에 저장된 시연 정차(미래가 아닌 것)는 실제 기록과 구별할 수 없다. 기록 지우기로 정리한다.
-- 지켜보지 못한 정차(헤드유닛 꺼짐)는 감지기에 "마지막 맥박부터 정차"로 되돌린다. 출발하면 그 시각부터 정차로 기록된다(정확도는 맥박 간격 1분 안).
+- 지켜보지 못한 정차(헤드유닛 꺼짐)는 감지기에 "마지막 맥박부터 정차"로 되돌린다. 다시 켜졌을 때 P면 그 시각부터의 정차로 기록되고(정확도는 맥박 간격 1분 안), 이미 달리고 있으면 길이 0인 정차라 기록되지 않는다(여정은 15분 넘게 꺼져 있었다는 것으로 휴식을 센다).
+- 급해 목록에서 고른 곳은 대개 경로 후보가 아니라서, 주행 중 재시작 뒤에는 후보에 다시 보이지 않아 이어받지 못한다(2분 기다리고 잊는다).
 
 ## 11. 테스트
 
 `./gradlew -q -p rest-engine :coach:test --tests 'dev.shimpyo.coach.*'` (서버)
-- `DemoRunTest` 10: 서울 날짜 주입, 배속, 정차 시연 연속 시각, NTP 점프, 이름, 재시작, 기준점, 시작 위치, 호환 겉면 2
-- `CoachWorldTest` 8: Real 항등, 정책 2, 시연 출력·위치 덧씌우기, 탑승자 출처, 기준점 프로필, 학습 상태, 정차 프라이밍
-- `TripSessionTest` 15: 4.1·4.2 표
-- `WorldSwitchTest` 18: 열기, 시연 들고 나기, 학습·맥박 저장, 시연 간 전환, 끄기·모르는 이름, 빠른 전환, 탑승자·설정(시연/실제), 기록 지우기(시연/실제), 새 여정, 학습 저장 정책, 정차 복원, 재시작(주행/정차)
+- `DemoRunTest` 11: 서울 날짜 주입, 배속, 정차 시연 연속 시각, NTP 점프, 이름, 재시작, 기준점, 시작 위치, 호환 겉면 2
+- `CoachWorldTest` 10: Real 항등, 정책 2, 시연 출력·위치 덧씌우기, 탑승자 출처, 기준점 프로필, 학습 상태, 정차 프라이밍, 정차가 끝났다고 알리기 2
+- `TripSessionTest` 19: 4.1·4.2 표, 마지막 맥박이 본 만큼, 들르기로 한 곳 3 (4.4)
+- `WorldSwitchTest` 20: 동의 철회 2, 열기, 시연 들고 나기, 학습·맥박 저장, 시연 간 전환, 끄기·모르는 이름, 빠른 전환, 탑승자·설정(시연/실제), 기록 지우기(시연/실제), 새 여정, 학습 저장 정책, 정차 복원, 재시작(주행/정차)
 - `DemoScenarioTest` 3: 귀성길, 오후 졸음, 정차 시연
 - 가짜: `fakes/WorldFakes.kt` (`WorldClock`, `FakeSettings`, `InMemoryMemory`, `InMemoryTripStore`, `seededEngines`)
