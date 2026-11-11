@@ -4,10 +4,15 @@ import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 import java.io.ByteArrayOutputStream
+import java.io.IOException
+import java.nio.BufferUnderflowException
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
 import java.time.Instant
 import java.time.ZoneId
+
+/** stops.bin이 깨졌거나 이 코드와 형식이 다르다. 앱(StopAssets.loadTable)은 이것을 잡고 후보 없이 동작한다 */
+class StopTableFormatException(message: String, cause: Throwable? = null) : IOException(message, cause)
 
 /**
  * 정차 후보 6만여 곳을 열(column) 단위 배열로 들고 있는 표. 앱은 assets/data/stops.bin을 [decode]로 한 번에 읽고,
@@ -16,9 +21,20 @@ import java.time.ZoneId
  * 예전에는 JSON 13MB를 행마다 Map → StopCandidate로 만들어 에뮬레이터에서 18초 동안 GC가 돌았다(2026-11-11).
  * 같은 변환 규칙([StopRows])으로 만든 이진 표라서 결과는 같다(StopTableTest가 JSON 전 행과 비교한다).
  *
- * stops.bin 형식 (리틀엔디언, 버전 1): "SHPT", version:int, n:int, kind:byte[n], lat:double[n], lon:double[n],
- * flags:int[n], walk:double[n](NaN = 없음), lane:short[n](MIN = 없음), hoursFlags:byte[n], open:short[n], close:short[n]
- * (-1 = 없음), idOffset:int[n+1], nameOffset:int[n+1], blobLength:int, blob:UTF-8
+ * [decode]는 모든 값을 검사한다(개수, 종류, 좌표, 방위, 오프셋, 색인). 그래서 읽힌 표의 어느 행을 꺼내도 예외가 나지 않는다
+ * (예전에는 종류 바이트 하나가 깨지면 질의 중에 예외가 나서 후보 갱신 루프가 끝났다. 데이터 감사 #9).
+ *
+ * stops.bin 형식 (리틀엔디언, 버전 2):
+ * ```
+ * "SHPT", version:int = 2, n:int, roadCount:int, scheduleCount:int
+ * kind:byte[n], lat:double[n], lon:double[n], flags:int[n], walk:double[n] (NaN = 없음)
+ * lane:short[n] (MIN = 없음), road:short[n] (-1 = 고속도로 시설 아님), schedule:short[n] (-1 = 영업 시간 모름)
+ * idOffset:int[n+1], nameOffset:int[n+1], roadOffset:int[roadCount+1], blobLength:int, blob:UTF-8 (id들, 이름들, 도로명들)
+ * scheduleFlags:byte[scheduleCount] (24시간 여부: 0 모름, 1 아님, 2 24시간)
+ * scheduleTimes:short[scheduleCount * 6] (평일·토요일·공휴일의 여는·닫는 분, -1 모름, -2 휴무)
+ * ```
+ * 버전 1(도로·요일별 시간 없음)은 읽지 않는다: 앱은 자기 APK의 stops.bin만 읽으므로 옛 파일이 올 일이 없고,
+ * 오면 [StopTableFormatException]으로 분명히 실패한다.
  */
 class StopTable private constructor(
     val size: Int,
@@ -28,12 +44,13 @@ class StopTable private constructor(
     private val flags: IntArray,
     private val walks: DoubleArray,
     private val lanes: ShortArray,
-    private val hoursFlags: ByteArray,
-    private val opens: ShortArray,
-    private val closes: ShortArray,
+    private val roads: ShortArray,
+    private val schedules: ShortArray,
     private val idOffsets: IntArray,
     private val nameOffsets: IntArray,
     private val blob: ByteArray,
+    private val roadNames: Array<String>,
+    private val scheduleTable: Array<StopHours>,
 ) {
     fun kind(i: Int): StopKind = KINDS[kinds[i].toInt()]
     fun lat(i: Int): Double = lats[i]
@@ -44,22 +61,22 @@ class StopTable private constructor(
     /** 그 휴게소·졸음쉼터로 들어가는 차로의 진행 방위(도). 양방향 시설이나 모르면 null */
     fun laneHeading(i: Int): Int? = lanes[i].takeIf { it != NO_LANE }?.toInt()
 
-    fun hours(i: Int): StopHours? {
-        val h = hoursFlags[i].toInt()
-        if (h and HOURS_PRESENT == 0) return null
-        val h24 = when ((h shr 1) and 3) { 1 -> false; 2 -> true; else -> null }
-        return StopHours(h24, opens[i].takeIf { it >= 0 }?.toInt(), closes[i].takeIf { it >= 0 }?.toInt())
-    }
+    /** 고속도로 시설이 있는 고속도로의 번호(표 안의 색인, 0..roadCount-1). 고속도로 시설이 아니면 -1 */
+    fun roadId(i: Int): Int = roads[i].toInt()
 
-    /** 지금 열려 있는지. 24시간이면 true, 시간 범위가 있으면 계산, 모르면 null */
+    /** 고속도로 이름 (OSM 고속도로명, 예: 경부고속도로). 고속도로 시설이 아니면 null */
+    fun road(i: Int): String? = roadId(i).takeIf { it >= 0 }?.let { roadNames[it] }
+
+    val roadCount: Int get() = roadNames.size
+    fun roadName(roadId: Int): String = roadNames[roadId]
+
+    fun hours(i: Int): StopHours? = schedules[i].toInt().takeIf { it >= 0 }?.let { scheduleTable[it] }
+
+    /** 지금 열려 있는지. 24시간이면 true, 그날(평일·토요일·일요일/공휴일) 시간 범위가 있으면 계산, 모르면 null */
     fun openNow(i: Int, nowMs: Long, zone: ZoneId = SEOUL): Boolean? {
         val h = hours(i) ?: return null
-        if (h.h24 == true) return true
-        val open = h.open ?: return null
-        val close = h.close ?: return null
-        val t = Instant.ofEpochMilli(nowMs).atZone(zone).toLocalTime()
-        val m = t.hour * 60 + t.minute
-        return if (open <= close) m in open until close else m >= open || m < close
+        val t = Instant.ofEpochMilli(nowMs).atZone(zone)
+        return h.openAt(KoreanCalendar.dayType(t.toLocalDate()), t.hour * 60 + t.minute)
     }
 
     /** i번째 행의 정차 후보 (질의 결과로 나갈 때만 만든다) */
@@ -94,9 +111,17 @@ class StopTable private constructor(
         private val KINDS = StopKind.entries.toTypedArray()
         private val SEOUL: ZoneId = ZoneId.of("Asia/Seoul")
         private const val MAGIC = 0x54504853 // "SHPT" (리틀엔디언)
-        private const val VERSION = 1
+        const val VERSION = 2
         private const val NO_LANE: Short = Short.MIN_VALUE
-        private const val HOURS_PRESENT = 1
+
+        // 머리말 상한: 깨진 개수로 몇 GB를 잡다가 OutOfMemoryError가 나지 않게 (파일 크기와도 맞춰 본다)
+        private const val MAX_ROWS = 2_000_000
+        private const val MAX_INDEX = Short.MAX_VALUE.toInt()
+        private const val HEADER_BYTES = 20
+        private const val ROW_BYTES = 1 + 8 + 8 + 4 + 8 + 2 + 2 + 2 + 4 + 4
+        private const val SCHEDULE_BYTES = 1 + 6 * 2
+        private const val T_UNKNOWN: Short = -1
+        private const val T_CLOSED: Short = -2
 
         private const val F_RESTROOM = 1 shl 0
         private const val F_DIAPER = 1 shl 1
@@ -118,41 +143,51 @@ class StopTable private constructor(
         /** 변환된 행들을 stops.bin 바이트로 */
         fun encode(records: List<StopRecord>): ByteArray {
             val n = records.size
+            val roadIndex = LinkedHashMap<String, Int>()
+            val scheduleIndex = LinkedHashMap<StopHours, Int>()
+            for (r in records) {
+                r.road?.let { roadIndex.getOrPut(it) { roadIndex.size } }
+                r.hours?.let { scheduleIndex.getOrPut(it) { scheduleIndex.size } }
+            }
+            require(roadIndex.size <= MAX_INDEX && scheduleIndex.size <= MAX_INDEX) { "too many roads/schedules" }
+
             val strings = ByteArrayOutputStream(n * 32)
             val idOff = IntArray(n + 1)
             val nameOff = IntArray(n + 1)
-            val idBytes = ArrayList<ByteArray>(n)
-            val nameBytes = ArrayList<ByteArray>(n)
-            for (r in records) {
-                idBytes += r.candidate.id.toByteArray(Charsets.UTF_8)
-                nameBytes += r.candidate.name.toByteArray(Charsets.UTF_8)
-            }
+            val roadOff = IntArray(roadIndex.size + 1)
             var pos = 0
-            for (i in 0 until n) { idOff[i] = pos; strings.write(idBytes[i]); pos += idBytes[i].size }
+            fun put(s: String): Int { val b = s.toByteArray(Charsets.UTF_8); strings.write(b); pos += b.size; return pos }
+            for (i in 0 until n) { idOff[i] = pos; put(records[i].candidate.id) }
             idOff[n] = pos
-            for (i in 0 until n) { nameOff[i] = pos; strings.write(nameBytes[i]); pos += nameBytes[i].size }
+            for (i in 0 until n) { nameOff[i] = pos; put(records[i].candidate.name) }
             nameOff[n] = pos
+            roadIndex.keys.forEachIndexed { k, name -> roadOff[k] = pos; put(name) }
+            roadOff[roadIndex.size] = pos
             val blob = strings.toByteArray()
 
-            val size = 12 + n * (1 + 8 + 8 + 4 + 8 + 2 + 1 + 2 + 2) + 4 * (n + 1) * 2 + 4 + blob.size
+            val size = HEADER_BYTES + n * ROW_BYTES + 8 + 4 * (roadIndex.size + 1) + 4 + blob.size + scheduleIndex.size * SCHEDULE_BYTES
             val b = ByteBuffer.allocate(size).order(ByteOrder.LITTLE_ENDIAN)
-            b.putInt(MAGIC).putInt(VERSION).putInt(n)
+            b.putInt(MAGIC).putInt(VERSION).putInt(n).putInt(roadIndex.size).putInt(scheduleIndex.size)
             for (r in records) b.put(r.candidate.kind.ordinal.toByte())
             for (r in records) b.putDouble(r.candidate.lat)
             for (r in records) b.putDouble(r.candidate.lon)
             for (r in records) b.putInt(flagsOf(r.candidate))
             for (r in records) b.putDouble(r.candidate.walkDistanceM ?: Double.NaN)
-            for (r in records) b.putShort(r.laneHeading?.also { require(it in -32767..32767) }?.toShort() ?: NO_LANE)
-            for (r in records) {
-                val h = r.hours
-                val tri = when (h?.h24) { null -> 0; false -> 1; true -> 2 }
-                b.put(if (h == null) 0 else (HOURS_PRESENT or (tri shl 1)).toByte())
-            }
-            for (r in records) b.putShort((r.hours?.open ?: -1).toShort())
-            for (r in records) b.putShort((r.hours?.close ?: -1).toShort())
+            for (r in records) b.putShort(r.laneHeading?.also { require(it in 0..360) { "lane heading $it" } }?.toShort() ?: NO_LANE)
+            for (r in records) b.putShort((r.road?.let(roadIndex::getValue) ?: -1).toShort())
+            for (r in records) b.putShort((r.hours?.let(scheduleIndex::getValue) ?: -1).toShort())
             for (v in idOff) b.putInt(v)
             for (v in nameOff) b.putInt(v)
+            for (v in roadOff) b.putInt(v)
             b.putInt(blob.size).put(blob)
+            for (h in scheduleIndex.keys) b.put(when (h.h24) { null -> 0; false -> 1; true -> 2 }.toByte())
+            for (h in scheduleIndex.keys) for (d in listOf(h.weekday, h.saturday, h.holiday)) {
+                when (d) {
+                    null -> b.putShort(T_UNKNOWN).putShort(T_UNKNOWN)
+                    DayHours.Closed -> b.putShort(T_CLOSED).putShort(T_CLOSED)
+                    is DayHours.Open -> b.putShort(d.from.toShort()).putShort(d.until.toShort())
+                }
+            }
             check(!b.hasRemaining()) { "size mismatch" }
             return b.array()
         }
@@ -160,28 +195,82 @@ class StopTable private constructor(
         /** stops.bin 바이트 → 표. 배열을 통째로 읽으므로 행 수에 비례하는 짧은 시간만 든다 */
         fun decode(bytes: ByteArray): StopTable = decode(ByteBuffer.wrap(bytes))
 
-        /** 메모리 매핑한 파일(앱은 압축하지 않은 asset을 매핑한다)에서 바로 읽는다. 배열로 복사하므로 다 읽은 뒤 매핑은 놓아도 된다 */
-        fun decode(buffer: ByteBuffer): StopTable {
-            val b = buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN)
-            require(b.int == MAGIC) { "not a stops.bin" }
-            val version = b.int
-            require(version == VERSION) { "stops.bin version $version, expected $VERSION (rest-engine buildStopTable로 다시 만들 것)" }
-            val n = b.int
-            val kinds = ByteArray(n).also { b.get(it) }
-            val lats = DoubleArray(n).also { b.asDoubleBuffer().get(it); b.position(b.position() + 8 * n) }
-            val lons = DoubleArray(n).also { b.asDoubleBuffer().get(it); b.position(b.position() + 8 * n) }
-            val flags = IntArray(n).also { b.asIntBuffer().get(it); b.position(b.position() + 4 * n) }
-            val walks = DoubleArray(n).also { b.asDoubleBuffer().get(it); b.position(b.position() + 8 * n) }
-            val lanes = ShortArray(n).also { b.asShortBuffer().get(it); b.position(b.position() + 2 * n) }
-            val hoursFlags = ByteArray(n).also { b.get(it) }
-            val opens = ShortArray(n).also { b.asShortBuffer().get(it); b.position(b.position() + 2 * n) }
-            val closes = ShortArray(n).also { b.asShortBuffer().get(it); b.position(b.position() + 2 * n) }
-            val idOff = IntArray(n + 1).also { b.asIntBuffer().get(it); b.position(b.position() + 4 * (n + 1)) }
-            val nameOff = IntArray(n + 1).also { b.asIntBuffer().get(it); b.position(b.position() + 4 * (n + 1)) }
-            val blob = ByteArray(b.int).also { b.get(it) }
-            require(!b.hasRemaining()) { "trailing bytes in stops.bin" }
-            return StopTable(n, kinds, lats, lons, flags, walks, lanes, hoursFlags, opens, closes, idOff, nameOff, blob)
+        /**
+         * 메모리 매핑한 파일(앱은 압축하지 않은 asset을 매핑한다)에서 바로 읽는다. 배열로 복사하므로 다 읽은 뒤 매핑은 놓아도 된다.
+         * 형식이 다르거나 값이 하나라도 범위를 벗어나면 [StopTableFormatException].
+         */
+        fun decode(buffer: ByteBuffer): StopTable = try {
+            decodeChecked(buffer.duplicate().order(ByteOrder.LITTLE_ENDIAN))
+        } catch (e: BufferUnderflowException) {
+            throw StopTableFormatException("stops.bin is truncated", e)
         }
+
+        private fun decodeChecked(b: ByteBuffer): StopTable {
+            fun bad(msg: String): Nothing = throw StopTableFormatException("stops.bin: $msg")
+            if (b.remaining() < 8 || b.int != MAGIC) bad("not a stops.bin")
+            val version = b.int
+            if (version != VERSION) bad("version $version, expected $VERSION (rest-engine buildStopTable로 다시 만들 것)")
+            if (b.remaining() < HEADER_BYTES - 8) bad("header is truncated")
+            val n = b.int
+            val roadCount = b.int
+            val scheduleCount = b.int
+            if (n !in 0..MAX_ROWS) bad("row count $n")
+            if (roadCount !in 0..MAX_INDEX || scheduleCount !in 0..MAX_INDEX) bad("road/schedule count $roadCount/$scheduleCount")
+            val fixed = n.toLong() * ROW_BYTES + 8 + 4L * (roadCount + 1) + 4 + scheduleCount.toLong() * SCHEDULE_BYTES
+            if (fixed > b.remaining()) bad("$n rows do not fit in ${b.remaining()} bytes")
+
+            val kinds = ByteArray(n).also { b.get(it) }
+            for (i in 0 until n) if (kinds[i] !in 0 until KINDS.size) bad("row $i: kind ${kinds[i]}")
+            val lats = doubles(b, n)
+            val lons = doubles(b, n)
+            for (i in 0 until n) {
+                if (!(lats[i] in -90.0..90.0 && lons[i] in -180.0..180.0)) bad("row $i: position ${lats[i]},${lons[i]}")
+            }
+            val flags = IntArray(n).also { b.asIntBuffer().get(it); b.position(b.position() + 4 * n) }
+            val walks = doubles(b, n)
+            for (i in 0 until n) if (!(walks[i].isNaN() || walks[i] in 0.0..1e6)) bad("row $i: walk ${walks[i]}")
+            val lanes = shorts(b, n)
+            for (i in 0 until n) if (lanes[i] != NO_LANE && lanes[i] !in 0..360) bad("row $i: lane ${lanes[i]}")
+            val roads = shorts(b, n)
+            for (i in 0 until n) if (roads[i] !in -1 until roadCount) bad("row $i: road ${roads[i]}")
+            val schedules = shorts(b, n)
+            for (i in 0 until n) if (schedules[i] !in -1 until scheduleCount) bad("row $i: schedule ${schedules[i]}")
+            val idOff = ints(b, n + 1)
+            val nameOff = ints(b, n + 1)
+            val roadOff = ints(b, roadCount + 1)
+            val blobLength = b.int
+            if (blobLength < 0 || blobLength.toLong() + scheduleCount.toLong() * SCHEDULE_BYTES != b.remaining().toLong()) {
+                bad("blob length $blobLength does not match the file")
+            }
+            // id들, 이름들, 도로명들이 blob 안에서 끊김 없이 이어져야 한다
+            if (idOff[0] != 0 || idOff[n] != nameOff[0] || nameOff[n] != roadOff[0] || roadOff[roadCount] != blobLength) bad("string offsets")
+            for (off in arrayOf(idOff, nameOff, roadOff)) for (k in 1 until off.size) if (off[k] < off[k - 1]) bad("string offsets go backwards")
+            val blob = ByteArray(blobLength).also { b.get(it) }
+            val roadNames = Array(roadCount) { String(blob, roadOff[it], roadOff[it + 1] - roadOff[it], Charsets.UTF_8) }
+
+            val scheduleFlags = ByteArray(scheduleCount).also { b.get(it) }
+            val times = shorts(b, scheduleCount * 6)
+            val scheduleTable = Array(scheduleCount) { s ->
+                val h24 = when (scheduleFlags[s].toInt()) { 0 -> null; 1 -> false; 2 -> true; else -> bad("schedule $s: flags ${scheduleFlags[s]}") }
+                fun day(k: Int): DayHours? {
+                    val from = times[s * 6 + k * 2]
+                    val until = times[s * 6 + k * 2 + 1]
+                    return when {
+                        from == T_UNKNOWN && until == T_UNKNOWN -> null
+                        from == T_CLOSED && until == T_CLOSED -> DayHours.Closed
+                        from in 0 until DayHours.DAY && until in 0 until DayHours.DAY -> DayHours.Open(from.toInt(), until.toInt())
+                        else -> bad("schedule $s: times $from-$until")
+                    }
+                }
+                StopHours(h24, day(0), day(1), day(2))
+            }
+            if (b.hasRemaining()) bad("trailing bytes")
+            return StopTable(n, kinds, lats, lons, flags, walks, lanes, roads, schedules, idOff, nameOff, blob, roadNames, scheduleTable)
+        }
+
+        private fun doubles(b: ByteBuffer, n: Int) = DoubleArray(n).also { b.asDoubleBuffer().get(it); b.position(b.position() + 8 * n) }
+        private fun shorts(b: ByteBuffer, n: Int) = ShortArray(n).also { b.asShortBuffer().get(it); b.position(b.position() + 2 * n) }
+        private fun ints(b: ByteBuffer, n: Int) = IntArray(n).also { b.asIntBuffer().get(it); b.position(b.position() + 4 * n) }
 
         private fun flagsOf(c: StopCandidate): Int {
             val f = c.facilities

@@ -3,7 +3,6 @@ package dev.shimpyo.engine.stops
 import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
-import java.time.LocalTime
 
 /** 앱에 넣는 정차 후보 데이터 파일 (tools/data/README.md). 이 순서대로 테이블에 들어간다 */
 enum class StopFile(val fileName: String) {
@@ -13,11 +12,11 @@ enum class StopFile(val fileName: String) {
     PARKABLES("parkables.json"),
 }
 
-/** 영업 시간 (급해 모드에서 '지금 열려 있는지' 판단). 분 단위, 모르면 null */
-data class StopHours(val h24: Boolean?, val open: Int?, val close: Int?)
-
-/** 데이터 한 행을 변환한 결과. 차로 방위와 영업 시간은 후보 밖에 따로 둔다 */
-data class StopRecord(val candidate: StopCandidate, val laneHeading: Int?, val hours: StopHours?)
+/**
+ * 데이터 한 행을 변환한 결과. 차로 방위·고속도로·영업 시간은 후보 밖에 따로 둔다.
+ * [road]: 휴게소·졸음쉼터가 있는 고속도로 이름(데이터의 `hw`, OSM 고속도로명). 같은 길 위 시설을 먼저 고르는 데 쓴다
+ */
+data class StopRecord(val candidate: StopCandidate, val laneHeading: Int?, val hours: StopHours?, val road: String? = null)
 
 /**
  * 데이터 행(평평한 키-값, 키가 없으면 값이 없거나 모르는 것, 불리언은 1/0) → 정차 후보.
@@ -50,7 +49,8 @@ object StopRows {
             parkable = true,
             openNow = true,
         )
-        return StopRecord(candidate, o.num("hdg")?.toInt(), StopHours(o.bool("h24") ?: true, minutes(o.str("open")), minutes(o.str("close"))))
+        val day = DayHours.of(minutes(o.str("open")), minutes(o.str("close")))
+        return StopRecord(candidate, o.num("hdg")?.toInt(), StopHours(o.bool("h24") ?: true, day), road = o.str("hw"))
     }
 
     private fun shelter(o: Map<String, Any?>): StopRecord? {
@@ -63,13 +63,13 @@ object StopRows {
             parkable = true,
             openNow = true,
         )
-        return StopRecord(candidate, o.num("hdg")?.toInt(), hours = null)
+        return StopRecord(candidate, o.num("hdg")?.toInt(), hours = null, road = o.str("hw"))
     }
 
     private fun restroom(o: Map<String, Any?>): StopRecord? {
         val c = base(o) ?: return null
-        val oh = o.str("oh")
-        val hours = StopHours(o.bool("h24"), oh?.substringBefore('-')?.let(::minutes), oh?.substringAfter('-', "")?.let(::minutes))
+        // 원천에 시간대가 하나뿐이라 요일 구분 없이 쓴다
+        val hours = StopHours(o.bool("h24"), range(o.str("oh")))
         val candidate = StopCandidate(
             id = c.first, name = c.second, kind = StopKind.PUBLIC_RESTROOM, lat = c.third.first, lon = c.third.second,
             facilities = Facilities(
@@ -93,7 +93,15 @@ object StopRows {
         if (!fuel) {
             // 주차장은 300m 안에 화장실이 있을 때만 '세우고 걸어가는' 후보가 된다
             val wcd = o.num("wcd") ?: return null
-            val hours = StopHours(o.bool("h24"), o.str("oh")?.substringBefore('-')?.let(::minutes), o.str("oh")?.substringAfter('-', "")?.let(::minutes))
+            // 운영요일(days: w 평일, s 토요일, h 공휴일)에 없는 날은 휴무, 있는 날은 그날 시간(oh 평일, ohs 토요일, ohh 공휴일).
+            // days가 없으면 oh 하나를 매일 쓴다 (24시간 주차장은 h24=1이고 시간이 없다)
+            val days = o.str("days")
+            fun day(code: Char, key: String): DayHours? = when {
+                days == null -> range(o.str("oh"))
+                code in days -> range(o.str(key))
+                else -> DayHours.Closed
+            }
+            val hours = StopHours(o.bool("h24"), day('w', "oh"), day('s', "ohs"), day('h', "ohh"))
             val candidate = StopCandidate(
                 id = c.first, name = c.second, kind = StopKind.PUBLIC_PARKING, lat = c.third.first, lon = c.third.second,
                 facilities = Facilities(restroom = true, open24h = o.bool("h24") == true),
@@ -109,7 +117,7 @@ object StopRows {
             facilities = Facilities(restroom = true, fuel = true, open24h = o.bool("h24") == true),
             parkable = true,
         )
-        return StopRecord(candidate, laneHeading = null, hours = StopHours(o.bool("h24"), null, null))
+        return StopRecord(candidate, laneHeading = null, hours = StopHours(o.bool("h24"), null))
     }
 
     // ------------------------------------------------------------ 도우미
@@ -123,11 +131,22 @@ object StopRows {
         return Triple(id, o.str("n") ?: "이름 없는 화장실", lat to lon)
     }
 
+    /** "HH:MM" → 분. 자정을 넘긴 닫는 시각("24:20")은 1440 이상으로 읽는다 (하루 구간으로는 [DayHours.of]가 접는다) */
     internal fun minutes(s: String?): Int? {
-        if (s.isNullOrBlank() || !s.contains(':')) return null
-        return runCatching { LocalTime.parse(s.trim().padStart(5, '0')).let { it.hour * 60 + it.minute } }
-            .getOrElse { if (s.trim() == "24:00") 24 * 60 else null }
+        val m = HHMM.matchEntire(s?.trim() ?: return null) ?: return null
+        val h = m.groupValues[1].toInt()
+        val min = m.groupValues[2].toInt()
+        return if (h < 48 && min < 60) h * 60 + min else null
     }
+
+    /** "HH:MM-HH:MM" → 하루 구간. 형식이 다르거나 한쪽이 없으면 null */
+    internal fun range(s: String?): DayHours? {
+        val parts = s?.split('-') ?: return null
+        if (parts.size != 2) return null
+        return DayHours.of(minutes(parts[0]), minutes(parts[1]))
+    }
+
+    private val HHMM = Regex("(\\d{1,2}):(\\d{2})(?::\\d{2}(?:\\.\\d+)?)?")
 
     private fun Map<String, Any?>.str(k: String) = this[k] as? String
     private fun Map<String, Any?>.num(k: String) = (this[k] as? Number)?.toDouble()
