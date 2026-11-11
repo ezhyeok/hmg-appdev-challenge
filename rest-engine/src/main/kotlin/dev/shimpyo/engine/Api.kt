@@ -67,7 +67,12 @@ data class StopCandidate(
     val openNow: Boolean? = null,
     /** 차에서 그곳까지 경로 거리. 모르면 null → 엔진이 직선거리로 추정 */
     val routeDistanceM: Double? = null,
-    /** 차에서 그곳까지 주행 시간. 모르면 null */
+    /**
+     * 차에서 그곳까지 주행 시간. 내비가 그 후보까지 교통을 반영해 계산한 값(requestTrip의 ETA)만 넣고, 모르면 null.
+     * 값이 있으면 엔진이 그대로 믿으므로 평균 속도로 만든 값을 넣으면 앞 정체를 무시하게 된다(2026-11-11 시연에서
+     * 정체 뒤 죽암휴게소가 63분이 아닌 16분으로 계산돼 마지막 기회가 사라졌다). null이면 엔진이 정체 구간으로 계산하고,
+     * 추천(Recommendation.stop)에는 엔진이 계산한 값을 채워 준다.
+     */
     val etaS: Double? = null,
     /** 진행 방향에서 유턴 없이 갈 수 있는지. 모르면 null */
     val directionOk: Boolean? = null,

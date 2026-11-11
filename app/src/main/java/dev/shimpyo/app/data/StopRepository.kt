@@ -16,13 +16,27 @@ class StopRepository(private val context: Context) {
     private val loadLock = Mutex()
     @Volatile private var index: GridIndex? = null
 
+    @Volatile private var complete = false
+
     val count: Int get() = index?.size ?: 0
 
-    suspend fun ensureLoaded(): Int = loadLock.withLock {
-        index?.let { return it.size }
-        val all = withContext(Dispatchers.IO) { StopAssets.loadAll(context) }
-        index = GridIndex(all)
-        all.size
+    /** 공중화장실·주유소·주차장까지 모두 읽었는지 (급해 모드 후보가 다 갖춰졌는지) */
+    val fullyLoaded: Boolean get() = complete
+
+    /**
+     * 두 단계로 읽는다. 고속도로 휴게소·졸음쉼터(500여 곳)를 먼저 색인에 올리고 [onHighwayReady]를 부른 뒤
+     * 공중화장실·주유소·주차장(6만여 곳)을 읽어 색인을 바꾼다. 한 번에 다 읽으면 에뮬레이터에서 1분 넘게
+     * 후보가 비어 '앞쪽에 화장실 정보가 없어요'가 보였다(2026-11-11).
+     */
+    suspend fun ensureLoaded(onHighwayReady: suspend (Int) -> Unit = {}): Int = loadLock.withLock {
+        if (complete) return index!!.size
+        val highway = withContext(Dispatchers.IO) { StopAssets.loadHighway(context) }
+        index = GridIndex(highway)
+        onHighwayReady(highway.size)
+        val local = withContext(Dispatchers.IO) { StopAssets.loadLocal(context) }
+        index = GridIndex(highway + local)
+        complete = true
+        highway.size + local.size
     }
 
     /**

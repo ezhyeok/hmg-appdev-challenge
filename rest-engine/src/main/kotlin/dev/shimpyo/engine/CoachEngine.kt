@@ -237,13 +237,13 @@ class CoachEngine(
         if (accepted == null && moving) {
             if (lastChance != null) {
                 promptCands += PromptPolicy.Candidate(
-                    PromptKind.LAST_CHANCE, lastChanceSpeech(lastChance), lastChance.opp.stop, lastChance.opp.distanceM,
+                    PromptKind.LAST_CHANCE, lastChanceSpeech(lastChance), lastChance.opp.withEta(), lastChance.opp.distanceM,
                     restroom.level, purposes = purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx),
                 )
             } else if (nowRestroom != null) {
                 promptCands += PromptPolicy.Candidate(
                     PromptKind.LAST_CHANCE, texts.restroomNowSuggestion(nowRestroom.stop.name, nowRestroom.distanceM),
-                    nowRestroom.stop, nowRestroom.distanceM, Level.NOW,
+                    nowRestroom.withEta(), nowRestroom.distanceM, Level.NOW,
                     purposes = purposesFor(nowRestroom.stop, Purpose.RESTROOM, ctx),
                 )
             }
@@ -257,7 +257,7 @@ class CoachEngine(
                     else -> texts.restSuggestionNoStop(drove)
                 }
                 promptCands += PromptPolicy.Candidate(
-                    PromptKind.REST_SUGGESTION, speech, t?.stop, t?.distanceM, fatigueGauge.level,
+                    PromptKind.REST_SUGGESTION, speech, t?.withEta(), t?.distanceM, fatigueGauge.level,
                     purposes = t?.let { purposesFor(it.stop, Purpose.REST, ctx) } ?: setOf(Purpose.REST),
                 )
             }
@@ -485,6 +485,9 @@ class CoachEngine(
         if (mono - a.atMono > ACCEPT_HOLD_MS) accepted = null
     }
 
+    /** 후보에 내비 ETA가 없으면 엔진이 정체를 반영해 계산한 도착 시간을 채운다 (화면의 '몇 분 뒤'가 정체를 반영하게) */
+    private fun Opportunity.withEta(): StopCandidate = if (stop.etaS != null) stop else stop.copy(etaS = arriveS)
+
     private fun recommend(
         ctx: PurposeContext,
         urgentList: List<RankedStop>?,
@@ -504,7 +507,7 @@ class CoachEngine(
         }
         if (ctx.restroom == Level.NOW) {
             val best = ranker.rank(candidates, ctx.wallNow, local, needs.has(OccupantType.INFANT), speed, 1).firstOrNull()
-            val stop = best?.stop ?: nowRestroom?.stop
+            val stop = best?.stop ?: nowRestroom?.withEta()
             if (stop != null) {
                 return Recommendation(
                     stop, purposesFor(stop, Purpose.RESTROOM, ctx),
@@ -514,18 +517,18 @@ class CoachEngine(
         }
         if (lastChance != null) {
             return Recommendation(
-                lastChance.opp.stop, purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx), listOf(lastChanceReason(lastChance)),
+                lastChance.opp.withEta(), purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx), listOf(lastChanceReason(lastChance)),
             )
         }
         if (wantsRest && restTarget != null) {
             return Recommendation(
-                restTarget.stop, purposesFor(restTarget.stop, Purpose.REST, ctx),
+                restTarget.withEta(), purposesFor(restTarget.stop, Purpose.REST, ctx),
                 listOf(Reason("NEXT_REST", texts.reasonNextRest())),
             )
         }
         if (mealWantedAt != NONE && mealTarget != null) {
             return Recommendation(
-                mealTarget.stop, purposesFor(mealTarget.stop, Purpose.MEAL, ctx),
+                mealTarget.withEta(), purposesFor(mealTarget.stop, Purpose.MEAL, ctx),
                 listOf(Reason("NEXT_MEAL", texts.reasonNextMeal())),
             )
         }

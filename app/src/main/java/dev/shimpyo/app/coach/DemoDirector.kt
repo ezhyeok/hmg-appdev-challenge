@@ -26,7 +26,7 @@ import java.time.ZoneId
  * 시간 배속: 엔진은 입력 시각으로만 판단하므로, 시연 시각을 실제보다 빠르게 흐르게 하면 15분 휴식이나
  * 25분 뒤의 피로 단계를 몇 분 안에 보여 줄 수 있다. 1초 간격 호출이 배속 후에도 2분을 넘지 않게 한다.
  */
-class DemoDirector {
+class DemoDirector(private val realClock: () -> Long = System::currentTimeMillis) {
     data class Pt(val lat: Double, val lon: Double)
 
     private class Scenario(
@@ -58,7 +58,7 @@ class DemoDirector {
     val oracleEnabled: Boolean get() = scenario == null
 
     fun now(): Long {
-        val real = System.currentTimeMillis()
+        val real = realClock()
         val s = scenario ?: return real
         return startedAtReal + clockOffsetMs + ((real - startedAtReal) * s.timeScale).toLong()
     }
@@ -67,7 +67,7 @@ class DemoDirector {
     data class Start(val occupants: List<Occupant>, val drivenMin: Int, val lastRestroomMin: Int)
 
     /** 시나리오 시작. 탑승자, 이미 달린 시간, 마지막 화장실을 돌려준다. 시연을 끄면 null */
-    fun start(name: String?, realNow: Long = System.currentTimeMillis()): Start? {
+    fun start(name: String?, realNow: Long = realClock()): Start? {
         val s = when (name) {
             "holiday" -> holiday()
             "fatigue" -> fatigue()
@@ -84,6 +84,11 @@ class DemoDirector {
         } ?: 0L
         return s?.let { Start(it.occupants, it.drivenMin, it.lastRestroomMin) }
     }
+
+    /** 시연 경로에서 점까지의 거리와 현재 진행 거리 (테스트용). 경로 밖이면 null */
+    internal fun alongForTest(p: Pt): Double? = scenario?.let { alongPath(it.path, p) }
+    internal fun travelledForTest(): Double? = scenario?.let { progressM(it) }
+    internal fun metersPerSecondForTest(): Double? = scenario?.metersPerSecond
 
     /** 가상 위치와 진행 방향. 시연이 아니면 null */
     fun position(): Triple<Double, Double, Float>? {
@@ -117,11 +122,12 @@ class DemoDirector {
         return list.mapNotNull { c ->
             val along = alongPath(s.path, Pt(c.lat, c.lon)) ?: return@mapNotNull null
             val ahead = along - travelled
-            if (ahead < -200) null else c.copy(routeDistanceM = ahead.coerceAtLeast(0.0), etaS = ahead.coerceAtLeast(0.0) / 25.0, directionOk = true)
+            // etaS는 넣지 않는다: 엔진이 시연 정체 구간으로 도착 시간을 계산한다 (StopCandidate.etaS 주석)
+            if (ahead < -200) null else c.copy(routeDistanceM = ahead.coerceAtLeast(0.0), etaS = null, directionOk = true)
         }
     }
 
-    private fun progressM(s: Scenario): Double = (System.currentTimeMillis() - startedAtReal) / 1000.0 * s.metersPerSecond
+    private fun progressM(s: Scenario): Double = (realClock() - startedAtReal) / 1000.0 * s.metersPerSecond
 
     // ------------------------------------------------------------ 시나리오
 
@@ -148,12 +154,18 @@ class DemoDirector {
         Pt(36.279148, 127.672231), // 금강휴게소
     )
     private val oksan = Pt(36.657743, 127.369817)
+    private val jukam = Pt(36.486810, 127.429261)
 
     private fun holiday(): Scenario {
         // 망향휴게소와 천안호두휴게소 사이(천안호두 약 6km 전)에서 출발
         val start = Pt(36.7779, 127.2324)
         val path = listOf(start) + gyeongbuSouth.dropWhile { it.lat > 36.75 }
         val oksanAt = alongPath(path, oksan) ?: 18_400.0
+        // 시연 경로는 휴게소 좌표를 직선으로 이어 실제 도로(옥산→죽암 약 21km)보다 짧다(약 19.7km).
+        // 정체를 20km로 두면 죽암휴게소가 정체 안에 들어가 '정체 안에 화장실 없음' 조건이 깨지므로, 죽암 300m 앞에서 끝낸다
+        val jamStart = oksanAt + 1_000.0
+        val jukamAt = alongPath(path, jukam) ?: (jamStart + 20_300.0)
+        val jamLength = minOf(20_000.0, jukamAt - 300.0 - jamStart)
         return Scenario(
             name = "holiday",
             path = path,
@@ -164,7 +176,7 @@ class DemoDirector {
             timeOfDay = LocalTime.of(14, 0),
             // 46분 전 안성휴게소에서 쉬고 출발했다 → 질문 지점에서 아이의 화장실 게이지 약 50분
             drivenMin = 46,
-            congestion = listOf(Triple(oksanAt + 1_000.0, 20_000.0, 60 * 60.0)),
+            congestion = listOf(Triple(jamStart, jamLength, 60 * 60.0)),
             routeTotalM = 310_000.0,
         )
     }

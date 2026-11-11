@@ -73,4 +73,7 @@ dependencies {
     implementation("androidx.activity:activity-compose:1.9.2")
     implementation("androidx.lifecycle:lifecycle-runtime-compose:2.8.6")
     implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.6")
+
+    // JVM 단위 테스트 (안드로이드 API를 쓰지 않는 코드만: CoachStore 등)
+    testImplementation("junit:junit:4.13.2")
 }

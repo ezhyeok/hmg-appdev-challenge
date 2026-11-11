@@ -72,6 +72,11 @@ data class StopCardModel(
     val muted: Boolean = false,
 )
 
+/** 경로 앞에서 가장 가까운 화장실 (경로 거리, 없으면 직선거리 기준) */
+internal fun nearestAhead(state: CoachUiState) = state.ahead
+    .filter { it.facilities.restroom && (it.routeDistanceM ?: it.straightDistanceM ?: -1.0) >= 0.0 }
+    .minByOrNull { it.routeDistanceM ?: it.straightDistanceM ?: Double.MAX_VALUE }
+
 /** 질문에 대한 두 버튼의 글자. null이면 [확인] 하나만 둔다 */
 fun acceptLabel(p: Prompt): String? = when (p.kind) {
     PromptKind.LAST_CHANCE, PromptKind.URGENT_RESULT -> "들르기"
@@ -146,6 +151,20 @@ fun stopCard(state: CoachUiState, driving: Boolean): StopCardModel {
     }
 
     if (next != null) return recommendationCard(next, state, maxChips, who)
+
+    // 엔진 추천이 없으면 경로 앞 첫 화장실을 보여 준다. 예전에는 '다음 화장실을 고르는 중이에요'가 남아서
+    // 정체 속(마지막 기회를 지난 뒤)에 오래 머무르면 고장처럼 보였다(2026-11-11 에뮬레이터). DriveModelsTest가 지킨다
+    nearestAhead(state)?.let { a ->
+        val afterJam = a.routeDistanceM?.let { d -> state.congestion.any { it.startDistanceM in 0.0..d } } == true
+        return StopCardModel(
+            context = if (state.guiding) "다음 화장실" else "진행 방향 가까운 화장실",
+            title = a.name,
+            meta = Labels.stopMeta(a),
+            chips = if (afterJam) listOf("정체 뒤") else emptyList(),
+            icon = ShimpyoIcons.Wc,
+            askingLevel = null,
+        )
+    }
 
     return StopCardModel(
         context = if (state.guiding) "다음 화장실" else "진행 방향 가까운 화장실",

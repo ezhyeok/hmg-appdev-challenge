@@ -133,7 +133,10 @@ class CoachService : PleosForegroundService() {
         } else if (intent.getBooleanExtra("selftest", false)) {
             devJob = serviceScope.launch { KitSelfTest(vehicle, navi, tts, stt, location).run(intent.getBooleanExtra("route", false)) }
         }
-        intent.getStringExtra("demo")?.let { CoachStore.send(UiCommand.Demo(it)) }
+        intent.getStringExtra("demo")?.let {
+            Log.i(TAG, "demo requested: $it")
+            CoachStore.send(UiCommand.Demo(it))
+        }
     }
 
     // ------------------------------------------------------------ 코치 루프
@@ -416,6 +419,7 @@ class CoachService : PleosForegroundService() {
             }
         }
         CoachStore.update { copy(demo = director.name, occupants = occupants, urgent = null, plan = null) }
+        Log.i(TAG, "demo started: ${director.name ?: "off"}")
         if (r != null) refreshCandidates()
     }
 
@@ -587,8 +591,15 @@ class CoachService : PleosForegroundService() {
     }
 
     private suspend fun candidateLoop() {
-        val n = app.stops.ensureLoaded()
-        CoachStore.update { copy(status = "정차 후보 데이터 ${n}곳") }
+        // 고속도로 휴게소·졸음쉼터가 올라오면 바로 경로 앞 후보를 만들고, 나머지(6만여 곳)는 이어서 읽는다
+        serviceScope.launch {
+            val n = app.stops.ensureLoaded { highway ->
+                CoachStore.update { copy(status = "정차 후보 데이터 ${highway}곳 (나머지 읽는 중)") }
+                refreshCandidates()
+            }
+            CoachStore.update { copy(status = "정차 후보 데이터 ${n}곳") }
+        }
+        while (app.stops.count == 0) delay(200)
         while (true) {
             refreshCandidates()
             delay(if (director.active) 5_000 else 20_000)
@@ -621,10 +632,6 @@ class CoachService : PleosForegroundService() {
      * 데이터에 없는 곳은 좌표 없이 넣고, 수락하면 내비 장소 검색을 연다.
      */
     private suspend fun candidatesFromRoute(opps: List<RouteOpportunity>, lat: Double, lon: Double, t: Long): List<StopCandidate> {
-        val r = route
-        val rd = r?.remainDistanceM
-        val rt = r?.remainTimeS
-        val avgMps = if (rd != null && rt != null && rt > 60.0) rd / rt else 22.0
         return opps.take(ROUTE_OPP_MAX).map { o ->
             val matches = app.stops.matchByName(o.name, o.kind, lat, lon, o.routeDistanceM + 5_000.0)
             val chosen = when (matches.size) {
@@ -644,7 +651,9 @@ class CoachService : PleosForegroundService() {
                 facilities = Facilities(restroom = true, food = o.kind == StopKind.HIGHWAY_REST_AREA),
                 parkable = true,
             )
-            base.copy(routeDistanceM = o.routeDistanceM, etaS = o.routeDistanceM / avgMps, directionOk = true)
+            // etaS는 비워 둔다: 경로 평균 속도로 만든 값은 앞 정체를 반영하지 못하고, 엔진은 etaS를 내비 값으로 믿는다
+            // (StopCandidate.etaS 주석). 비워 두면 엔진이 정체 구간으로 도착 시간을 계산해 추천에 채운다
+            base.copy(routeDistanceM = o.routeDistanceM, directionOk = true)
         }
     }
 

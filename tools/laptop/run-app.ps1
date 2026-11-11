@@ -10,6 +10,13 @@ $pkg = "dev.shimpyo.app"
 Set-Location -LiteralPath $proj -ErrorAction Stop
 "sdk.dir=$($env:ANDROID_HOME.Replace('\','\\'))" | Set-Content -Encoding ASCII "$proj\local.properties"
 # PowerShell 5.1은 네이티브 stderr를 오류로 감싸므로 cmd로 합쳐서 로그에 남긴다
+# 에뮬레이터가 떠 있으면 빌드를 낮은 우선순위로 한다(자식 프로세스가 물려받는다). 빌드가 CPU를 다 쓰면 게스트가
+# 굶어 VHAL이 재시작되거나 에뮬레이터가 멈출 수 있다(2026-11-11 빌드 직후 멈춤). `start /b`로 우선순위를 주면
+# 배치 파일 cmd가 남아 SSH 세션이 끝나지 않으므로 이 방법을 쓴다
+if (Get-Process qemu-system-x86_64-headless, qemu-system-x86_64 -ErrorAction SilentlyContinue) {
+  (Get-Process -Id $PID).PriorityClass = "BelowNormal"
+  "emulator running: building at BelowNormal priority"
+}
 if (-not $SkipBuild) {
   cmd /c "gradlew.bat --no-daemon :app:assembleDebug > `"$P\logs\app-build.log`" 2>&1"
   if ($LASTEXITCODE -ne 0) { "BUILD FAILED (exit $LASTEXITCODE)"; Select-String -Path "$P\logs\app-build.log" -Pattern "^e: |error:|FAILED|What went wrong" -Context 0,3 | Select-Object -First 40 | ForEach-Object { $_.ToString() }; exit 1 }

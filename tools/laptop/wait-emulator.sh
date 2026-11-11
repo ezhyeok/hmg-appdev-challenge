@@ -11,12 +11,25 @@ ADB='C:\Users\User\hmg-appdev-challenge\sdk\platform-tools\adb.exe'
 MAX_LOAD="${1:-8}"
 MIN_UPTIME=240
 DEADLINE=$(( $(date +%s) + ${2:-1200} ))
+HEALTH='powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\User\hmg-appdev-challenge\repo\tools\laptop\emu-health.ps1 -Resume'
+stalls=0
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-  boot=$(ssh hmg-laptop "$ADB shell getprop sys.boot_completed" 2>/dev/null | tr -d '\r\n')
+  # adb devices에는 보이는데 adb shell이 응답하지 않으면 qemu가 일시 정지됐을 수 있다 (emu-health.ps1 참고)
+  if ! boot=$(timeout 25 ssh hmg-laptop "$ADB shell getprop sys.boot_completed" 2>/dev/null | tr -d '\r\n'); then boot=""; fi
+  if [ -z "$boot" ] && timeout 20 ssh hmg-laptop "$ADB devices" 2>/dev/null | grep -q "emulator-.*device$"; then
+    stalls=$((stalls + 1))
+    if [ "$stalls" -ge 2 ]; then
+      echo "$(date +%T) adb shell 무응답 → qemu 상태 점검"
+      timeout 60 ssh hmg-laptop "$HEALTH" 2>/dev/null | grep -v "CLIXML\|<Objs"
+      stalls=0
+    fi
+  else
+    stalls=0
+  fi
   if [ "$boot" = "1" ]; then
-    user=$(ssh hmg-laptop "$ADB shell am get-current-user" 2>/dev/null | tr -d '\r\n')
-    load=$(ssh hmg-laptop "$ADB shell uptime" 2>/dev/null | sed 's/.*load average: \([0-9.]*\).*/\1/' | tr -d '\r\n')
-    up=$(ssh hmg-laptop "$ADB shell cat /proc/uptime" 2>/dev/null | cut -d. -f1 | tr -d '\r\n')
+    user=$(timeout 25 ssh hmg-laptop "$ADB shell am get-current-user" 2>/dev/null | tr -d '\r\n')
+    load=$(timeout 25 ssh hmg-laptop "$ADB shell uptime" 2>/dev/null | sed 's/.*load average: \([0-9.]*\).*/\1/' | tr -d '\r\n')
+    up=$(timeout 25 ssh hmg-laptop "$ADB shell cat /proc/uptime" 2>/dev/null | cut -d. -f1 | tr -d '\r\n')
     echo "$(date +%T) user=$user uptime=${up}s load1=$load"
     if [ "$user" = "10" ] && [ "${up:-0}" -ge "$MIN_UPTIME" ] && awk -v l="$load" -v m="$MAX_LOAD" 'BEGIN{exit !(l<m)}'; then
       echo READY

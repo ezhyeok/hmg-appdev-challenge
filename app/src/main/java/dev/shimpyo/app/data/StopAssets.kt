@@ -32,13 +32,23 @@ object StopAssets {
      */
     val laneHeading = HashMap<String, Int>()
 
-    fun loadAll(context: Context): List<StopCandidate> {
-        val out = ArrayList<StopCandidate>(110_000)
+    fun loadAll(context: Context): List<StopCandidate> = loadHighway(context) + loadLocal(context)
+
+    /** 고속도로 휴게소·졸음쉼터 (500여 곳, 빨리 읽힌다). 마지막 기회·계획에 쓴다 */
+    fun loadHighway(context: Context): List<StopCandidate> {
+        val out = ArrayList<StopCandidate>(1_000)
         read(context, "data/rest_areas.json") { o -> restArea(o) }?.let(out::addAll)
         read(context, "data/drowsy_shelters.json") { o -> shelter(o) }?.let(out::addAll)
+        Log.i(TAG, "stop assets loaded (highway): ${out.size}")
+        return out
+    }
+
+    /** 공중화장실·주유소·주차장 (6만여 곳, 에뮬레이터에서 1분 넘게 걸린다). 급해 모드에 쓴다 */
+    fun loadLocal(context: Context): List<StopCandidate> {
+        val out = ArrayList<StopCandidate>(110_000)
         read(context, "data/restrooms.json") { o -> restroom(o) }?.let(out::addAll)
         read(context, "data/parkables.json") { o -> parkable(o) }?.let(out::addAll)
-        Log.i(TAG, "stop assets loaded: ${out.size}")
+        Log.i(TAG, "stop assets loaded (local): ${out.size}")
         return out
     }
 

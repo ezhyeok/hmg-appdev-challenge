@@ -44,6 +44,7 @@
   - **GPU 가속을 쓴다.** `start-emulator.ps1`의 기본값은 `-gpu host`다(SSH로 창 없이 띄워도 GeForce MX450을 쓴다). `swiftshader_indirect`(소프트웨어 렌더링)로 띄우면 에뮬레이터 프로세스가 호스트 CPU의 88%를 쓰고, `host`면 40% 정도다
   - **노트북에 충전기를 꽂는다.** 배터리 모드에서는 CPU가 정격의 43% 수준으로 제한된다. 확인: `(Get-CimInstance Win32_Battery).BatteryStatus`가 2면 AC
   - **부팅 후 `tools/laptop/wait-emulator.sh`로 기다린다**(가동 4분 이상, 운전자 프로필 user 10 활성). 그 전에 앱을 실행하거나 빌드하면 VHAL이 재시작되면서 시스템이 user 0으로 돌아가고 내비 앱이 조회에 응답하지 않는다. 그렇게 되면 에뮬레이터를 다시 부팅한다. 빌드는 에뮬레이터를 띄우기 전에 `run-app.ps1 -BuildOnly`로 해 둔다
+  - **에뮬레이터가 멈춘 것처럼 보이면 재부팅 전에 `tools/laptop/emu-health.ps1`로 qemu 상태를 본다.** 증상은 `adb devices`에는 보이는데 `adb shell`이 응답하지 않고 qemu CPU가 0%다. 2026-11-11에는 에뮬레이터의 크래시 보고기(crashpad_handler)가 qemu를 덤프하려고 일시 정지시킨 뒤 자신이 죽어서 스레드가 모두 Suspended로 남았다. `emu-health.ps1 -Resume`으로 재개된다(`wait-emulator.sh`가 adb 무응답을 보면 자동으로 부른다). 재발 방지로 `start-emulator.ps1`은 `-crash-report-mode disabled -no-metrics`로 띄운다
   - 노트북 화면에서 창으로 띄우려면(시연 영상 녹화용) `tools/laptop/start-emulator-gui.cmd`를 더블클릭한다
 - GitHub private repo: https://github.com/ezhyeok/hmg-appdev-challenge (기본 브랜치 `main`)
 
@@ -91,6 +92,8 @@
 - 주행 중 UX 제한: `CarUxRestrictions` 연동 필수 (`docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/driving-restriction-development-guide.md`, `docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-planning-guide/driver-distraction-guideline.md`). 심사 항목 "차량특화성"과 직결된다
 - 로터리 컨트롤러(CCP), 오디오 포커스, IME 리사이즈 같은 차량 특화 동작은 `docs/contest/02_Pleos_개발가이드/pleos-connect/vehicle-app-developer-guide/` 참고
 - UI는 `docs/contest/02_Pleos_개발가이드/connect-guide/docs-design/`의 Pleos Connect UI Design Guide(레이아웃, 컬러, 타이포, 컴포넌트)를 따른다
+- 화면·인텐트가 서비스에 보내는 명령은 `CoachStore`의 Channel로 보낸다. 구독 전 값을 버리는 SharedFlow(replay 0)를 쓰면 첫 실행 때 `--es demo` 명령이 서비스의 collect보다 먼저 와서 사라진다(2026-11-11, `CoachStoreTest`가 지킨다). 앱 JVM 테스트는 노트북에서 `gradlew :app:testDebugUnitTest`
+- 버그를 고칠 때는 같은 문제가 다시 생기지 않게 테스트·점검 스크립트·이 문서 중 맞는 곳에 막는 장치를 함께 남긴다
 - 생성형 AI 사용은 허용되지만, 참가자가 2차 PT 기술 Q&A에서 구조와 로직을 직접 설명해야 한다. 코드를 짤 때 아키텍처와 주요 흐름을 `docs/ARCHITECTURE.md` 같은 문서로 함께 정리한다. 참가자는 전산 전공이므로 구조는 설명하기 쉬운 쪽이 아니라 기술적으로 적절한 쪽으로 정한다
 
 ## 참가·제출 (공모전 규정 + 설명회)
