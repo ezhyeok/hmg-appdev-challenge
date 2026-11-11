@@ -176,7 +176,26 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 | prompt.md 2.5 | 시연 질문이 실제 6초 만에 사라짐 | `EngineFactory`가 세계의 `engineConfig`를 받음 |
 | 정리 | 중복 코드 | TBT 종류 규칙은 `StopNames.kindFor` 하나. `CongestionMath`, `DemoDirector`, 옛 `RouteOracle.refine` 삭제 |
 
-## 12. 남은 것
+## 12. 에뮬레이터 확인 (2026-11-12, Pleos Connect Emulator 2.1.0, debug, Virtual Console)
+
+| 시나리오 | 결과 (logcat `Shimpyo`) |
+|---|---|
+| 귀성길 `demo-smoke.sh holiday --split` | `prompt shown: LAST_CHANCE 옥산휴게소 at 4920m` → 22.1초 뒤 `prompt hidden` (500m 앞에서 엔진이 거둠, 200m/s). 예전에는 약 6초 |
+| 오후 졸음 `fatigue --split` | 시작 66초 뒤 `prompt shown: REST_SUGGESTION 천안호두휴게소 at 17583m`. 첫 CHECK_IN 카드는 실제 45초 뒤 내려감 |
+| 도심 급해 `urgent --split` + 급해 버튼 | `urgent …: 5 results`, `prompt shown: URGENT_RESULT 역삼문화공원 제1호 공영주차장 at 261m`(목록 1등과 같음), TTS 묻는 중 '말하는 중', 닫기 → `prompt hidden` |
+| 정차 `stop --split` + P·문 열림 → D 40 | `stop recorded: 11 min restroom=true persisted=false`, `stops.json` 없음(`run-as --user 10`), 시연 진입 때 `trip.json` 저장 |
+| 끄기 `off` | `demo started: off`, 실제 경로 후보(`candidates READY ROUTE n=9`), 실제 위치(판교 geo fix), `stops.json` 없음 |
+| 실제 길안내 | `navi mode: UNKNOWN -> ROUTE_GUIDING`, `navi epoch 1: guidance started`, TBT 후보 `candidates READY ROUTE n=10 until=144490`. 급해 결과 수락 → `goTo result: WAYPOINT_ADDED SK네트웍스(주)스타팅광동주유소`, 화면 '경유지로 넣었어요' + 다음 추천이 그 주유소(엔진이 수락을 앎). 경유지 변경 이벤트 → epoch, `navi tbt dropped: route changed while asking` |
+| 마이크 토글 | 급해 질문을 말하는 중 마이크를 누르면 멈춘다 ('말하는 중' → 마이크) |
+| 급해 결과 세 번 연타 | `goTo` 1번, `addWaypoint` 1번 |
+
+기기에서 찾아 고친 것 (모두 테스트 먼저):
+- 길안내 중 목적지 응답 하나가 남은 거리 0을 주면 재탐색이 두 번 잡혔다 → 0은 못 읽은 것 (`NaviTrackerTest.aZeroRemainingDistanceWhileStillGuidingIsAGlitchNotTwoReroutes`)
+- 이미 경유지인 곳을 다시 넣으면 목록이 늘지 않아 FAILED → 다시 보내지 않음 (`KitRulesTest.aPlaceAlreadyInTheWaypointsIsRecognisedSoItIsNotSentAgain`)
+- `trafficCongestionTime`은 분 단위 늘어난 시간 → 지나는 시간은 거리 ÷ 평균 속도 (`NaviCongestionTest`, CLAUDE.md)
+- 서 있는 내비에 TBT를 5초마다 물었다(1분 20번) → 경로 조회만큼 (`NaviTrackerTest.aFrozenNaviIsAskedForTbtAtTheRoutePaceAfterTheFastWindow`)
+
+## 13. 남은 것
 
 - 급해 목록에서 엔진 질문과 다른 곳을 고르면 엔진은 그 선택을 모른다(질문 수락으로만 알린다). 고른 곳 고정도 엔진이 추천하는 동안만 유지된다.
 - 들르기 결과가 감시(140초)보다 늦게 오면 결과는 버려지지만 내비에는 들어갔을 수 있다 (prompt.md의 남은 위험과 같다).
