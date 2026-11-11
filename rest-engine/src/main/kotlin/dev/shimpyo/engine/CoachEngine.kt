@@ -33,6 +33,9 @@ import kotlin.random.Random
  * 후보([CoachInput.candidates])는 매 update마다 지금 위치 기준 거리로 넘긴다.
  * 입력은 들어오는 곳에서 한 번 정리한다([InputSanitizer]: NaN·무한대 → 모름). 앱에 내보내는 추천·질문의 정차 후보에는
  * 한 경로([withEta])로 엔진이 계산한 도착 시간을 채운다(내비 ETA가 있으면 그대로).
+ * 운전자가 화면에서 정차지를 직접 골랐으면(급해 목록, 계획, 다시 시도) [noteAccepted]로 알린다. 엔진이 물은 곳이 아니어도 된다.
+ * 추천([CoachOutput.next]): 들르기로 한 곳 > 급해 결과 > 화장실 여유 없음 > 마지막 기회 > 휴식 > 식사. 단 화장실 질문
+ * (PromptKind.LAST_CHANCE)이 떠 있는 동안에는 그 질문의 장소와 이유다 — 화면이 질문 카드의 이유를 추천에서 가져오기 때문이다.
  * 새 여정: [setProfile]에 다른 tripStart를 넘기면 주행 상태(피로, 기준선, 정차, 질문)를 새로 시작한다.
  *
  * @param random 톰프슨 샘플링용 난수. 테스트에서는 시드를 고정한 Random을 넣는다.
@@ -66,7 +69,12 @@ class CoachEngine(
     private var policy = PromptPolicy(config, random, promptIds)
     private var quiet = QuietTracker(config)
 
-    private class Accepted(val stopId: String, var stop: StopCandidate, val purposes: Set<Purpose>, val kind: PromptKind, val atMono: Long) {
+    /**
+     * 들르기로 한 곳: 수락한 질문의 장소, 또는 운전자가 화면에서 직접 고른 곳([noteAccepted]).
+     * [suggested]: 그곳에 서면 '앱이 권해서 들른 정차'로 배울지 (엔진의 마지막 기회·휴식 제안, 화면에서 고른 곳).
+     * "화장실 급해"의 결과는 사용자가 필요를 말한 것이라 아니다 (그 사람은 말한 때 이미 사건으로 남았다)
+     */
+    private class Accepted(val stopId: String, var stop: StopCandidate, var purposes: Set<Purpose>, val suggested: Boolean, val atMono: Long) {
         var missingSince: Long = NONE
     }
 
@@ -161,9 +169,7 @@ class CoachEngine(
         val wasMealStop = meal.factor != 1.0
         meal.observe(mono, stops.sessionStart, stops.parked, stops.parked && mealIntent(mono), input.candidates, speed, dtMs)
         if (ev.restroomStopAt != NONE) {
-            val acc = accepted
-            val suggested = acc != null && (acc.kind == PromptKind.LAST_CHANCE || acc.kind == PromptKind.REST_SUGGESTION)
-            memory = needs.onRestroomStop(ev.restroomStopAt, memory, suggested)
+            memory = needs.onRestroomStop(ev.restroomStopAt, memory, suggested = accepted?.suggested == true)
             accepted = null
         }
         if (ev.restAt != NONE) {
@@ -247,22 +253,20 @@ class CoachEngine(
         val wantsRest = restWantedAt != NONE || fatigueGauge.level >= Level.SOON
         val restTarget = if (wantsRest || restAnswer.on) pickRestTarget(input.candidates, fatigueGauge) else null
         val mealTarget = if (mealWantedAt != NONE || mealAnswer.on) pickMealTarget(input.candidates) else null
-        val nowRestroom = if (restroom.level == Level.NOW && lastChance == null && accepted == null && urgentList == null) {
-            restroomOpps.firstOrNull { it.distanceM >= config.askWindowNearM }
-        } else null
+        // 아직 안전하게 들를 수 있는 가장 가까운 화장실 기회 (진입로 2km 밖)
+        val nearestRestroom = restroomOpps.firstOrNull { it.distanceM >= config.askWindowNearM }
+        val nowRestroom = if (restroom.level == Level.NOW && lastChance == null && accepted == null && urgentList == null) nearestRestroom else null
 
-        // 6. 다음 추천
+        // 6. 질문 (사용자 응답 먼저, 그다음 엔진이 먼저 거는 질문을 우선순위 순으로).
+        // 사용자의 말에 답할 곳이 이미 들르기로 한 곳이면 '들를까요?'를 다시 묻지 않고 그렇게만 답한다 ([goingThere])
         val ctx = PurposeContext(restroom.level, fatigueGauge.level, input.now, mono)
-        val next = recommend(ctx, urgentList, lastChance, nowRestroom, wantsRest, restTarget, mealTarget, input.candidates, speed)
-
-        // 7. 질문 (사용자 응답 먼저, 그다음 엔진이 먼저 거는 질문을 우선순위 순으로)
         promptCands.clear()
         promptOwners.clear()
         if (urgentRequested) {
             val top = urgentList?.firstOrNull()
             addCand(
                 if (top != null) {
-                    ask(
+                    goingThere(top.stop, route.distanceOf(top.stop).takeIf { it.isFinite() && it > 0.0 }, fresh = true) ?: ask(
                         PromptKind.URGENT_RESULT, texts.urgentResult(top.stop.name, (top.totalTimeS / 60.0).roundToInt()),
                         top.stop, null, restroom.level, user = true, purposes = purposesFor(top.stop, Purpose.RESTROOM, ctx),
                     )
@@ -275,22 +279,29 @@ class CoachEngine(
         if (needAnswer.on) {
             if (moving) {
                 // 아직 안전하게 들를 수 있는 가장 가까운 화장실 기회. 그곳이 마지막 기회이기도 하면 그 이유(정체·공백)로 답한다
-                val t = restroomOpps.firstOrNull { it.distanceM >= config.askWindowNearM }
+                val t = nearestRestroom
                 val p = needAnswer.purpose
+                val fresh = !needAnswer.offered
                 addCand(
                     if (t != null) {
-                        val lc = lastChance?.takeIf { it.opp.stop.id == t.stop.id }
-                        val speech = when {
-                            lc != null -> lastChanceSpeech(lc)
-                            p == Purpose.RESTROOM -> texts.restroomRequested(t.stop.name, t.distanceM)
-                            else -> texts.careStopSuggestion(t.stop.name, t.distanceM)
+                        goingThere(t.stop, t.distanceM, fresh) ?: run {
+                            val lc = lastChance?.takeIf { it.opp.stop.id == t.stop.id }
+                            val speech = when {
+                                lc != null -> lastChanceSpeech(lc)
+                                p == Purpose.RESTROOM -> texts.restroomRequested(t.stop.name, t.distanceM)
+                                else -> texts.careStopSuggestion(t.stop.name, t.distanceM)
+                            }
+                            // 요청에 답한 곳이라는 이유. 그곳이 마지막 기회이기도 하면 그 이유가 앞에 온다 (문장도 그 이유로 말한다)
+                            val requested = if (p == Purpose.RESTROOM) Reason("NEXT_REQUESTED_RESTROOM", texts.reasonNextRequestedRestroom())
+                            else Reason("NEXT_REQUESTED_CARE", texts.reasonNextRequestedCare())
+                            ask(
+                                PromptKind.LAST_CHANCE, speech, t.stop, t.distanceM, restroom.level, user = true, fresh = fresh,
+                                purposes = purposesFor(t.stop, p, ctx),
+                                reasons = if (lc != null) lastChanceReasons(lc) + requested else listOf(requested),
+                            )
                         }
-                        ask(
-                            PromptKind.LAST_CHANCE, speech, t.stop, t.distanceM, restroom.level, user = true,
-                            fresh = !needAnswer.offered, purposes = purposesFor(t.stop, p, ctx),
-                        )
                     } else {
-                        ask(PromptKind.INFO, texts.restroomRequestedNone(), user = true, fresh = !needAnswer.offered)
+                        ask(PromptKind.INFO, texts.restroomRequestedNone(), user = true, fresh = fresh)
                     },
                     needAnswer,
                 )
@@ -300,11 +311,14 @@ class CoachEngine(
         }
         if (restAnswer.on) {
             val t = restTarget
-            val speech = if (fatigue.sleepyVoiced) texts.restSuggestionSleepy(t?.stop?.name, t?.distanceM, canSwapDriver())
-            else texts.restSuggestionWanted(t?.stop?.name, t?.distanceM)
+            val fresh = !restAnswer.offered
+            val going = goingThere(t?.stop, t?.distanceM, fresh, if (fatigue.sleepyVoiced) texts.sleepyAdvice(canSwapDriver()) else null)
             addCand(
-                ask(
-                    PromptKind.REST_SUGGESTION, speech, t?.stop, t?.distanceM, fatigueGauge.level, user = true, fresh = !restAnswer.offered,
+                going ?: ask(
+                    PromptKind.REST_SUGGESTION,
+                    if (fatigue.sleepyVoiced) texts.restSuggestionSleepy(t?.stop?.name, t?.distanceM, canSwapDriver())
+                    else texts.restSuggestionWanted(t?.stop?.name, t?.distanceM),
+                    t?.stop, t?.distanceM, fatigueGauge.level, user = true, fresh = fresh,
                     purposes = t?.let { purposesFor(it.stop, Purpose.REST, ctx) } ?: setOf(Purpose.REST),
                 ),
                 restAnswer,
@@ -312,28 +326,30 @@ class CoachEngine(
         }
         if (mealAnswer.on) {
             val t = mealTarget
+            val fresh = !mealAnswer.offered
             addCand(
                 if (t != null) {
-                    ask(
+                    goingThere(t.stop, t.distanceM, fresh) ?: ask(
                         PromptKind.REST_SUGGESTION, texts.mealSuggestion(t.stop.name, t.distanceM), t.stop, t.distanceM,
-                        fatigueGauge.level, user = true, fresh = !mealAnswer.offered, purposes = purposesFor(t.stop, Purpose.MEAL, ctx),
+                        fatigueGauge.level, user = true, fresh = fresh, purposes = purposesFor(t.stop, Purpose.MEAL, ctx),
                     )
                 } else {
-                    ask(PromptKind.INFO, texts.mealNone(), user = true, fresh = !mealAnswer.offered)
+                    ask(PromptKind.INFO, texts.mealNone(), user = true, fresh = fresh)
                 },
                 mealAnswer,
             )
         }
         if (fuelAnswer.on) {
             val t = pickFuelTarget(input.candidates)
+            val fresh = !fuelAnswer.offered
             addCand(
                 if (t != null) {
-                    ask(
+                    goingThere(t.stop, t.distanceM, fresh) ?: ask(
                         PromptKind.REST_SUGGESTION, texts.fuelSuggestion(t.stop.name, t.distanceM), t.stop, t.distanceM,
-                        fatigueGauge.level, user = true, fresh = !fuelAnswer.offered, purposes = purposesFor(t.stop, Purpose.FUEL, ctx),
+                        fatigueGauge.level, user = true, fresh = fresh, purposes = purposesFor(t.stop, Purpose.FUEL, ctx),
                     )
                 } else {
-                    ask(PromptKind.INFO, texts.fuelNone(), user = true, fresh = !fuelAnswer.offered)
+                    ask(PromptKind.INFO, texts.fuelNone(), user = true, fresh = fresh)
                 },
                 fuelAnswer,
             )
@@ -359,6 +375,7 @@ class CoachEngine(
                     ask(
                         PromptKind.LAST_CHANCE, lastChanceSpeech(lastChance), lastChance.opp.stop, lastChance.opp.distanceM,
                         restroom.level, purposes = purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx),
+                        reasons = lastChanceReasons(lastChance),
                     ),
                     null,
                 )
@@ -367,7 +384,7 @@ class CoachEngine(
                     ask(
                         PromptKind.LAST_CHANCE, texts.restroomNowSuggestion(nowRestroom.stop.name, nowRestroom.distanceM),
                         nowRestroom.stop, nowRestroom.distanceM, Level.NOW,
-                        purposes = purposesFor(nowRestroom.stop, Purpose.RESTROOM, ctx),
+                        purposes = purposesFor(nowRestroom.stop, Purpose.RESTROOM, ctx), reasons = listOf(nearestRestroomReason()),
                     ),
                     null,
                 )
@@ -412,6 +429,9 @@ class CoachEngine(
             val owner = promptOwners[i] ?: continue
             if (promptCands[i] === issued) owner.clear() else owner.offered = true
         }
+
+        // 7. 다음 추천. 질문을 정한 뒤에 낸다: 화장실 질문이 떠 있으면 추천은 그 질문의 장소와 이유다
+        val next = recommend(ctx, urgentList, lastChance, nowRestroom, wantsRest, restTarget, mealTarget, input.candidates, speed)
 
         // 8. 공조 (피로와 별개인 편의 기능. 앱은 사용자가 허용했을 때만 실행하고, 외기는 1~2분 뒤 되돌린다)
         val coolDown = !freshAir && fatigueGauge.level >= Level.SOON && input.cabin.hvacOn == true &&
@@ -509,6 +529,43 @@ class CoachEngine(
     }
 
     /**
+     * 운전자가 이 정차지를 골랐고 내비 명령(경유지·길안내)이 성공했다. 급해 목록, 계획 화면, 실패 뒤 다시 시도처럼
+     * 엔진의 질문을 거치지 않은 선택을 알리는 길이다 (엔진이 물은 곳이 아니어도 된다). 첫 update 전에 불러도 된다
+     * (앱이 다시 떠서 저장해 둔 '들르기로 한 곳'을 되살릴 때).
+     *
+     * - 그곳이 들르기로 한 곳이 된다: 추천은 NEXT_ACCEPTED, 그동안 엔진은 정차를 먼저 묻지 않는다. 유지·해제는 수락한 질문과 같다
+     *   (후보 목록에서 1분 넘게 사라지면, 90분이 지나면, 화장실 정차·휴식이 기록되면 내린다. 서 있는 동안에는 내리지 않는다).
+     *   그래서 앱은 그곳을 이후 update의 [CoachInput.candidates]에 같은 id로 계속 넣어야 한다.
+     * - 같은 곳을 묻던 질문이 떠 있으면 그 질문을 수락한 것이다 ([onPromptResult]와 같다: 수락률 학습, 질문의 목적도 함께).
+     * - 다른 곳을 묻던 화장실 질문(마지막 기회·여유 없음·"화장실 가고 싶대"의 답, 급해 결과)은 이 선택으로 끝난다. 무시한 것으로
+     *   치지 않아 쉼·시간당 횟수가 남지 않고, 그 질문에 늦게 온 대답은 받지 않는다. 밀려 있던 "다음 화장실은 …" 답도 내린다.
+     * - 그곳을 다시 묻지 않는다: 사용자의 말에 답할 곳이 바로 그곳이면 "…에 들르기로 했어요"라고만 답한다 ([goingThere]).
+     * - 그 뒤 그곳에 서면 '앱이 권해서 들른 정차'(0.5회)로 배운다.
+     *
+     * @param purposes 그 정차의 목적 (계획의 식사 정차면 MEAL 포함). 비어 있으면 화장실
+     */
+    fun noteAccepted(stop: StopCandidate, purposes: Set<Purpose>, now: Long) {
+        ensureStarted(now)
+        val mono = clock.peek(now)
+        policy.noteInteraction(mono) // 방금 화면에서 고른 운전자에게 30초 동안 먼저 말을 걸지 않는다
+        val asked = policy.active
+        if (asked != null && asked.targetId == stop.id) {
+            applyResult(asked.prompt.id, true, mono)
+        } else if (asked != null && (asked.kind == PromptKind.LAST_CHANCE || asked.kind == PromptKind.URGENT_RESULT)) {
+            policy.supersede(asked)
+        }
+        needAnswer.clear()
+        val wanted = purposes.ifEmpty { setOf(Purpose.RESTROOM) }
+        val a = accepted
+        if (a != null && a.stopId == stop.id) {
+            // 이미 들르기로 한 곳 (방금 수락한 질문, 또는 같은 곳을 두 번 알림): 유지 시간과 배우는 방식은 처음 것 그대로
+            a.purposes = a.purposes + wanted
+        } else {
+            accepted = Accepted(stop.id, InputSanitizer.candidate(stop), wanted, suggested = true, mono)
+        }
+    }
+
+    /**
      * 탑승자·수면 정보를 바꾼다. 같은 tripStart면 시계와 상태를 이어 가고(새 탑승자만 추가),
      * tripStart가 다르면 새 여정으로 보고 주행 상태를 새로 시작한다. 개인 기억은 유지한다.
      */
@@ -603,7 +660,10 @@ class CoachEngine(
             }
             PromptKind.LAST_CHANCE, PromptKind.REST_SUGGESTION, PromptKind.URGENT_RESULT ->
                 if (stop != null) {
-                    accepted = Accepted(stop.id, stop, rec.purposes.ifEmpty { setOf(Purpose.RESTROOM) }, rec.kind, mono)
+                    accepted = Accepted(
+                        stop.id, stop, rec.purposes.ifEmpty { setOf(Purpose.RESTROOM) },
+                        suggested = rec.kind != PromptKind.URGENT_RESULT, mono,
+                    )
                 } else if (rec.kind == PromptKind.REST_SUGGESTION) {
                     restWantedAt = mono
                 }
@@ -680,7 +740,19 @@ class CoachEngine(
         user: Boolean = false,
         fresh: Boolean = true,
         purposes: Set<Purpose> = emptySet(),
-    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh)
+        reasons: List<Reason> = emptyList(),
+    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh, reasons)
+
+    /**
+     * 사용자의 말에 답할 곳([stop])이 이미 들르기로 한 곳이면 '들를까요?' 대신 낼 안내, 아니면 null.
+     * 다시 물으면 '응'에 같은 곳으로 내비 명령이 한 번 더 간다 (UI 감사 #9: 안내를 시작한 곳을 "바로 안내할까요?"라고 또 물었다)
+     */
+    private fun goingThere(stop: StopCandidate?, distanceM: Double?, fresh: Boolean, prefix: String? = null): PromptPolicy.Candidate? {
+        val a = accepted ?: return null
+        if (stop == null || a.stopId != stop.id) return null
+        val text = texts.alreadyAccepted(stop.name, distanceM)
+        return ask(PromptKind.INFO, if (prefix != null) "$prefix $text" else text, user = true, fresh = fresh)
+    }
 
     private fun addCand(c: PromptPolicy.Candidate, owner: Pending?) {
         promptCands += c
@@ -698,6 +770,7 @@ class CoachEngine(
         candidates: List<StopCandidate>,
         speed: Float?,
     ): Recommendation? {
+        askedRestroomStop()?.let { return it }
         accepted?.let { a ->
             return rec(a.stop, a.purposes, listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())))
         }
@@ -708,10 +781,7 @@ class CoachEngine(
             val best = ranker.rank(candidates, ctx.wallNow, local, needs.has(OccupantType.INFANT), speed, 1).firstOrNull()
             val stop = best?.stop ?: nowRestroom?.stop
             if (stop != null) {
-                return rec(
-                    stop, purposesFor(stop, Purpose.RESTROOM, ctx),
-                    listOf(Reason("NEXT_NEAREST_RESTROOM", texts.reasonNextNearestRestroom())),
-                )
+                return rec(stop, purposesFor(stop, Purpose.RESTROOM, ctx), listOf(nearestRestroomReason()))
             }
         }
         if (lastChance != null) {
@@ -724,6 +794,24 @@ class CoachEngine(
             return rec(mealTarget.stop, purposesFor(mealTarget.stop, Purpose.MEAL, ctx), listOf(Reason("NEXT_MEAL", texts.reasonNextMeal())))
         }
         return null
+    }
+
+    private fun nearestRestroomReason() = Reason("NEXT_NEAREST_RESTROOM", texts.reasonNextNearestRestroom())
+
+    /**
+     * 떠 있는 화장실 질문(마지막 기회, 여유 없음, "화장실 가고 싶대"의 답)의 장소와 이유. 그런 질문이 없거나 그 장소가 지금 후보에 없으면 null.
+     * 화면은 질문 카드를 띄우는 틱의 추천에서 이유를 가져온다(같은 장소일 때만). 추천이 다른 곳이거나 다른 이유면 "정체 전 마지막
+     * 화장실이에요"라고 묻는 카드에 '가까운 화장실' 딱지가 붙는다(UI 감사 #6). 카드는 엔진이 낸 틱보다 늦게 뜰 수도 있어서
+     * 질문이 떠 있는 내내 맞춘다. 거리는 지금 후보의 값이다 (지금 목록에 없으면 물은 때의 거리를 지금 값처럼 내보내지 않는다).
+     */
+    private fun askedRestroomStop(): Recommendation? {
+        val q = policy.active ?: return null
+        if (q.kind != PromptKind.LAST_CHANCE || q.reasons.isEmpty()) return null
+        val id = q.targetId ?: return null
+        val cur = currentCandidates.firstOrNull { it.id == id } ?: return null
+        val d = route.distanceOf(cur)
+        if (d.isNaN() || d <= 0.0) return null
+        return rec(cur, q.purposes.ifEmpty { setOf(Purpose.RESTROOM) }, q.reasons)
     }
 
     /** 한 정차에서 함께 해결할 수 있는 목적을 묶는다 */

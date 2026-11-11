@@ -81,11 +81,22 @@ open class CoachTexts {
      * 운전을 바꿀 사람이 있으면 교대를 권한다 (ai-science.md 2장). 카페인은 선택지로만 말한다.
      */
     open fun restSuggestionSleepy(stop: String?, distanceM: Double?, canSwapDriver: Boolean = false): String {
-        val advice = if (canSwapDriver) "커피 한 잔 뒤 15분 이내로 눈을 붙이거나 운전을 바꾸는 게 좋아요."
-        else "쉬기만 하기보다 커피 한 잔 뒤 15분 이내로 눈을 붙이는 게 좋아요."
-        return if (stop != null && distanceM != null) "졸릴 땐 $advice ${distance(distanceM)} 앞 ${stop}에 들를까요?"
-        else "졸릴 땐 $advice 가까운 쉼터를 찾아 들를까요?"
+        val advice = sleepyAdvice(canSwapDriver)
+        return if (stop != null && distanceM != null) "$advice ${distance(distanceM)} 앞 ${stop}에 들를까요?"
+        else "$advice 가까운 쉼터를 찾아 들를까요?"
     }
+
+    /** 졸릴 때의 권고 한 문장: 커피 뒤 15분 이내 낮잠, 운전을 바꿀 사람이 있으면 교대 */
+    open fun sleepyAdvice(canSwapDriver: Boolean): String =
+        if (canSwapDriver) "졸릴 땐 커피 한 잔 뒤 15분 이내로 눈을 붙이거나 운전을 바꾸는 게 좋아요."
+        else "졸릴 땐 쉬기만 하기보다 커피 한 잔 뒤 15분 이내로 눈을 붙이는 게 좋아요."
+
+    /**
+     * 사용자의 말("화장실 급해", "아이가 화장실 가고 싶대", "쉬고 싶어" 등)에 답할 곳이 이미 들르기로 한 곳일 때.
+     * '들를까요?'를 다시 묻지 않는다: "가휴게소에 들르기로 했어요. 6km 남았어요."
+     */
+    open fun alreadyAccepted(stop: String, distanceM: Double?): String =
+        if (distanceM != null) "${stop}에 들르기로 했어요. ${distance(distanceM)} 남았어요." else "${stop}에 들르기로 했어요."
 
     /** "좀 쉬고 싶어"에 대한 응답 */
     open fun restSuggestionWanted(stop: String?, distanceM: Double?): String =
@@ -225,6 +236,12 @@ open class CoachTexts {
 
     open fun reasonNextAccepted(): String = "경유지로 넣기로 한 곳이에요"
     open fun reasonNextNearestRestroom(): String = "가장 빨리 갈 수 있는 화장실이에요"
+
+    /** "화장실 가고 싶대"에 답한 곳 (코드 NEXT_REQUESTED_RESTROOM) */
+    open fun reasonNextRequestedRestroom(): String = "화장실이 필요하다고 해서 찾은 다음 화장실이에요"
+
+    /** 수유·반려견 요청에 답한 곳 (코드 NEXT_REQUESTED_CARE) */
+    open fun reasonNextRequestedCare(): String = "잠깐 쉬어 갈 수 있는 다음 정차지예요"
     open fun reasonLastChanceCongestion(congestionMin: Int): String =
         "이곳을 지나면 ${duration(congestionMin)} 정체 구간에 화장실이 없어요"
     open fun reasonLastChanceGap(gapMin: Int): String = "이곳을 지나면 다음 화장실까지 ${duration(gapMin)} 걸려요"
