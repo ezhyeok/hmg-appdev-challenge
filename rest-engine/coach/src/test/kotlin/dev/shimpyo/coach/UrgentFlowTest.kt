@@ -236,12 +236,49 @@ class UrgentFlowTest {
         val f = ready()
         f.onGoToStarted(wc)
         f.onGoToFinished(wc, ok = true, nowMs = 20_000)
-        f.track(null, "wc", 60_000)
-        f.track(null, null, 60_000 + UrgentFlow.PIN_GRACE_MS)
+        f.track(null, "wc", null, 60_000)
+        f.track(null, null, null, 60_000 + UrgentFlow.PIN_GRACE_MS)
         assertEquals(wc, f.pinned)
-        f.track(null, "other", 60_001 + UrgentFlow.PIN_GRACE_MS)
+        f.track(null, "other", null, 60_001 + UrgentFlow.PIN_GRACE_MS)
         assertNull(f.pinned)
         assertTrue(f.extras().isEmpty())
+    }
+
+    @Test
+    fun thePinIsKeptWhileTheEngineAsksAboutAnotherStop() {
+        // 엔진의 추천은 떠 있는 화장실 질문의 장소를 따라간다 (들르기로 한 곳이 있어도, 질문 수명 45초까지). 그 동안은 엔진이 들르기로 한
+        // 곳을 내린 것이 아니다: 여기서 고정을 풀면 그곳이 후보에서 빠지고 엔진은 1분 뒤 그곳을 잊는다
+        val f = ready()
+        f.onGoToStarted(wc)
+        f.onGoToFinished(wc, ok = true, nowMs = 20_000)
+        f.track(null, "wc", null, 60_000)
+        // "화장실 급해"를 또 말했다: 엔진이 더 빠른 곳(gas)을 45초 동안 묻는다
+        for (s in 1..45) f.track(null, "gas", "gas", 60_000 + s * 1_000L)
+        assertEquals("질문이 떠 있는 동안은 그대로다", wc, f.pinned)
+        assertTrue(wc in f.extras())
+        // 대답 없이 끝났다: 추천이 들르기로 한 곳으로 돌아온다
+        f.track(null, "wc", null, 106_000)
+        assertEquals(wc, f.pinned)
+
+        // 질문에 '응'이라고 해서 들르기로 한 곳이 바뀌었으면(추천이 다른 곳, 질문은 없다) 유예 뒤에 푼다
+        for (s in 1..10) f.track(null, "gas", "gas", 106_000 + s * 1_000L)
+        f.track(null, "gas", null, 117_000)
+        assertEquals("질문이 끝난 때부터 유예를 센다", wc, f.pinned)
+        f.track(null, "gas", null, 117_000 + UrgentFlow.PIN_GRACE_MS)
+        assertNull(f.pinned)
+    }
+
+    @Test
+    fun aQuestionAboutSomethingElseDoesNotHoldThePin() {
+        // 추천이 질문의 장소를 따라간 것이 아니면(질문에 장소가 없다, 질문과 추천이 다른 곳이다) 엔진이 그곳을 내린 것이다
+        val f = ready()
+        f.onGoToStarted(wc)
+        f.onGoToFinished(wc, ok = true, nowMs = 20_000)
+        f.track(null, "wc", null, 60_000)
+        f.track(null, "gas", "oksan", 60_000 + UrgentFlow.PIN_GRACE_MS)
+        assertEquals(wc, f.pinned)
+        f.track(null, "gas", "oksan", 60_001 + UrgentFlow.PIN_GRACE_MS)
+        assertNull(f.pinned)
     }
 
     @Test
@@ -253,7 +290,7 @@ class UrgentFlowTest {
         var t = 0L
         fun drive(m: Double) {
             t += 1_000
-            f.track(at(m), "wc", t)
+            f.track(at(m), "wc", null, t)
         }
         drive(3_000.0); drive(2_000.0); drive(900.0)
         drive(900.0 + UrgentFlow.PASSED_M - 5.0)
@@ -267,11 +304,11 @@ class UrgentFlowTest {
         val f = ready()
         f.onGoToStarted(wc)
         f.onGoToFinished(wc, ok = true, nowMs = 0L)
-        f.track(at(400.0), "wc", 1_000)
-        f.track(at(120.0), "wc", 2_000)
-        f.track(at(UrgentFlow.ARRIVED_M - 5.0), "wc", 3_000)
+        f.track(at(400.0), "wc", null, 1_000)
+        f.track(at(120.0), "wc", null, 2_000)
+        f.track(at(UrgentFlow.ARRIVED_M - 5.0), "wc", null, 3_000)
         assertEquals("150m 안에 있는 동안은 도착해 있는 것이다", wc, f.pinned)
-        f.track(at(UrgentFlow.ARRIVED_M + 10.0), "wc", 4_000)
+        f.track(at(UrgentFlow.ARRIVED_M + 10.0), "wc", null, 4_000)
         assertNull("들어갔다 나오면 떠난 것이다 (300m를 기다리지 않는다)", f.pinned)
     }
 
@@ -279,11 +316,11 @@ class UrgentFlowTest {
     fun aStopOnItsWayToTheNaviIsNotDroppedForBeingPassedButItsClosestApproachCounts() {
         val f = ready()
         f.onGoToStarted(wc)
-        f.track(at(100.0), null, 1_000)
-        f.track(at(2_000.0), null, 2_000)
+        f.track(at(100.0), null, null, 1_000)
+        f.track(at(2_000.0), null, null, 2_000)
         assertEquals("넣는 중에는 빼지 않는다 (결과가 정한다)", listOf(wc, gas, wc), f.extras())
         f.onGoToFinished(wc, ok = true, nowMs = 3_000)
-        f.track(at(2_100.0), "wc", 4_000)
+        f.track(at(2_100.0), "wc", null, 4_000)
         assertNull("넣는 동안 이미 지나쳤으면 다음 틱에 뺀다", f.pinned)
     }
 
@@ -292,7 +329,7 @@ class UrgentFlowTest {
         val f = ready()
         f.onGoToStarted(wc)
         f.onGoToFinished(wc, ok = true, nowMs = 0L)
-        for (i in 1..600) f.track(null, "wc", i * 1_000L)
+        for (i in 1..600) f.track(null, "wc", null, i * 1_000L)
         assertEquals(wc, f.pinned)
     }
 

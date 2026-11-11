@@ -22,7 +22,7 @@ import dev.shimpyo.engine.StopCandidate
  * 고정: 목록에서 고른 곳은 대개 경로 후보가 아니라서, 엔진 후보([extras])에 계속 넣어 줘야 엔진이 '들르기로 한 곳'을 잊지 않는다.
  * 들르기를 시작할 때부터 넣고(화면을 닫아도 남는다, 9c), 실패하면 뺀다. 성공한 뒤에는 지나쳤거나(직선거리가 가장 가까웠던 때보다
  * [PASSED_M] 넘게 멀어짐, 또는 [ARRIVED_M] 안까지 갔다가 벗어남) 엔진이 [PIN_GRACE_MS] 넘게 추천하지 않으면(도착해 섰다, 엔진이
- * 내렸다) 푼다. 예전에는 엔진이 추천을 멈출 때만 풀었는데, 고정이 후보를 대 주므로 엔진은 지나친 곳을 90분 동안 추천했다 (R-F1).
+ * 내렸다) 푼다. 엔진이 다른 곳을 묻느라 추천이 그 질문의 장소를 따라가는 동안은 세지 않는다. 예전에는 엔진이 추천을 멈출 때만 풀었는데, 고정이 후보를 대 주므로 엔진은 지나친 곳을 90분 동안 추천했다 (R-F1).
  *
  * @param seedMs 음성으로 연 요청 번호의 시작점 (코어를 만든 때의 경과 시간). 화면은 닫은 번호를 기억하므로 다시 뜬 코어가 앞 코어의
  *   번호를 또 쓰면 안 된다 (UI 닫힘 검증 N4)
@@ -195,9 +195,13 @@ class UrgentFlow(seedMs: Long = 0L) {
 
     /**
      * 틱마다 차 위치([pos], 모르면 null)와 엔진의 추천을 본다. 들르기로 한 곳을 지나쳤거나 엔진이 더는 추천하지 않으면 고정을 푼다:
-     * 그러면 후보에서 빠지고 엔진이 그곳을 잊어 보통 추천으로 돌아간다
+     * 그러면 후보에서 빠지고 엔진이 그곳을 잊어 보통 추천으로 돌아간다.
+     *
+     * [askedStopId]: 엔진이 지금 묻고 있는 질문의 장소 (CoachOutput.prompt.stop). 엔진의 추천은 떠 있는 화장실 질문의 장소를 따라간다
+     * (들르기로 한 곳이 있어도, 질문 수명 45초까지). 추천이 그 질문의 장소인 동안은 엔진이 들르기로 한 곳을 내린 것이 아니므로
+     * 유예를 세지 않는다: 여기서 고정을 풀면 그곳이 후보에서 빠지고, 질문이 대답 없이 끝난 뒤 엔진이 그곳을 잊는다
      */
-    fun track(pos: Fix?, nextStopId: String?, nowMs: Long) {
+    fun track(pos: Fix?, nextStopId: String?, askedStopId: String?, nowMs: Long) {
         // 넣는 중에도 가장 가까웠던 거리는 잰다 (내비 확인이 20초 걸리는 동안 500m를 간다)
         picking?.let { p -> if (pos != null) p.minDistM = minOf(p.minDistM, distanceM(pos, p.stop)) }
         val p = pin ?: return
@@ -209,7 +213,8 @@ class UrgentFlow(seedMs: Long = 0L) {
                 return
             }
         }
-        if (nextStopId == p.stop.id) p.seenAtMs = nowMs else if (nowMs - p.seenAtMs > PIN_GRACE_MS) pin = null
+        val followsQuestion = nextStopId != null && nextStopId == askedStopId
+        if (nextStopId == p.stop.id || followsQuestion) p.seenAtMs = nowMs else if (nowMs - p.seenAtMs > PIN_GRACE_MS) pin = null
     }
 
     private fun distanceM(pos: Fix, stop: StopCandidate) = Geo.distanceM(pos.lat, pos.lon, stop.lat, stop.lon)
@@ -231,7 +236,7 @@ class UrgentFlow(seedMs: Long = 0L) {
         const val REFRESH_MS = 10_000L
         const val RADIUS_M = 5_000.0
         const val MAX = 15
-        /** 고정한 곳을 엔진이 추천하지 않은 채로 두는 시간 */
+        /** 고정한 곳을 엔진이 추천하지 않은 채로 두는 시간 (엔진이 다른 곳을 묻는 동안은 빼고) */
         const val PIN_GRACE_MS = 15_000L
         /** 가장 가까웠던 때보다 이만큼 넘게 멀어지면 지나친 것이다 (m) */
         const val PASSED_M = 300.0

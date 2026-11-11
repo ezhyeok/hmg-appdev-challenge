@@ -326,7 +326,7 @@ class CoachCore(private val d: CoachDeps) {
             lastOutput = out
             toMachine(PromptEvent.EngineTick(out.prompt, out.next, out.parked))
             autoFreshAir(out, el)
-            urgent.track(pos, out.next?.stop?.id, el)
+            urgent.track(pos, out.next?.stop?.id, out.prompt?.stop?.id, el)
         }
         if (freshAir.takeRevert(el, d.hub.recirculation)) revertFreshAir()
         desk.tick(el)
