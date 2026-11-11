@@ -224,6 +224,26 @@ class ContextFactorEngineTest {
         assertTrue("RESTROOM_AFTER_MEAL" in leaving.codes())
     }
 
+    @Test
+    fun aStopSeenOnlyAtItsStartAndAgainMuchLaterStillCounts() {
+        // 앱이 정차 중에 다시 시작하면 정차 시작 시각의 P 입력 한 번과 지금 입력만 온다 (CoachWorld.newEngine).
+        // 그 한 번의 update에서 화장실 정차·휴식·식사 길이가 함께 판정돼도 순서와 상관없이 같은 결과여야 한다
+        val e = engine(adult())
+        e.update(CoachInput(now = noon, gear = Gear.DRIVE, speedKph = 100f))
+        val park = noon + 10 * MIN
+        e.update(CoachInput(now = park, gear = Gear.PARK, speedKph = 0f, doorOpened = true))
+        val later = e.update(CoachInput(now = park + 25 * MIN, gear = Gear.PARK, speedKph = 0f, candidates = listOf(foodHere)))
+        assertEquals(98, later.restroom.minutes, "시계는 3분에 돌아갔고(22분 전) 식사 정차다: 120 − 22")
+        assertTrue("RESTROOM_AFTER_MEAL" in later.codes())
+        // 떠나는 update에서야 알게 돼도 같다
+        val e2 = engine(adult())
+        e2.update(CoachInput(now = noon, gear = Gear.DRIVE, speedKph = 100f))
+        e2.update(CoachInput(now = park, gear = Gear.PARK, speedKph = 0f, doorOpened = true, candidates = listOf(foodHere)))
+        val leaving = e2.update(CoachInput(now = park + 25 * MIN, gear = Gear.DRIVE, speedKph = 20f))
+        assertEquals(98, leaving.restroom.minutes)
+        assertTrue("RESTROOM_AFTER_MEAL" in leaving.codes())
+    }
+
     // ------------------------------------------------------------ 식사 정차: 수락한 정차, "배고파"
 
     /** "배고파" → 식사 제안 → "응". 수락한 정차의 목적에 식사가 들어간다 */

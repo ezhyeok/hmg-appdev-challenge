@@ -31,6 +31,7 @@ internal class MealStopRule(private val config: CoachConfig, private val local: 
     private var placeKnown = false
     private var placeFood = false
     private var movedSinceM = 0.0
+    private var wasParked = false
 
     /**
      * 매 update에 한 번, 정차 판정([StopTracker.update]) 바로 뒤에 부른다.
@@ -67,12 +68,14 @@ internal class MealStopRule(private val config: CoachConfig, private val local: 
             placeKnown = true
             placeFood = best.facilities.food
             movedSinceM = 0.0
-        } else if (placeKnown && !parked && dtMs > 0L) {
-            // 차속을 모르면 고속으로 달린 것으로 본다 (기억을 일찍 버리는 쪽)
+        } else if (placeKnown && !parked && !wasParked && dtMs > 0L) {
+            // 지난 update에도 달리고 있었을 때만 그 사이를 달린 거리로 센다: 정차를 떠나는 update의 dt는 서 있던 시간이다
+            // (update가 드물면 25분이기도 하다). 차속을 모르면 고속으로 달린 것으로 본다 (기억을 일찍 버리는 쪽)
             val kph = speedKph?.toDouble() ?: config.highwayAvgSpeedKph
             movedSinceM += kph / 3.6 * dtMs / 1000.0
             if (movedSinceM > ARRIVAL_MAX_TRAVEL_M) placeKnown = false
         }
+        wasParked = parked
     }
 
     /**

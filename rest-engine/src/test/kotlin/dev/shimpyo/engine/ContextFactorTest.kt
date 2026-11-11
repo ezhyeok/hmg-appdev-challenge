@@ -176,6 +176,33 @@ class ContextFactorTest {
     }
 
     @Test
+    fun eachMealStopStartsItsOwnInterval() {
+        // 점심(0.8) 뒤 저녁(0.9): 두 번째 정차에서 시계가 돌아가면 앞 배수는 풀리고 새 배수가 걸린다
+        val quiet = cfg.copy(restroomMinObservedMin = 10_000.0)
+        val m = model(listOf(adult()), noon, quiet)
+        m.mealStop(noon + 10 * MIN)
+        val dinner = noon + 8 * 60 * MIN
+        m.onRestroomStop(dinner + 3 * MIN, PersonalMemory())
+        assertEquals(1.0, m.who("me").mealFactor, "저녁 정차가 식사 정차로 판정되기 전")
+        m.onMealStop(dinner, dinner + 20 * MIN, 0.9)
+        assertEquals(0.9, m.who("me").mealFactor)
+        assertEquals(108, m.gauge(dinner + 30 * MIN, texts).minutes)
+    }
+
+    @Test
+    fun someoneWhoJoinsAfterTheMealStopHasAPlainInterval() {
+        val clock = EngineClock().apply { advance(noon) }
+        val m = RestroomNeedModel(cfg).also { it.sync(TripProfile(listOf(adult()), tripStart = noon), clock, PersonalMemory()) }
+        m.mealStop(noon + 10 * MIN)
+        clock.advance(noon + 50 * MIN)
+        val joined = TripProfile(listOf(adult(), child("kid", 7)), tripStart = noon, lastRestroomAt = mapOf("kid" to noon + 45 * MIN))
+        m.sync(joined, clock, PersonalMemory())
+        m.onMealStop(noon + 10 * MIN, noon + 40 * MIN, 0.8) // 엔진은 서 있는 동안만 부르지만, 다시 불려도 구간이 그 정차에서 시작한 사람만
+        assertEquals(0.8, m.who("me").mealFactor)
+        assertEquals(1.0, m.who("kid").mealFactor)
+    }
+
+    @Test
     fun aFactorOfOneOrANonsenseFactorDoesNothing() {
         for (f in listOf(1.0, 0.0, -0.5, Double.NaN, Double.POSITIVE_INFINITY)) {
             val m = model(listOf(adult()), noon)
@@ -390,6 +417,20 @@ class ContextFactorTest {
     }
 
     @Test
+    fun aRestroomStopResetsASleepingChildLikeEveryoneElse() {
+        // 지금 규칙 그대로: 화장실 정차는 모두의 시계를 돌린다 (누가 내렸는지 엔진은 모른다). 잠든 아이 목록을 비우는 것은 앱의 일이다
+        // (need-covariates 8장: 화장실 정차가 있으면 해제). 목록에 남아 있으면 새 구간도 늘려 잡는다
+        val m = model(listOf(child("kid", 7)), nine)
+        m.run(nine, nine + 60 * MIN, setOf("kid"))
+        m.onRestroomStop(nine + 60 * MIN, PersonalMemory())
+        m.run(nine + 60 * MIN, nine + 60 * MIN, setOf("kid"))
+        assertEquals(0.0, m.tauMin(m.who("kid"), nine + 60 * MIN))
+        assertTrue(m.who("kid").asleep)
+        m.run(nine + 60 * MIN, nine + 90 * MIN, setOf("kid"))
+        approx(20.0, m.tauMin(m.who("kid"), nine + 90 * MIN), 1e-9)
+    }
+
+    @Test
     fun theAsleepFactorOfOneTurnsItOff() {
         val off = cfg.copy(asleepIntervalFactor = 1.0)
         val m = model(listOf(child("kid", 7)), nine, off)
@@ -471,6 +512,20 @@ class ContextFactorTest {
         assertEquals(93, capped.minutes, "120 − 27")
         assertEquals(listOf("RESTROOM_ELAPSED", "RESTROOM_CAP"), capped.codes(), "게이지를 정하지 않는 배수는 이유로 내지 않는다")
         approx(120.0 - 27, long.deadlineMin(noon + 40 * MIN, 0.3)!!, 1e-9, "마감도 상한에서 멈춘다")
+    }
+
+    @Test
+    fun awakePeopleGetNoTimeOfDayFactor() {
+        // need-covariates 9장 1번: 밤에 소변이 주는 것은 잠 때문이다. 깨어 있는 사람의 곡선은 새벽 3시와 오후 3시가 같아야 한다
+        // (밤에는 열린 화장실이 적어 늦게 잡는 쪽이 더 위험하다). 깨어 있는 아이도 같다
+        val people = listOf(adult(), child("kid", 7), Occupant("g", OccupantType.ELDERLY))
+        val readings = listOf(kst(2026, 9, 24, 15, 0), kst(2026, 9, 25, 3, 0), kst(2026, 9, 24, 19, 30), kst(2026, 9, 25, 6, 30)).map { start ->
+            val m = model(people, start)
+            m.run(start, start + 50 * MIN, step = MIN)
+            Triple(m.gauge(start + 50 * MIN, texts), m.deadlineMin(start + 50 * MIN, 0.3), m.tracked.map { m.tauMin(it, start + 50 * MIN) })
+        }
+        for (r in readings.drop(1)) assertEquals(readings[0], r)
+        assertEquals(55, readings[0].first.minutes)
     }
 
     @Test

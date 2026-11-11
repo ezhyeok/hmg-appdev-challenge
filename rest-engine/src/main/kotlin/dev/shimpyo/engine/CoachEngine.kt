@@ -463,6 +463,7 @@ class CoachEngine(
         val fatigueFirstS = (fe.gauge.minutes ?: 0) * 60.0
         val sleep = profile.driverSleepHours
         val awakeNow = fatigue.awakeHours(mono)
+        // 영아·반려견의 시계는 문맥 보정(식사·잠)을 받지 않으므로 지난 시간과 문턱을 그대로 쓴다
         val care = ArrayList<PitStopPlanner.Care>(2)
         needs.firstOf(OccupantType.INFANT)?.let { t ->
             care += PitStopPlanner.Care(
