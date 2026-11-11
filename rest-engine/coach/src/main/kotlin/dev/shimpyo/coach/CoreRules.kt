@@ -142,8 +142,33 @@ object HealthConsent {
     }
 }
 
+/**
+ * 차의 진행 방향: 움직이는 동안 마지막으로 본 방위. 느려지거나 서도 그 방위를 계속 쓴다 (움직인 적이 없으면 모름).
+ *
+ * 느리거나 선 차의 위치 방위는 믿을 수 없다(0.0이거나 오래된 값, 데이터 감사 #10). 예전에는 그때 방위를 null로 넘겼는데,
+ * 방위가 없으면 앞쪽 후보 검색(StopIndex.ahead)이 방향을 하나도 거르지 않는다: 길안내 없이 정체 속을 기어가는 차에게 뒤쪽·반대 차로
+ * 시설이 갔고(경부선 재생에서 앞 6곳 중 같은 길 앞쪽이 205곳 → 43곳), 같은 이름 휴게소 쌍도 차로 방위로 고르지 못했다
+ * (닫힘 검증 C1). 정체에 들어가도 진행 방향은 그대로다. 시설 안에 반대로 세운 차는 StopRepository의 '시설 안' 예외
+ * (휴게소·졸음쉼터 250m 안이고 본선 위가 아니면 차로를 보지 않는다)가 맡는다.
+ */
+class TravelHeading {
+    /** 지금 쓸 진행 방향 (도, 북=0). 움직인 적이 없으면 null */
+    var heading: Float? = null
+        private set
+
+    /** 틱마다 실제 위치·차속·기어를 넣는다. 움직이는 중이면 그 방위를 기억한다. 지금 쓸 진행 방향을 돌려준다 */
+    fun update(real: Fix?, speedKph: Float?, gear: Gear): Float? {
+        val h = real?.heading
+        if (h != null && moving(speedKph, gear)) heading = h
+        return heading
+    }
+
+    /** P가 아니고 [CoreRules.SLOW_KPH] 이상 (차속을 모르면 P가 아닌 것으로 본다: 위치 SDK의 방위를 믿던 예전과 같다) */
+    private fun moving(speedKph: Float?, gear: Gear): Boolean = gear != Gear.PARK && (speedKph == null || speedKph >= CoreRules.SLOW_KPH)
+}
+
 object CoreRules {
-    /** 이보다 느리면 방위를 믿지 않는다 (km/h) */
+    /** 이보다 느리면 위치의 방위를 믿지 않는다 (km/h). 그동안은 마지막으로 움직일 때의 방위를 쓴다 ([TravelHeading]) */
     const val SLOW_KPH = 10f
 
     /**
@@ -155,14 +180,14 @@ object CoreRules {
     )
 
     /**
-     * 정차 후보 검색에 넘길 위치. 실제 위치이고 차가 서 있거나(P) 느리면 방위를 null로 둔다(0.0이나 오래된 방위로 앞뒤가
-     * 뒤집히지 않게, 데이터 감사 #10·data.md 3.3 '부르는 쪽 계약'). 시연 위치([pos]가 [real]과 다른 것)는 시연 경로의 방위라 그대로 쓴다.
+     * 정차 후보 검색에 넘길 위치. 실제 위치면 방위를 진행 방향([travelHeading], TravelHeading)으로 바꾼다: 느리거나 선 차의
+     * 위치 방위(0.0이나 오래된 값)로 앞뒤가 뒤집히지 않게 (데이터 감사 #10·data.md 3.3 '부르는 쪽 계약'). 움직인 적이 없으면 방위 없이 찾는다.
+     * 시연 위치([pos]가 [real]과 다른 것)는 시연 경로의 방위라 그대로 쓴다.
      */
-    fun searchFix(pos: Fix?, real: Fix?, speedKph: Float?, gear: Gear): Fix? {
+    fun searchFix(pos: Fix?, real: Fix?, travelHeading: Float?): Fix? {
         if (pos == null) return null
         if (pos !== real) return pos
-        val slow = gear == Gear.PARK || (speedKph != null && speedKph < SLOW_KPH)
-        return if (slow && pos.heading != null) pos.copy(heading = null) else pos
+        return if (pos.heading == travelHeading) pos else pos.copy(heading = travelHeading)
     }
 
     /**

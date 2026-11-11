@@ -144,15 +144,15 @@ class CoreRulesTest {
     // ------------------------------------------------------------ 검색 위치 (데이터 감사 #10)
 
     @Test
-    fun aParkedOrSlowRealFixSearchesWithoutAHeading() {
-        val real = Fix(37.0, 127.0, 0f)
-        assertNull("P", CoreRules.searchFix(real, real, 0f, Gear.PARK)!!.heading)
-        assertNull("느림", CoreRules.searchFix(real, real, 5f, Gear.DRIVE)!!.heading)
-        assertEquals("달리면 방위를 쓴다", 0f, CoreRules.searchFix(real, real, 60f, Gear.DRIVE)!!.heading)
-        assertEquals("차속을 모르고 D면 쓴다", 0f, CoreRules.searchFix(real, real, null, Gear.DRIVE)!!.heading)
+    fun aRealFixSearchesWithTheTravelHeadingAndADemoFixWithItsOwn() {
+        val real = Fix(37.0, 127.0, 0f) // 서 있는 차의 위치 방위 0.0은 믿을 수 없다
+        assertEquals("진행 방향으로 찾는다", 161f, CoreRules.searchFix(real, real, travelHeading = 161f)!!.heading)
+        assertNull("움직인 적이 없으면 방위 없이", CoreRules.searchFix(real, real, travelHeading = null)!!.heading)
+        val moving = Fix(37.0, 127.0, 161f)
+        assertSame("방위가 같으면 같은 위치 그대로", moving, CoreRules.searchFix(moving, moving, travelHeading = 161f))
         val demo = Fix(36.7, 127.2, 160f)
-        assertSame("시연 위치는 시연 경로의 방위 그대로", demo, CoreRules.searchFix(demo, real, 0f, Gear.PARK))
-        assertNull(CoreRules.searchFix(null, real, 60f, Gear.DRIVE))
+        assertSame("시연 위치는 시연 경로의 방위 그대로", demo, CoreRules.searchFix(demo, real, travelHeading = 20f))
+        assertNull(CoreRules.searchFix(null, real, travelHeading = 161f))
     }
 
     @Test

@@ -76,6 +76,7 @@ class CoachCore(private val d: CoachDeps) {
     private val plans = PlanKeeper(seedMs = d.elapsed.elapsedMs())
     private val freshAir = FreshAirGate()
     private val memorySaver = MemorySaver()
+    private val travel = TravelHeading()
 
     private var started = false
     private var lastInput: CoachInput? = null
@@ -246,6 +247,7 @@ class CoachCore(private val d: CoachDeps) {
         val pos = a.world.position(real)
         val gear = d.hub.gear
         val speed = d.hub.speedKph
+        val heading = travel.update(real, speed, gear)
         val (samples, door) = d.hub.drain(t)
 
         recorder.onTick(t, gear, speed, door, pos, a.world.persistsHistory)?.let { r ->
@@ -277,7 +279,7 @@ class CoachCore(private val d: CoachDeps) {
                 cabinAutoAllowed = d.settings.autoFreshAir,
             ),
         )
-        d.loopInputs.request = CandidateRequest(CoreRules.searchFix(pos, real, speed, gear), navi, a.world.candidatePolicy)
+        d.loopInputs.request = CandidateRequest(CoreRules.searchFix(pos, real, heading), navi, a.world.candidatePolicy)
         val out = try {
             a.engine.update(input)
         } catch (e: Exception) {
@@ -705,7 +707,9 @@ class CoachCore(private val d: CoachDeps) {
         d.oracle.enabled = a.world.oracleEnabled
         d.loopInputs.naviFallback = a.world.usesNaviLocationFallback
         val real = d.positions.current.value?.fix
-        d.loopInputs.request = CandidateRequest(CoreRules.searchFix(a.world.position(real), real, d.hub.speedKph, d.hub.gear), d.tracker.snapshot.value, a.world.candidatePolicy)
+        // 시작하자마자 달리고 있으면 첫 후보 갱신부터 진행 방향을 안다 (첫 틱을 기다리면 방위 없이 한 번 만든 목록이 20초 간다)
+        val heading = travel.update(real, d.hub.speedKph, d.hub.gear)
+        d.loopInputs.request = CandidateRequest(CoreRules.searchFix(a.world.position(real), real, heading), d.tracker.snapshot.value, a.world.candidatePolicy)
     }
 
     /**
@@ -746,7 +750,7 @@ class CoachCore(private val d: CoachDeps) {
             UrgentFlow.Step.NO_LOCATION -> speak("현재 위치를 아직 모르겠어요")
             UrgentFlow.Step.SEARCH -> {
                 val real = d.positions.current.value?.fix
-                val f = CoreRules.searchFix(pos, real, d.hub.speedKph, d.hub.gear)!!
+                val f = CoreRules.searchFix(pos, real, travel.heading)!!
                 val near = d.stops.near(f.lat, f.lon, f.heading, UrgentFlow.RADIUS_M, CoreRules.PARKABLE_KINDS, now = input.now, limit = UrgentFlow.MAX)
                 // 화면 목록과 엔진의 급해 질문이 같은 곳을 1등으로 고르도록 같은 후보(경로 후보 + 가까운 화장실)로 순위를 매긴다
                 val ranked = try {
