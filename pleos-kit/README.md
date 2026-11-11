@@ -20,7 +20,7 @@ Pleos Connect SDK(Vehicle, NaviHelper, TTS, STT, FusedLocation)와 AAOS Car API�
 | Car 서비스가 죽으면 `createCar(context)`로 만든 연결은 프로세스를 죽인다 | `CarState`는 상태 리스너를 받는 `createCar`로 만들고 `connected`로 알린다 (API 30+) |
 | Pleos 차량 서비스가 멈추면(`force-stop`) SDK는 다시 붙지 않고 값이 언다 | `VehicleKit.reconnect()`, `LocationKit.reconnect()`가 SDK 객체를 버리고 새로 붙는다. 신호 객체는 그대로 쓸 수 있다 |
 | TTS/STT 이벤트에 요청 번호가 없다. 쉬는 TTS에 `stop()`을 보내도 `onStop`이 온다 | `TurnRunner`(Turns.kt): 요청을 하나씩 보내고, 앞 요청의 끝남 이벤트를 받은 뒤 다음을 보낸다. 하는 중이 아니면 `stop()`은 SDK를 부르지 않는다 |
-| STT는 `request()` 뒤 0.2~8초가 지나야 녹음을 시작한다(`onReady`). 듣는 시간을 요청부터 재면 그만큼 줄어든다 | `SttKit.listen(timeoutMs, onMicOpen)`: 듣는 시간은 `onReady`부터 잰다(`listenWindow`). 12초 안에 열리지 않으면 null. '듣는 중' 표시는 `onMicOpen`에서 켠다 |
+| STT는 `request()` 뒤 0.2~10초가 지나야 녹음을 시작한다(`onReady`). 듣는 시간을 요청부터 재면 그만큼 줄어든다 | `SttKit.listen(timeoutMs, onMicOpen)`: 듣는 시간은 `onReady`부터 잰다(`listenWindow`). 15초 안에 열리지 않으면 null. '듣는 중' 표시는 `onMicOpen`에서 켠다 |
 | 내비는 새 경유지를 늘 뒤에 붙이고, 셋째는 조용히 버리고, 경유지 좌표를 돌려주지 않는다 | `NaviKit.addWaypoint`는 이름으로 확인하고 가득 차 있으면 곧바로 false. 순서를 정하려면 `NaviKit.setWaypoints` |
 | 취소를 SDK 실패로 바꾸면 쓰는 쪽이 취소를 실패로 센다 | `sdkSend`·`sdkCall`은 취소를 `CancellationException` 그대로 던진다 |
 | 앱이 죽은 뒤 다시 만들어진 서비스에는 `onStartCommand` 없이 `onTaskRemoved`만 올 수 있다 | `PleosForegroundService`가 `onTaskRemoved`에서도 시작하고, `startForeground`가 거절돼도 죽지 않고 다시 시도한다 |

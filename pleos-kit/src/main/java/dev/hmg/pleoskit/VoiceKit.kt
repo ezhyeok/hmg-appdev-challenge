@@ -257,8 +257,8 @@ class SttKit(
      * 차량 마이크로 한 번 듣고 인식한 문장을 돌려준다. 마이크가 열린 뒤 [timeoutMs] 안에 인식이 끝나지 않으면 그때까지의
      * 중간 결과를 돌려준다(아무 말도 없었으면 null).
      *
-     * 듣는 시간은 마이크가 열린 뒤(SDK의 onReady)부터 잰다 ([listenWindow]). 에뮬레이터의 STT 서비스는 request 뒤 약 5~8초에
-     * 녹음을 시작해서, request부터 재면 6초 듣기가 1초 남짓이었다(2026-11-12). [MIC_OPEN_WAIT_MS] 안에 열리지 않으면 null.
+     * 듣는 시간은 마이크가 열린 뒤(SDK의 onReady)부터 잰다 ([listenWindow]). 에뮬레이터의 STT 서비스는 request 뒤 0.2~10초에
+     * 녹음을 시작해서, request부터 재면 6초 듣기가 1초 남짓이거나 0초였다(2026-11-12). [MIC_OPEN_WAIT_MS] 안에 열리지 않으면 null.
      */
     override suspend fun listen(timeoutMs: Long, onMicOpen: () -> Unit): String? =
         recognize("SpeechToText.request", timeoutMs, Heard(), onMicOpen) { raw.request() }
@@ -322,7 +322,7 @@ class SttKit(
         const val LISTEN_TIMEOUT_MS = 10_000L
         const val STOP_CONFIRM_MS = 400L
 
-        /** request 뒤 마이크가 열리기(onReady)를 기다리는 시간. 에뮬레이터에서 4.8~8초였다 */
-        const val MIC_OPEN_WAIT_MS = 12_000L
+        /** request 뒤 마이크가 열리기(onReady)를 기다리는 시간. 에뮬레이터에서 0.2~10.3초였다 (부하가 높을 때 길다) */
+        const val MIC_OPEN_WAIT_MS = 15_000L
     }
 }
