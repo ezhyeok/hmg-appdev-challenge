@@ -61,6 +61,11 @@ android {
     packaging {
         resources.excludes += "/META-INF/{AL2.0,LGPL2.1}"
     }
+    // JVM 단위 테스트에서 android.util.Log 같은 안드로이드 메서드가 예외 대신 기본값을 돌려주게 한다
+    // (코치 로직은 포트 뒤에서 순수 Kotlin으로 돌리고, 로그만 남는 호출 때문에 테스트가 깨지지 않게)
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
     // assets/data의 JSON(공개 데이터 원본, tools/data/README.md)은 APK에 넣지 않는다. 앱은 같은 내용으로 만든
     // stops.bin만 읽는다 (rest-engine buildStopTable). 기본 무시 목록에 *.json을 더한 것
     androidResources {
@@ -90,4 +95,6 @@ dependencies {
 
     // JVM 단위 테스트 (안드로이드 API를 쓰지 않는 코드만: CoachStore 등)
     testImplementation("junit:junit:4.13.2")
+    // 가상 시간으로 코치 루프·내비 조회 간격을 시험한다 (runTest, TestCoroutineScheduler)
+    testImplementation("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.8.1")
 }
