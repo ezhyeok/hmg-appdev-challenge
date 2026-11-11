@@ -1,6 +1,10 @@
 package dev.shimpyo.coach
 
 /**
+ * 옛 전역 판정기. [CongestionBasis](NaviTracker가 갖는 인스턴스)로 바뀌었다. 옛 CoachService가 아직 쓰고 있어서
+ * 지우지 않고 그대로 둔다. CoachService가 NaviTracker로 옮겨 가면 이 파일을 지운다 (코어 담당).
+ * 이 객체의 구멍(경로 전체 거리를 첫 정체에서 잡음, 정체 안에서 시작하면 출발지 기준으로 굳음)은 CongestionBasis 주석에 있다.
+ *
  * NaviHelper 정체 정보(TrafficCongestionInfo)를 '차 기준' 값으로 바꾼다.
  *
  * 확인 결과(2026-11-11): trafficCongestionTime 단위는 초. offset의 기준(출발지 / 현재 위치)은
@@ -8,6 +12,7 @@ package dev.shimpyo.coach
  * 같은 구간(도로명 + 시작 교차로)의 offset을 처음 본 뒤 남은 거리가 1km 이상 줄었을 때
  * offset도 그만큼 줄었으면 '현재 위치 기준', 그대로면 '출발지 기준'이다. 판정 전에는 현재 위치 기준으로 본다.
  */
+@Deprecated("NaviTracker가 갖는 CongestionBasis를 쓴다", ReplaceWith("CongestionBasis"))
 object CongestionMath {
     enum class Basis { UNKNOWN, FROM_CAR, FROM_ORIGIN }
 

@@ -7,7 +7,8 @@ import dev.shimpyo.engine.RouteState
  * 코치 틱 하나만 [advance]한다. 읽는 쪽(NaviTracker, CandidateProvider)은 같은 코치 디스패처에서 읽는다.
  */
 class Odometer(private val clock: ElapsedClock) {
-    var meters = 0.0
+    // 쓰는 쪽은 코치 틱 하나지만 읽는 쪽이 다른 스레드에 있어도 찢어진 값을 보지 않게 (Double은 원자적 쓰기가 보장되지 않는다)
+    @Volatile var meters = 0.0
         private set
     private var lastAt: Long? = null
 
@@ -32,9 +33,15 @@ data class NaviSnapshot(
     val destination: NaviDestination? = null,
     /** TBT의 경로 위 휴게소·졸음쉼터 (현재 위치부터 누적 경로 거리) */
     val opportunities: List<RouteOpportunity> = emptyList(),
-    /** 이번 epoch의 TBT 응답을 받았는지. 받았는데 비어 있으면 정말 경로 위에 휴게시설이 없다 */
+    /**
+     * 이번 epoch의 TBT 응답을 받았는지. 받았는데 [opportunities]가 비어 있으면 [tbtCoverageM]까지는 정말 경로 위에
+     * 휴게시설이 없다. 받기 전(false)에는 경로 위 시설을 모른다 (빈 목록과 다르다)
+     */
     val tbtReceived: Boolean = false,
-    /** TBT 목록이 닿는 경로 거리(마지막 항목까지의 누적). 목적지보다 짧으면 그 뒤는 모른다 */
+    /**
+     * TBT 목록이 닿는 경로 거리(마지막 항목까지의 누적, tbtOdometerM 시점). 목적지보다 짧으면 그 뒤는 모른다.
+     * 빈 TBT면 0 (아무것도 모른다), 받기 전이면 null. 거리가 깨진 항목에서 읽기를 멈춘 경우도 거기까지다 (TbtDigest)
+     */
     val tbtCoverageM: Double? = null,
     val nextManeuverM: Double? = null,
     val tbtOdometerM: Double = 0.0,
@@ -64,6 +71,13 @@ data class NaviSnapshot(
     /** 지금 경로 위 기회. 다른 epoch(바뀌기 전 경로)의 TBT면 비운다 */
     fun liveOpportunities(odometerM: Double): List<RouteOpportunity> =
         if (tbtEpoch != epoch) emptyList() else NaviPoll.advance(opportunities, moved(tbtOdometerM, odometerM))
+
+    /**
+     * 지금 위치에서 TBT가 닿는 경로 거리. 이번 epoch의 TBT를 아직 못 받았으면 null.
+     * [liveRoute]의 남은 거리보다 짧으면 그 뒤 경로 위 시설은 모른다 (후보 범위 RouteState.candidatesUntilM에 쓴다)
+     */
+    fun liveTbtCoverageM(odometerM: Double): Double? =
+        if (tbtEpoch != epoch || !tbtReceived) null else tbtCoverageM?.let { (it - moved(tbtOdometerM, odometerM)).coerceAtLeast(0.0) }
 }
 
 /** 위치 한 점과 받은 때(실제 시간)·출처. PositionTracker가 실제 위치만 담는다 (시연 위치는 CoachWorld가 덧씌운다) */
