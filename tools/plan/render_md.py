@@ -2,7 +2,7 @@
 import os
 import re
 
-from blocks import H, P, Bullets, Table, Callout, KeyNumbers, Figure, Storyboard, Note, Spacer
+from blocks import H, P, Bullets, Table, Callout, KeyNumbers, Figure, Storyboard, Note, Spacer, Annotated
 
 
 def md_inline(text):
@@ -56,6 +56,10 @@ def render(blocks, resolve_md):
             else:
                 out.append('![%s](%s)' % (b.alt or b.caption, target.replace(' ', '%20')))
                 out.append('*' + md_inline(b.caption) + '*')
+        elif isinstance(b, Annotated):
+            out.append('![%s](%s)' % (b.alt or b.caption, resolve_md(b.key).replace(' ', '%20')))
+            out.append('\n'.join('%d. **%s**: %s' % (i + 1, t, md_inline(d)) for i, (t, d) in enumerate(b.items)))
+            out.append('*' + md_inline(b.caption) + '*')
         elif isinstance(b, Storyboard):
             out.append('**%s** · %s' % (b.title, b.subtitle))
             out.append(_table(['단계', '차·앱이 하는 일', '사용자가 듣고 보는 것'],

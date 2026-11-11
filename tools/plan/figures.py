@@ -198,7 +198,7 @@ def fig_gauge():
     b.append(c)
     b.append(T(x0 + 16 + w_ + 8, 33, "다음 화장실·휴식까지 남은 시간", 14, 700, INK))
     cw = (W - x0 - 16 * 2 - 16) / 2.0
-    b.append(gauge_card(x0 + 16, 50, cw, 150, "화장실", "39", "분", 39 / 90.0, 20 / 90.0, "6세 아이 기준", "확인 단계"))
+    b.append(gauge_card(x0 + 16, 50, cw, 150, "화장실", "39", "분", 39 / 105.0, 20 / 105.0, "7살 아이 기준", "확인 단계"))
     b.append(gauge_card(x0 + 32 + cw, 50, cw, 150, "피로", "72", "분", 72 / 120.0, 20 / 120.0, "연속 운전 0:48",
                         "여유 단계"))
     # stage strip (restroom gauge)
@@ -242,7 +242,7 @@ def fig_storyboard():
 
     b = []
     b.append(T(16, 26, "경로", 14, 700, INK2))
-    b.append(T(52, 26, "앞으로의 주행 시간 기준 · 추석 서울→부산, 6세 아이 동승", 12.5, 500, INK3))
+    b.append(T(52, 26, "앞으로의 주행 시간 기준 · 추석 서울→부산, 7살 아이 동승", 12.5, 500, INK3))
     ry = 104
     b.append(L(tx(0), ry, tx(TMAX) - 4, ry, LINE2, 6, cap="round", marker=None))
     b.append(PATH("M %.1f %.1f l -9 -6 l 0 12 z" % (tx(TMAX) + 4, ry), fill=LINE2, stroke=LINE2, sw=1))
@@ -272,7 +272,7 @@ def fig_storyboard():
 
     # chart
     top, bot = 196 + DY, 352 + DY
-    vmax = 100.0
+    vmax = 112.0
 
     def ty(v):
         return bot - (bot - top) * v / vmax
@@ -290,30 +290,34 @@ def fig_storyboard():
         b.append(L(X0, ty(v), X1, ty(v), LINE, 1))
         b.append(T(X1 + 6, ty(v) + 4, name, 11.5, 600, INK3))
     b.append(L(X0, bot, X1, bot, LINE2, 1.2))
-    for v in (0, 10, 20, 45, 90):
+    for v in (0, 10, 20, 45, 105):
         b.append(T(X0 - 8, ty(v) + 4, str(v), 11.5, 500, INK3, "end"))
     for t in range(0, 71, 10):
         b.append(T(tx(t), bot + 18, "%d분" % t if t else "0", 11.5, 500, INK3, "middle"))
     # skip path (dashed): 39 -> 0 at t=39
-    b.append(PATH("M %.1f %.1f L %.1f %.1f" % (tx(0), ty(39), tx(39), ty(0)), stroke=INK3, sw=2.5, dash="6 5"))
-    b.append(C(tx(39), ty(0), 6, RED, WHITE, 2))
-    b.append(T(tx(39) + 10, ty(0) - 10, "지나치면 정체 안에서 0분", 12.5, 700, INK))
+    b.append(PATH("M %.1f %.1f L %.1f %.1f" % (tx(0), ty(27), tx(27), ty(0)), stroke=INK3, sw=2.5, dash="6 5"))
+    b.append(C(tx(27), ty(0), 6, RED, WHITE, 2))
+    b.append(T(tx(27) + 10, ty(0) - 10, "지나치면 정체 안에서 0분", 12.5, 700, INK))
     # stop path (solid): 39 -> 27 at t=12, refill to 90, then down
     b.append(PATH("M %.1f %.1f L %.1f %.1f L %.1f %.1f L %.1f %.1f" % (
-        tx(0), ty(39), tx(12), ty(27), tx(12), ty(90), tx(70), ty(32)), stroke=ACCENT, sw=3))
-    b.append(C(tx(12), ty(90), 4.5, ACCENT, WHITE, 1.5))
-    b.append(T(tx(12) + 10, ty(90) - 6, "화장실에 들르면 다시 찬다 (정차 시간 제외)", 12.5, 600, INK))
-    b.append(C(tx(0), ty(39), 4.5, INK, WHITE, 1.5))
-    b.append(T(tx(0) + 8, ty(39) - 8, "39분", 12.5, 700, INK))
+        tx(0), ty(27), tx(12), ty(15), tx(12), ty(105), tx(70), ty(47)), stroke=ACCENT, sw=3))
+    b.append(C(tx(12), ty(105), 4.5, ACCENT, WHITE, 1.5))
+    b.append(T(tx(12) + 10, ty(105) - 6, "화장실에 들르면 다시 찬다 (정차 시간 제외)", 12.5, 600, INK))
+    b.append(C(tx(0), ty(27), 4.5, INK, WHITE, 1.5))
+    b.append(T(tx(0) + 8, ty(27) - 9, "27분", 12.5, 700, INK))
+    qx2 = tx(8.6)
+    b.append(C(qx2, ty(18.4), 5, ACCENT, WHITE, 2))
+    b.append(L(qx2, ty(18.4) - 7, qx2, ty(64), ACCENT, 1.2, dash="3 3"))
+    b.append(T(qx2 - 6, ty(64) + 4, "질문 시점 18분", 12, 700, ACCENT_D, "end"))
 
     # storyboard cards
-    cy0, ch = 414, 132
+    cy0, ch = 414, 140
     gap = 12
     cw = (W - 32 - gap * 3) / 4.0
     cards = [
         ("정체와 휴게소 읽기", "내비 경로 상태에서 앞 정체 40분을, 회전 안내에서 경로 위 휴게소를 읽는다"),
-        ("마지막 기회 판정", "아이 게이지 39분이 정체 뒤 첫 휴게소까지 58분보다 짧다"),
-        ("4km 전 음성 질문", "“앞에 40분 정체가 있어요. 안성휴게소가 정체 전 마지막 화장실이에요. 들를까요?”"),
+        ("마지막 기회 판정", "정체 안에 화장실이 없고, 정체 뒤 첫 휴게소(58분 뒤)까지 아이가 버티기 어렵다"),
+        ("4km 전 음성 질문", "“앞에 40분 정체가 있어요. 다음 안성휴게소가 정체 전 마지막 화장실이에요. 들를까요?”"),
         ("“응” → 경유지", "addWaypoint로 경유지를 넣고, 정차하면 기록해 게이지를 되돌린다"),
     ]
     for i, (title, body) in enumerate(cards):
@@ -432,8 +436,8 @@ def fig_engine():
     for x, w, name in cols:
         b.append(T(x, 24, name, 13.5, 800, INK2))
         b.append(L(x, 33, x + w, 33, ACCENT if name != "입력" else LINE2, 2))
-    inputs = ["탑승자 프로필 · 정차 기록", "조향 · 차속 · 제동", "연속 운전 · 시간대 · 수면", "경로 앞 기회 · 정체",
-              "주변 후보 · 경로 시간", "다음 회전 · 거절 이력", "음성 발화"]
+    inputs = ["탑승자 프로필 · 정차 기록", "조향 · 차속 · 제동", "연속 운전 · 기상 · 수면", "경로 앞 기회 · 정체",
+              "주변 후보 · 경로 시간", "다음 회전 · 대화 이력", "음성 발화 · ‘졸려’"]
     for i, s in enumerate(inputs):
         y = 46 + i * 44
         b.append(R(16, y, 168, 34, 8, SURF))
@@ -446,17 +450,17 @@ def fig_engine():
         return ''.join(o)
 
     ys = [46, 140, 234]
-    st = [("화장실 필요 모델", ["와이블 생존모형", "개인 기록으로 베이즈 갱신"]),
+    st = [("화장실 필요 모델", ["와이블 생존모형 (k = 2.5)", "개인 기록으로 베이즈 갱신"]),
           ("운전 스타일 편차", ["주행 초반 개인 기준선", "강건 z점수 + EWMA"]),
-          ("피로 모델 (규칙)", ["연속 운전 + 졸음 시간대", "수면·편차·‘졸려’로 앞당김"])]
+          ("피로 모델", ["2시간 휴식 리듬 + 졸림 곡선", "‘혹시 졸리세요?’ 대답 우선"])]
     for i, (t, ls) in enumerate(st):
         b.append(comp(204, ys[i], 214, 82, i + 1, t, ls))
-    pl = [("마지막 기회", ["정체 반영 도착 시간과", "게이지로 공백 분석"]),
+    pl = [("마지막 기회", ["정체 반영 도착 시간 vs", "판단 마감(30%) · 커버리지"]),
           ("급해 순위", ["총 소요 + 영업·주차", "야간 안전·교환대 가점"]),
           ("피트스톱 플래너", ["경로 순서 동적 계획법", "정차 수·시간 최소화"])]
     for i, (t, ls) in enumerate(pl):
         b.append(comp(442, ys[i], 196, 82, i + 4, t, ls))
-    b.append(comp(662, 46, 172, 82, 7, "묻는 타이밍", ["규칙 게이트 +", "톰프슨 샘플링"]))
+    b.append(comp(662, 46, 172, 82, 7, "묻는 타이밍", ["회전·대화 뒤 침묵 +", "톰프슨 샘플링"]))
     b.append(comp(662, 140, 172, 82, 8, "음성 의도", ["규칙 분류가 기본", "LLM은 선택"]))
     b.append(R(662, 234, 172, 82, 10, TINT, ACCENT, 1.3))
     b.append(T(676, 258, "출력", 13.5, 800, ACCENT_D))

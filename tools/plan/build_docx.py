@@ -17,7 +17,8 @@ What it changes in the form
 
 Screenshots: put PNG/JPEG files in docs/plan/assets/screens/ (e.g. "1_주행 화면 질문 중.png").
 They replace the mockup figure in section 7; the caption is the file name without the
-leading number. Re-run this script after adding them.
+leading number. docs/plan/assets/screen-drive.png is the single driving screen shown in
+box 3. Re-run this script after replacing them (e.g. with emulator captures).
 
 Standard library only (zipfile + string edits), so it runs with `python3 -I`.
 """
@@ -55,6 +56,7 @@ FIGURES = {
     "engine": "fig4-engine.png",
     "funnel": "fig5-funnel.png",
     "screens": "fig6-screens-mockup.png",
+    "drive_screen": "screen-drive.png",      # one real driving screen for box 3 (copied in, not generated)
 }
 
 

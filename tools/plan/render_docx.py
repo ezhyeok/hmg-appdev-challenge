@@ -2,7 +2,7 @@
 import os
 
 import ooxml as X
-from blocks import H, P, Bullets, Table, Callout, KeyNumbers, Figure, Storyboard, Note, Spacer
+from blocks import H, P, Bullets, Table, Callout, KeyNumbers, Figure, Storyboard, Note, Spacer, Annotated
 
 BULLET_NUM_ID = 90           # added to numbering.xml by the build script
 CIRCLED = "①②③④⑤⑥⑦⑧⑨⑩"
@@ -162,23 +162,26 @@ def render_figure(b, media, resolve):
 
 
 def render_screens(shots, b, media, width=X.BOX_CONTENT_DXA):
-    """Screenshots laid out in a 2-column grid (landscape shots take a full row)."""
+    """Screenshots in a grid of b.columns portrait images per row (landscape shots take a full row)."""
     rows = []
     pending = []
-    half = width // 2
+    ncol = max(1, b.columns)
+    colw = [width // ncol] * ncol
+    colw[-1] += width - sum(colw)
+    half = colw[0]
 
     def flush():
         if not pending:
             return
         cells = []
-        for path, label in pending:
-            w_cm = (half - 160) / 567.0
+        for i, (path, label) in enumerate(pending):
+            w_cm = (colw[i] - 160) / 567.0
             cells.append(X.cell(_image_para(media, path, w_cm, label, keep_next=True, max_h_cm=9.5,
                                             outline="C7C9CE") +
                                 X.para(X.inline(label, size=8, color=X.INK2), before=0, after=60, line=240,
-                                       jc='center'), half))
-        if len(cells) == 1:
-            cells.append(X.cell(X.empty_para(), width - half))
+                                       jc='center'), colw[i]))
+        for i in range(len(pending), ncol):
+            cells.append(X.cell(X.empty_para(), colw[i]))
         rows.append(X.row(cells))
         pending.clear()
 
@@ -190,16 +193,36 @@ def render_screens(shots, b, media, width=X.BOX_CONTENT_DXA):
             rows.append(X.row([X.cell(_image_para(media, path, w_cm, label, keep_next=True, max_h_cm=10.5,
                                                   outline="C7C9CE") +
                                       X.para(X.inline(label, size=8, color=X.INK2), before=0, after=60,
-                                             line=240, jc='center'), width, gridspan=2)]))
+                                             line=240, jc='center'), width, gridspan=ncol)]))
         else:
             pending.append((path, label))
-            if len(pending) == 2:
+            if len(pending) == ncol:
                 flush()
     flush()
-    t = X.table(rows, [half, width - half], borders={'top': None, 'left': None, 'bottom': None, 'right': None,
-                                                      'insideH': None, 'insideV': None},
+    t = X.table(rows, colw, borders={'top': None, 'left': None, 'bottom': None, 'right': None,
+                                     'insideH': None, 'insideV': None},
                 cell_margins=(40, 80, 40, 80))
     return t + _caption(b.caption_screens or b.caption)
+
+
+def render_annotated(b, media, resolve, width=X.BOX_CONTENT_DXA):
+    """Screen image (left) + numbered notes (right) in a borderless two-column table."""
+    path = resolve(b.key)
+    img_w = int(b.image_width_cm * 567) + 240
+    widths = [img_w, width - img_w]
+    notes = []
+    for i, (title, desc) in enumerate(b.items):
+        mark = CIRCLED[i] if i < len(CIRCLED) else str(i + 1)
+        notes.append(X.para(X.run(mark + " ", size=10, bold=True, color=X.ACCENT) +
+                            X.run(title, size=9.5, bold=True, color=X.INK),
+                            before=0 if i == 0 else 110, after=20, line=245, keep_next=True))
+        notes.append(X.para(X.inline(desc, size=9, color=X.INK2), before=0, after=0, line=250, ind_left=300))
+    left = _image_para(media, path, b.image_width_cm, b.alt or b.caption, keep_next=False, outline="C7C9CE")
+    t = X.table([X.row([X.cell(left, widths[0], valign="center"),
+                        X.cell(''.join(notes), widths[1], valign="center", margins=(80, 200, 80, 60))])],
+                widths, borders={'top': None, 'left': None, 'bottom': None, 'right': None,
+                                 'insideH': None, 'insideV': None}, cell_margins=(40, 60, 40, 60))
+    return t + _caption(b.caption)
 
 
 def render_storyboard(b, width=X.BOX_CONTENT_DXA):
@@ -249,6 +272,8 @@ def render_blocks(blocks, media, resolve):
             out.append(render_figure(b, media, resolve))
         elif isinstance(b, Storyboard):
             out.append(render_storyboard(b))
+        elif isinstance(b, Annotated):
+            out.append(render_annotated(b, media, resolve))
         elif isinstance(b, Note):
             out.append(render_note(b))
         elif isinstance(b, Spacer):

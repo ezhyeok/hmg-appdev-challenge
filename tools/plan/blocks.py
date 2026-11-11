@@ -60,6 +60,17 @@ class Figure:
     width_cm: float = 17.0
     alt: str = ""
     caption_screens: Optional[str] = None   # used instead of caption when real screenshots replace a mockup
+    columns: int = 2                        # screenshot grid columns for portrait images
+
+
+@dataclass
+class Annotated:
+    """A screen image on the left, numbered notes on the right."""
+    key: str
+    caption: str
+    items: List[Tuple[str, str]]       # (title, description)
+    image_width_cm: float = 6.5
+    alt: str = ""
 
 
 @dataclass
