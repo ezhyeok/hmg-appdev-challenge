@@ -362,6 +362,86 @@ class AuditDecisionsTest {
         }
     }
 
+    // ---------------- 게이지 NOW와 마지막 기회: 지금 필요한 것이 먼저다 (닫힘 검증 E2, UI 감사 #6) ----------------
+
+    /**
+     * 10km마다 휴게소(s1…s29)가 있는 길을 시속 100km로 [seconds]초 달린다. 아이 게이지 5분(NOW).
+     * [jamAtKm]에서 20km·40분 정체가 시작하고 그 안의 휴게소는 없다. 질문에는 답하지 않는다
+     */
+    private fun nowDrive(jamAtKm: Int?, seconds: Int): List<CoachOutput> {
+        val occ = listOf(adult("driver"), child("kid", 7))
+        val e = CoachEngine(
+            profile = TripProfile(occ, tripStart = t0 - 100 * MIN, lastRestroomAt = occ.associate { it.id to t0 - 100 * MIN }),
+            random = Random(7),
+        )
+        val destM = 300 * KM
+        val jam = jamAtKm?.let { CongestionSegment(startDistanceM = it * KM, lengthM = 20 * KM, durationS = 2_400.0) }
+        var posM = 0.0
+        return (0 until seconds).map { s ->
+            val cands = (1..29).filter { jamAtKm == null || it * 10 !in jamAtKm..jamAtKm + 20 }
+                .map { it to it * 10 * KM - posM }.filter { it.second > 0 }.map { (i, d) -> stop("s$i", d, name = "${i}번 휴게소") }
+            val ahead = jam?.let { listOf(it.copy(startDistanceM = it.startDistanceM - posM)) }.orEmpty().filter { it.startDistanceM + it.lengthM > 0 }
+            var jamLeft = 0.0
+            var jamTime = 0.0
+            for (j in ahead) {
+                val left = j.lengthM + minOf(0.0, j.startDistanceM)
+                jamLeft += left
+                jamTime += j.durationS * left / j.lengthM
+            }
+            val r = RouteState(
+                guiding = true, remainDistanceM = destM - posM, remainTimeS = (destM - posM - jamLeft) / V100 + jamTime,
+                congestion = ahead, nextManeuverDistanceM = 100 * KM,
+            )
+            posM += V100
+            e.update(CoachInput(now = t0 + s * SEC, gear = Gear.DRIVE, speedKph = 100f, route = r, candidates = cands))
+        }
+    }
+
+    @Test
+    fun aFarJamDoesNotSilenceTheNowRestroomQuestion() {
+        // 회귀: 게이지가 NOW여도 마지막 기회가 하나라도 있으면 '가까운 화장실' 질문을 만들지 않았다. 정체 항목을 묶게 된 뒤(R1) 먼 정체 전
+        // 마지막 기회가 흔해졌다: 81km 앞 정체 전 휴게소(8번)가 마지막 기회로 잡히면 그곳이 20km 안에 들어올 때까지(약 36분) 아무것도
+        // 묻지 않고 10km마다 있는 휴게소를 지나쳤다. 정한 규칙: NOW는 '가장 가까운 화장실이 아닌' 마지막 기회보다 먼저다
+        val free = nowDrive(jamAtKm = null, seconds = 60)
+        val jammed = nowDrive(jamAtKm = 81, seconds = 60)
+        assertEquals(Level.NOW, jammed.first().restroom.level)
+        val control = assertNotNull(free.first().prompt, "대조: 정체가 없으면 첫 틱에 가까운 화장실을 묻는다")
+        val asked = assertNotNull(jammed.first().prompt, "81km 앞 정체가 있어도 똑같이 묻는다")
+        assertEquals("s1", asked.stop?.id)
+        assertEquals(control.speech, asked.speech)
+        assertTrue(asked.speech.startsWith("화장실 여유가 거의 없어요"), asked.speech)
+        // 추천도 먼 마지막 기회(8번)가 아니라 지금 가장 빨리 갈 수 있는 화장실이다
+        assertTrue(jammed.all { it.next?.stop?.id == "s1" && it.next?.reasons?.map { r -> r.code } == listOf("NEXT_NEAREST_RESTROOM") }, jammed.first().next.toString())
+    }
+
+    @Test
+    fun whenTheNearestRestroomIsTheLastChanceTheLastChanceWordingWins() {
+        // 가장 가까운 화장실(1번, 10km)이 정체 전 마지막 화장실이기도 하다: NOW 질문 대신 마지막 기회로 묻고, 이유도 마지막 기회다.
+        // 예전에는 문장은 "정체 전 마지막 화장실"인데 추천의 이유가 NEXT_NEAREST_RESTROOM이어서 화면 카드에 '가까운 화장실'이 붙었다
+        val outs = nowDrive(jamAtKm = 11, seconds = 60) // 질문은 45초 뒤 내려간다: 그 뒤의 추천도 같다
+        assertEquals(Level.NOW, outs.first().restroom.level)
+        val q = assertNotNull(outs.first().prompt)
+        assertEquals("s1", q.stop?.id)
+        assertEquals("앞에 40분 정체가 있어요. 다음 1번 휴게소가 정체 전 마지막 화장실이에요. 들를까요?", q.speech)
+        assertTrue(outs.all { it.next?.stop?.id == "s1" && it.next?.reasons?.map { r -> r.code } == listOf("LAST_CHANCE_CONGESTION") }, outs.first().next.toString())
+    }
+
+    @Test
+    fun theFarLastChanceIsAskedWithItsOwnWordingOnceItIsTheNearestRestroom() {
+        // 81km 앞 정체까지 44분: 그동안 지나는 휴게소마다 NOW 질문(가까운 화장실)을 하고, 8번 휴게소가 가장 가까운 화장실이 되면
+        // 그때는 "정체 전 마지막 화장실"로 묻는다. 그 질문이 뜬 틱의 추천 이유도 마지막 기회다
+        val outs = nowDrive(jamAtKm = 81, seconds = 44 * 60)
+        val firstAsk = LinkedHashMap<String, CoachOutput>()
+        for (o in outs) o.prompt?.let { p -> firstAsk.putIfAbsent(p.id, o) }
+        val byStop = firstAsk.values.groupBy { it.prompt!!.stop?.id }
+        assertTrue(byStop.keys.containsAll(listOf("s1", "s2", "s3")), "지나는 휴게소마다 묻는다: ${byStop.keys}")
+        assertTrue(byStop.filterKeys { it != "s8" }.values.flatten().all { it.prompt!!.speech.startsWith("화장실 여유가 거의 없어요") })
+        val last = assertNotNull(byStop["s8"]?.singleOrNull(), "8번 휴게소는 한 번, 마지막 기회로 묻는다: ${byStop["s8"]?.map { it.prompt!!.speech }}")
+        assertEquals("앞에 40분 정체가 있어요. 다음 8번 휴게소가 정체 전 마지막 화장실이에요. 들를까요?", last.prompt!!.speech)
+        assertEquals(listOf("LAST_CHANCE_CONGESTION"), last.next?.reasons?.map { it.code })
+        assertEquals("s8", last.next?.stop?.id)
+    }
+
     // ---------------- 정체 묶음의 경계 ----------------
 
     private val gap = GapAnalyzer(cfg)
