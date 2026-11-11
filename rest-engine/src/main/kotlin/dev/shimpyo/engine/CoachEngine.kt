@@ -245,7 +245,7 @@ class CoachEngine(
         val urgentList = if (urgentRequested) {
             ranker.rank(
                 input.candidates, input.now, local, needs.has(OccupantType.INFANT), speed,
-                if (stops.parked) config.urgentMaxResults else config.urgentMaxResultsDriving,
+                if (stops.parked) config.urgentMaxResults else config.urgentMaxResultsDriving, route,
             )
         } else null
 
@@ -268,7 +268,8 @@ class CoachEngine(
                 if (top != null) {
                     goingThere(top.stop, route.distanceOf(top.stop).takeIf { it.isFinite() && it > 0.0 }, fresh = true) ?: ask(
                         PromptKind.URGENT_RESULT, texts.urgentResult(top.stop.name, (top.totalTimeS / 60.0).roundToInt()),
-                        top.stop, null, restroom.level, user = true, purposes = purposesFor(top.stop, Purpose.RESTROOM, ctx),
+                        urgentStop(top.stop, speed), null, restroom.level, user = true,
+                        purposes = purposesFor(top.stop, Purpose.RESTROOM, ctx), reasons = top.why,
                     )
                 } else {
                     ask(PromptKind.INFO, texts.urgentNone(), user = true)
@@ -460,14 +461,19 @@ class CoachEngine(
         )
     }
 
-    /** 급해 모드: 후보를 총 소요 시간 순으로 정렬해 돌려준다 (상태를 바꾸지 않는다) */
+    /**
+     * 급해 모드: 후보를 총 소요 시간 순으로 정렬해 돌려준다 (상태를 바꾸지 않는다).
+     * [CoachInput.route]를 함께 넘기면 update의 급해 결과와 같은 시간(정체 반영)으로 계산한다 ([UrgentRanker])
+     */
     @Suppress("NAME_SHADOWING")
     fun urgent(input: CoachInput): List<RankedStop> {
         val input = InputSanitizer.clean(input)
         ensureStarted(input.now)
         val speed = currentSpeed(input)
+        val ctx = RouteContext(config)
+        ctx.prepare(input.route, speed)
         return ranker.rank(
-            input.candidates, input.now, local, needs.has(OccupantType.INFANT), speed, config.urgentMaxResults,
+            input.candidates, input.now, local, needs.has(OccupantType.INFANT), speed, config.urgentMaxResults, ctx,
         )
     }
 
@@ -770,15 +776,15 @@ class CoachEngine(
         candidates: List<StopCandidate>,
         speed: Float?,
     ): Recommendation? {
-        askedRestroomStop()?.let { return it }
+        askedRestroomStop(speed)?.let { return it }
         accepted?.let { a ->
             return rec(a.stop, a.purposes, listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())))
         }
         urgentList?.firstOrNull()?.let { r ->
-            return rec(r.stop, purposesFor(r.stop, Purpose.RESTROOM, ctx), r.why)
+            return rec(urgentStop(r.stop, speed), purposesFor(r.stop, Purpose.RESTROOM, ctx), r.why)
         }
         if (ctx.restroom == Level.NOW) {
-            val best = ranker.rank(candidates, ctx.wallNow, local, needs.has(OccupantType.INFANT), speed, 1).firstOrNull()
+            val best = ranker.rank(candidates, ctx.wallNow, local, needs.has(OccupantType.INFANT), speed, 1, route).firstOrNull()
             val stop = best?.stop ?: nowRestroom?.stop
             if (stop != null) {
                 return rec(stop, purposesFor(stop, Purpose.RESTROOM, ctx), listOf(nearestRestroomReason()))
@@ -799,19 +805,32 @@ class CoachEngine(
     private fun nearestRestroomReason() = Reason("NEXT_NEAREST_RESTROOM", texts.reasonNextNearestRestroom())
 
     /**
-     * 떠 있는 화장실 질문(마지막 기회, 여유 없음, "화장실 가고 싶대"의 답)의 장소와 이유. 그런 질문이 없거나 그 장소가 지금 후보에 없으면 null.
-     * 화면은 질문 카드를 띄우는 틱의 추천에서 이유를 가져온다(같은 장소일 때만). 추천이 다른 곳이거나 다른 이유면 "정체 전 마지막
-     * 화장실이에요"라고 묻는 카드에 '가까운 화장실' 딱지가 붙는다(UI 감사 #6). 카드는 엔진이 낸 틱보다 늦게 뜰 수도 있어서
-     * 질문이 떠 있는 내내 맞춘다. 거리는 지금 후보의 값이다 (지금 목록에 없으면 물은 때의 거리를 지금 값처럼 내보내지 않는다).
+     * 떠 있는 화장실 질문(마지막 기회, 여유 없음, "화장실 가고 싶대"의 답, 급해 결과)의 장소와 이유. 그런 질문이 없거나 그 장소가 지금
+     * 후보에 없으면 null. 화면은 질문 카드를 띄우는 틱의 추천에서 이유를 가져온다(같은 장소일 때만). 추천이 다른 곳이거나 다른 이유면
+     * "정체 전 마지막 화장실이에요"라고 묻는 카드에 '가까운 화장실' 딱지가 붙는다(UI 감사 #6). 카드는 엔진이 낸 틱보다 늦게 뜰 수도
+     * 있어서 질문이 떠 있는 내내 맞춘다. 거리는 지금 후보의 값이다 (지금 목록에 없으면 물은 때의 거리를 지금 값처럼 내보내지 않는다).
+     * 급해 결과의 도착 시간은 순위에 쓴 주행 시간이다 ([urgentStop]).
      */
-    private fun askedRestroomStop(): Recommendation? {
+    private fun askedRestroomStop(speed: Float?): Recommendation? {
         val q = policy.active ?: return null
-        if (q.kind != PromptKind.LAST_CHANCE || q.reasons.isEmpty()) return null
+        if ((q.kind != PromptKind.LAST_CHANCE && q.kind != PromptKind.URGENT_RESULT) || q.reasons.isEmpty()) return null
         val id = q.targetId ?: return null
         val cur = currentCandidates.firstOrNull { it.id == id } ?: return null
         val d = route.distanceOf(cur)
         if (d.isNaN() || d <= 0.0) return null
-        return rec(cur, q.purposes.ifEmpty { setOf(Purpose.RESTROOM) }, q.reasons)
+        val stop = if (q.kind == PromptKind.URGENT_RESULT) urgentStop(cur, speed) else cur
+        return rec(stop, q.purposes.ifEmpty { setOf(Purpose.RESTROOM) }, q.reasons)
+    }
+
+    /**
+     * 급해 순위에서 나온 장소를 질문·추천으로 내보낼 때: 도착 시간은 순위에 쓴 주행 시간이다 ([UrgentRanker.driveS]).
+     * 음성과 목록의 '약 N분'(총 소요)은 이 값에 주차·도보·유턴을 더한 것이라, 말한 시간과 카드의 시간이 한 계산에서 나온다.
+     * 예전에는 음성은 거리 ÷ 80km/h, 카드는 엔진 도착 시간이어서 "약 6분"이라고 말한 카드에 17분이 보였다 (닫힘 검증 E1)
+     */
+    private fun urgentStop(stop: StopCandidate, speed: Float?): StopCandidate {
+        if (stop.etaS != null) return stop
+        val s = ranker.driveS(stop, speed, route)
+        return if (s.isFinite()) stop.copy(etaS = s) else stop
     }
 
     /** 한 정차에서 함께 해결할 수 있는 목적을 묶는다 */

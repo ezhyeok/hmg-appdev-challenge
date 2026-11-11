@@ -44,6 +44,10 @@ internal class RouteContext(private val config: CoachConfig) {
     var vFreeMps = config.highwayAvgSpeedKph / 3.6
         private set
 
+    /** 길안내 중인지 (RouteState.guiding). 급해 순위가 '길안내 경로 위 후보'를 가리는 데 쓴다 */
+    var guiding = false
+        private set
+
     /** 정차 후보를 넣은 경로 거리 한계 (RouteState.candidatesUntilM). 목적지까지 다 넣었거나 모르면 NaN */
     var horizonM = Double.NaN
         private set
@@ -62,6 +66,7 @@ internal class RouteContext(private val config: CoachConfig) {
 
     fun prepare(route: RouteState?, speedKph: Float?) {
         idxCands = emptyList()
+        guiding = route?.guiding == true
         val rd = route?.remainDistanceM
         val rt = route?.remainTimeS
         destM = if (rd != null && rd.isFinite() && rd > 0.0) rd else Double.NaN
@@ -190,6 +195,11 @@ internal class RouteContext(private val config: CoachConfig) {
         val dy = idxDist[y]
         if (dx != dy) return dx < dy
         return cands[x].id < cands[y].id
+    }
+
+    /** [candidates]의 도착 시간이 계산돼 있게 한다 ([arrivalOf]를 [opportunities] 없이 쓸 때) */
+    fun ensureIndex(candidates: List<StopCandidate>) {
+        if (candidates !== idxCands) index(candidates)
     }
 
     /**
