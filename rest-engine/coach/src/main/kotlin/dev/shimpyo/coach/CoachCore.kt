@@ -30,8 +30,9 @@ import kotlin.math.truncate
  * 그래서 코어의 상태(세계·엔진·질문·정차·여정·급해·계획)는 잠금 없이 한 스레드만 바꾼다. 예전 CoachService는 필드 30개를
  * 코루틴 12종이 함께 바꿨다(구조 리뷰 §0·D6·D7).
  *
- * 판단은 순수 부품이 하고 코어는 그 결과를 잇는다: 엔진, PromptMachine(질문), UrgentFlow(급해), VoiceDesk(음성 작업),
- * PlanKeeper(계획), StopRecorder(정차), WorldSwitch(세계·여정), CoreRules.kt의 작은 규칙들.
+ * 판단은 부품이 하고 코어는 그 결과를 잇는다: 엔진, PromptMachine(질문), UrgentFlow(급해), VoiceDesk(말하기·듣기), Crew(탑승자),
+ * PlanKeeper(계획), StopRecorder(정차), WorldSwitch(세계·여정), CoreRules.kt의 작은 규칙들(환기, 학습 저장, 진행 방향, 동의).
+ * 코어에 남은 것은 우편함, 틱, 명령 가르기, 질문 기계의 효과 실행, 세계 전환 때의 초기화 순서다.
  *
  * 1초 틱: 신호 → 정차 판정(StopRecorder) → 여정(WorldSwitch.onTick) → 내비 스냅샷·후보 투영 → 세계가 입력을 바꿈 → 엔진 →
  * 질문 기계(PromptMachine) → 효과 실행 → 화면 상태 한 번 갱신.
