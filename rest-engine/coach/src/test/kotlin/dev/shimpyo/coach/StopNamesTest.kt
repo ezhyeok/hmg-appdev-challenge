@@ -62,12 +62,16 @@ class StopNamesTest {
         // TBT가 쉼터를 SERVICEAREA로 보내도 이름의 시설어를 따른다 (옥산졸음쉼터 ↔ 옥산휴게소를 섞지 않게)
         assertEquals(StopKind.DROWSY_SHELTER, StopNames.kindFor("옥산졸음쉼터(서울방향)", StopKind.HIGHWAY_REST_AREA))
         assertEquals(StopKind.HIGHWAY_REST_AREA, StopNames.kindFor("안성", StopKind.HIGHWAY_REST_AREA))
+        assertEquals(StopKind.DROWSY_SHELTER, StopNames.kindFor("오산쉼터", StopKind.HIGHWAY_REST_AREA))
+        assertEquals(StopKind.HIGHWAY_REST_AREA, StopNames.kindFor("망향휴게소", StopKind.DROWSY_SHELTER))
+        assertEquals(StopKind.DROWSY_SHELTER, StopNames.kindFor("서울만남의광장", StopKind.DROWSY_SHELTER), "이름으로 모르면 TBT 종류")
     }
 
     @Test
     fun restStopFilterKeepsTheOldRule() {
         assertTrue(StopNames.isRestStop("안성휴게소", StopKind.HIGHWAY_REST_AREA))
         assertTrue(StopNames.isRestStop("옥산졸음쉼터", StopKind.HIGHWAY_REST_AREA))
+        assertTrue(StopNames.isRestStop("간이휴게시설", StopKind.HIGHWAY_REST_AREA), "휴게시설도 정차 시설 (facilityKind와 같은 규칙)")
         assertFalse(StopNames.isRestStop("서울하이패스센터", StopKind.HIGHWAY_REST_AREA))
         assertTrue(StopNames.isRestStop("오산졸음쉼터", StopKind.DROWSY_SHELTER))
         assertTrue(StopNames.isRestStop("간이휴게시설", StopKind.DROWSY_SHELTER))

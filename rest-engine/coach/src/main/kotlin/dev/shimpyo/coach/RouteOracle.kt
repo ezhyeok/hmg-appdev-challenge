@@ -27,7 +27,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * - 요청 하나는 [ORACLE_REQUEST_TIMEOUT_MS]까지만 기다린다. 부른 쪽이 취소하면(갱신 예산·모드 전환) 그대로 취소되고 실패로 세지 않는다.
  *
  * 시각: 예전에는 코치 시각(now)으로 캐시 나이를 쟀다. 시연에서는 가상 시각이라 시연을 끈 뒤 몇 시간씩 어긋났다. 지금은 [ElapsedClock].
- * 스레드: 코치 디스패처 하나에서 부르는 것을 기본으로 하되, 지금 CoachService가 여러 스레드에서 부르므로 상태는 [lock]으로 지킨다
+ * 스레드: 코치 디스패처 하나에서 부른다(CandidateProvider). [clear]는 세계 전환 때 코치 액터가 부르므로 상태는 [lock]으로 지킨다
  * (잠금 안에서 일시 중단하지 않는다).
  */
 class RouteOracle(
@@ -54,14 +54,6 @@ class RouteOracle(
         val entry = fresh(c.id, from, clock.elapsedMs()) ?: ask(c, from) ?: return null
         return applyEntry(c, entry, from, straight)
     }
-
-    /**
-     * 예전 진입점 (지금 CoachService가 쓴다). 실패하면 직선거리만 채운 후보를 돌려준다.
-     * 코치 액터가 CandidateProvider로 바뀌면 지운다.
-     */
-    @Deprecated("CandidateProvider가 refine(c, from)을 쓴다", ReplaceWith("refine(c, Fix(lat, lon, null))"))
-    suspend fun refine(c: StopCandidate, lat: Double, lon: Double, @Suppress("UNUSED_PARAMETER") now: Long): StopCandidate =
-        refine(c, Fix(lat, lon, null)) ?: c.copy(straightDistanceM = c.straightDistanceM ?: Geo.distanceM(lat, lon, c.lat, c.lon))
 
     override fun clear() = synchronized(lock) {
         cache.clear()

@@ -49,7 +49,8 @@ object StopNames {
 
     /** TBT 항목이 화장실이 있는 정차 시설인지. 하이패스센터처럼 화장실 없는 '서비스 시설'도 SERVICEAREA로 온다 */
     fun isRestStop(name: String, kind: StopKind): Boolean = when (kind) {
-        StopKind.HIGHWAY_REST_AREA -> name.contains("휴게소") || name.contains("쉼터")
+        // '휴게시설'은 facilityKind가 휴게소로 본다. 같은 규칙으로 정차 시설로 받는다
+        StopKind.HIGHWAY_REST_AREA -> name.contains("휴게소") || name.contains("쉼터") || name.contains("휴게시설")
         StopKind.DROWSY_SHELTER -> name.contains("쉼터") || name.contains("휴게")
         else -> false
     }

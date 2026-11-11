@@ -84,18 +84,6 @@ object CandidateRules {
         return list.filter { c -> (c.routeDistanceM ?: c.straightDistanceM)?.let { it <= remainM } ?: true }
     }
 
-    /**
-     * TBT가 준 종류와 이름이 다르면 이름을 믿는다. TBT는 졸음쉼터를 SERVICEAREA로 보내기도 하고 extract는 그 종류를 그대로 둔다.
-     * 그러면 '옥산졸음쉼터(서울방향)'가 같은 기본 이름의 반대편 '옥산휴게소(부산방향)'(0.3km)와 맞았다 (데이터 감사 #5).
-     * 데이터의 휴게소 이름은 모두 '휴게소'를, 졸음쉼터는 모두 '졸음쉼터'를 담는다.
-     */
-    fun effectiveKind(name: String, tbtKind: StopKind): StopKind = when {
-        name.contains("졸음쉼터") -> StopKind.DROWSY_SHELTER
-        name.contains("휴게소") -> StopKind.HIGHWAY_REST_AREA
-        name.contains("쉼터") -> StopKind.DROWSY_SHELTER
-        else -> tbtKind
-    }
-
     /** TBT 이름으로 찾은 행의 직선거리가 TBT 경로 거리와 어울리는지 (그 밖이면 다른 노선의 같은 이름 시설이다) */
     fun plausibleMatch(straightM: Double?, tbtRouteM: Double): Boolean {
         val s = straightM ?: return true

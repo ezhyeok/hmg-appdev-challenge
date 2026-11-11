@@ -167,7 +167,8 @@ class CandidateProvider(
         val ids = HashSet<String>()
         val nameCount = HashMap<String, Int>()
         for (o in plan.opportunities.take(ROUTE_OPP_MAX)) {
-            val kind = CandidateRules.effectiveKind(o.name, o.kind)
+            // 종류는 extract가 이름의 시설어로 이미 정했다 (StopNames.kindFor)
+            val kind = o.kind
             val chosen = matchOpportunity(o, kind, pos, navi, odo, policy, budget)
             val n = (nameCount[o.name] ?: 0) + 1
             nameCount[o.name] = n

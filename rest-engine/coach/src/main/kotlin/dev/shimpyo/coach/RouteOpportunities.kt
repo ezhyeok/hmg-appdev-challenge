@@ -27,16 +27,9 @@ object RouteOpportunities {
             cumulative += item.distanceM
             if (item.type != TbtType.SERVICE_AREA && item.type != TbtType.REST_AREA) continue
             val name = item.description.trim()
-            // 종류는 이름이 분명하면 이름을 따른다. SERVICEAREA로 온 '옥산졸음쉼터(서울방향)'를 휴게소로 보면 같은 이름의
-            // 옥산휴게소(부산방향, 0.3km)와 짝이 되어 반대 차로 시설을 준다 (데이터 감사 #5). 둘 다거나 둘 다 아니면 TBT 종류를 따른다
-            val saysRestArea = name.contains("휴게소")
-            val saysShelter = name.contains("쉼터")
-            val kind = when {
-                saysShelter && !saysRestArea -> StopKind.DROWSY_SHELTER
-                saysRestArea && !saysShelter -> StopKind.HIGHWAY_REST_AREA
-                item.type == TbtType.SERVICE_AREA -> StopKind.HIGHWAY_REST_AREA
-                else -> StopKind.DROWSY_SHELTER
-            }
+            // 종류는 이름의 시설어가 정한다(StopNames.kindFor, 이름 규칙은 한 곳). SERVICEAREA로 온 '옥산졸음쉼터(서울방향)'를
+            // 휴게소로 보면 같은 이름의 옥산휴게소(부산방향, 0.3km)와 짝이 되어 반대 차로 시설을 준다 (데이터 감사 #5)
+            val kind = StopNames.kindFor(name, if (item.type == TbtType.SERVICE_AREA) StopKind.HIGHWAY_REST_AREA else StopKind.DROWSY_SHELTER)
             // 하이패스센터처럼 화장실이 없는 '서비스 시설'도 SERVICEAREA로 온다. 이름으로 거른다
             if (!isRestStop(name, kind)) continue
             out += RouteOpportunity(name = name, kind = kind, routeDistanceM = cumulative)

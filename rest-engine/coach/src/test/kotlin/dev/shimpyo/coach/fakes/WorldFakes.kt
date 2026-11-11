@@ -91,4 +91,4 @@ class InMemoryTripStore(var stored: TripHeartbeat? = null) : TripStorePort {
 }
 
 /** 재현 가능한 엔진 (톰프슨 샘플링 난수 고정) */
-fun seededEngines(seed: Int = 42) = EngineFactory { profile, memory -> CoachEngine(profile = profile, memory = memory, random = Random(seed)) }
+fun seededEngines(seed: Int = 42) = EngineFactory { profile, memory, config -> CoachEngine(config = config, profile = profile, memory = memory, random = Random(seed)) }
