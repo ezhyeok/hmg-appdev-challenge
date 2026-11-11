@@ -1,11 +1,12 @@
 ﻿# 루트 프로젝트(app + pleos-kit) 빌드 → 설치 → 실행 → 결과(logcat) 출력
-# 실행: powershell -ExecutionPolicy Bypass -File run-app.ps1 [-SkipBuild] [-BuildOnly] [-SelfTest] [-Route] [-WaitSeconds 60]
+# 실행: powershell -ExecutionPolicy Bypass -File run-app.ps1 [-SkipBuild] [-BuildOnly] [-SelfTest] [-Route] [-Verify] [-WaitSeconds 60]
 #   -SelfTest: pleos-kit 점검(KitSelfTest)을 함께 돌린다. -Route: 길안내 시작·경유지 추가까지 시험한다(에뮬레이터 부하 큼)
-param([int]$WaitSeconds = 30, [switch]$SkipBuild, [switch]$BuildOnly, [switch]$SelfTest, [switch]$Route)
+#   -Verify: 쉼표 설계 확인(SdkVerify, docs/product/SPEC.md 8장). 약 3분 걸린다
+param([int]$WaitSeconds = 30, [switch]$SkipBuild, [switch]$BuildOnly, [switch]$SelfTest, [switch]$Route, [switch]$Verify)
 . "$PSScriptRoot\env.ps1"
 if (-not $P) { throw "env.ps1 not loaded" }
 $proj = "$P\repo"
-$pkg = "dev.hmg.pleosapp"
+$pkg = "dev.shimpyo.app"
 Set-Location -LiteralPath $proj -ErrorAction Stop
 "sdk.dir=$($env:ANDROID_HOME.Replace('\','\\'))" | Set-Content -Encoding ASCII "$proj\local.properties"
 # PowerShell 5.1은 네이티브 stderr를 오류로 감싸므로 cmd로 합쳐서 로그에 남긴다
@@ -27,6 +28,7 @@ cmd /c "`"$ADB`" logcat -c"
 $extras = ""
 if ($SelfTest) { $extras += " --ez selftest true" }
 if ($Route) { $extras += " --ez route true" }
+if ($Verify) { $extras += " --ez verify true" }
 cmd /c "`"$ADB`" shell am start -n $pkg/.MainActivity$extras 2>&1"
 Start-Sleep -Seconds $WaitSeconds
 cmd /c "`"$ADB`" logcat -d -s PleosApp:I PleosKit:D > `"$P\logs\app-result.log`" 2>&1"

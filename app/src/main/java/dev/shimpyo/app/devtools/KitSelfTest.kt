@@ -1,4 +1,4 @@
-package dev.hmg.pleosapp
+package dev.shimpyo.app.devtools
 
 import ai.pleos.playground.navi.constants.WaypointIndex
 import ai.pleos.playground.navi.data.RequestWaypointInfo

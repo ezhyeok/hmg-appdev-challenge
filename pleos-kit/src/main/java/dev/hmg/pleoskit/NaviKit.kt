@@ -8,6 +8,7 @@ import ai.pleos.playground.navi.data.CurrentLocationInfo
 import ai.pleos.playground.navi.data.DestinationArrivedInfo
 import ai.pleos.playground.navi.data.DestinationInfo
 import ai.pleos.playground.navi.data.DrivingInfo
+import ai.pleos.playground.navi.data.NavigationScreenRequest
 import ai.pleos.playground.navi.data.RequestWaypointInfo
 import ai.pleos.playground.navi.data.RouteInfo
 import ai.pleos.playground.navi.data.RouteStartInfo
@@ -216,6 +217,11 @@ class NaviKit(context: Context) {
     }
 
     /** 길안내를 끝낸다. `naviMode`가 `ROUTE_GUIDING`에서 벗어나면 true. */
+    /** 내비 화면에서 장소 검색을 연다. 좌표를 모르는 곳(이름만 아는 휴게소 등)으로 안내할 때 쓴다 */
+    suspend fun showPlaceSearch(keyword: String) = withContext(SdkThreads.navi) {
+        raw.requestNavigationScreen(NavigationScreenRequest.SearchPlace(keyword))
+    }
+
     suspend fun cancelRoute(confirmTimeoutMs: Long = 20_000): Boolean = mutex.withLock {
         command("cancelRoute") { raw.cancelRoute() }
         awaitGuiding(false, confirmTimeoutMs)

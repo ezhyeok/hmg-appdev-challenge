@@ -6,6 +6,7 @@ import ai.pleos.playground.vehicle.api.model.area.SeatArea
 import ai.pleos.playground.vehicle.api.model.area.WindowArea
 import ai.pleos.playground.vehicle.api.model.capability.AreaBounds
 import ai.pleos.playground.vehicle.api.model.capability.CapabilityConfig
+import ai.pleos.playground.vehicle.constant.area.TurnSignalValue
 import ai.pleos.playground.vehicle.constant.control.CruiseControl
 import ai.pleos.playground.vehicle.constant.control.MoveControl
 import ai.pleos.playground.vehicle.constant.unit.TemperatureUnit
@@ -20,6 +21,8 @@ import ai.pleos.playground.vehicle.listener.HvacRecirculationStateListener
 import ai.pleos.playground.vehicle.listener.HvacTemperatureValueListener
 import ai.pleos.playground.vehicle.listener.SeatBackrestAnglePositionListener
 import ai.pleos.playground.vehicle.listener.SeatOccupancyListener
+import ai.pleos.playground.vehicle.listener.SteeringWheelAngleListener
+import ai.pleos.playground.vehicle.listener.TurnSignalStateListener
 import ai.pleos.playground.vehicle.listener.WindowPositionListener
 import android.content.Context
 import kotlinx.coroutines.channels.awaitClose
@@ -50,6 +53,8 @@ class VehicleKit(context: Context) {
     private val odometer by lazy { raw.getOdometer() }
     private val brake by lazy { raw.getBrake() }
     private val evBattery by lazy { raw.getEvBattery() }
+    private val steering by lazy { raw.getSteeringWheel() }
+    private val turnSignalDomain by lazy { raw.getTurnSignal() }
 
     @Volatile
     private var connected = false
@@ -411,6 +416,46 @@ class VehicleKit(context: Context) {
                 },
                 { evBattery.registerEvBatteryStateOfCharge(it) },
                 { evBattery.unregisterEvBatteryStateOfCharge(it) },
+            )
+        },
+    )
+
+    // ------------------------------------------------------------ 주행 입력 (CAR_DRIVE / CAR_LIGHTS)
+
+    /** 조향각(도). 운전 스타일 분석에 쓴다. CAR_DRIVE */
+    fun steeringAngle() = ReadSignal<Float>(
+        name = "steeringWheelAngle",
+        getter = { call<Float?>("getCurrentSteeringWheelAngle") { ok, fail -> steering.getCurrentSteeringWheelAngle(ok, fail) } },
+        changesFactory = {
+            observe<SteeringWheelAngleListener, Float?>(
+                "steeringWheelAngle",
+                { emit, fail ->
+                    object : SteeringWheelAngleListener {
+                        override fun onSteeringWheelAngleUpdated(angle: Float?) = emit(angle)
+                        override fun onFailed(e: Exception) = fail(e)
+                    }
+                },
+                { steering.registerSteeringWheelAngle(it) },
+                { steering.unregisterSteeringWheelAngle(it) },
+            )
+        },
+    )
+
+    /** 방향지시등 상태(OFF / LEFT / RIGHT). CAR_LIGHTS */
+    fun turnSignal() = ReadSignal<TurnSignalValue>(
+        name = "turnSignalState",
+        getter = { call<TurnSignalValue?>("getCurrentTurnSignalState") { ok, fail -> turnSignalDomain.getCurrentTurnSignalState(ok, fail) } },
+        changesFactory = {
+            observe<TurnSignalStateListener, TurnSignalValue?>(
+                "turnSignalState",
+                { emit, fail ->
+                    object : TurnSignalStateListener {
+                        override fun onTurnSignalStateUpdated(state: TurnSignalValue?) = emit(state)
+                        override fun onFailed(e: Exception) = fail(e)
+                    }
+                },
+                { turnSignalDomain.registerTurnSignalState(it) },
+                { turnSignalDomain.unregisterTurnSignalState(it) },
             )
         },
     )
