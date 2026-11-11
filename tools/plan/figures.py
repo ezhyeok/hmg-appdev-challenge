@@ -1193,10 +1193,10 @@ def fig_models():
     b.append(L(lx2, 103, lx2 + 20, 103, INK3, 1.4, dash="5 4"))
     b.append(T(lx2 + 26, 108, "실제 중앙값 %d분" % ps["trueMedianMin"], FS, 600, INK2))
 
-    # ③ scene A (그림 1): driver + 7-year-old, both 55 min after the last restroom. The decision deadline is the
-    # most constrained occupant's: where that person's need probability (from the last restroom) reaches the
-    # decision probability (RestroomNeedModel.deadlineMin, 2026-11-11 engine fix: the gauge and the deadline
-    # follow the same person). S = 1 − cdf, interpolated from the engine's own curves.
+    # ③ scene A (그림 1): driver + 7-year-old, both 55 min after the last restroom. The decision deadline is where
+    # the probability that ANYONE on board needs a stop, P(Δ) = 1 − S_adult(55+Δ)·S_child(55+Δ), reaches the decision
+    # probability (RestroomNeedModel.deadlineMin; the gauge stays with the most constrained occupant, SPEC 4.1).
+    # S = 1 − cdf, interpolated from the engine's own curves. The grey line is the child alone, for comparison.
     elapsed, decision = 55.0, 0.3
     ok_min, jam0, jam1, jk_min = 2.4, 3.0, 63.0, 63.0     # 옥산 2.4 min, congestion 3–63 min, 죽암 63 min
     s_ad, s_ch = nd["series"]["ADULT"]["cdf"], nd["series"]["CHILD_7"]["cdf"]
@@ -1204,20 +1204,14 @@ def fig_models():
     def need_p(series, dl):
         return _interp(ts, series, elapsed + dl)
 
-    def deadline_of(series):
-        lo, hi = 0.0, 70.0
-        for _ in range(50):
-            mid = (lo + hi) / 2
-            lo, hi = (mid, hi) if need_p(series, mid) < decision else (lo, mid)
-        return lo
-
-    d_ad, d_ch = deadline_of(s_ad), deadline_of(s_ch)
-    who, curve, other = ("7살 아이", s_ch, s_ad) if d_ch <= d_ad else ("운전자", s_ad, s_ch)
-    deadline = min(d_ad, d_ch)
-
     def group_p(dl):
-        return need_p(curve, dl)
+        return 1.0 - (1.0 - need_p(s_ad, dl)) * (1.0 - need_p(s_ch, dl))
 
+    lo, hi = 0.0, 70.0
+    for _ in range(50):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if group_p(mid) < decision else (lo, mid)
+    deadline = lo
     p_ok, p_jk = group_p(ok_min), group_p(jk_min)
     x3 = xs[2]
     b.append(R(x3 + pw * jam0 / 70.0, top, pw * (jam1 - jam0) / 70.0, ph, 0, RED_TINT))
@@ -1225,7 +1219,7 @@ def fig_models():
                    lambda v: "%d" % v, lambda v: "%d%%" % round(v * 100))
     b.append(T(px((jam0 + jam1) / 2), top + ph - 10, "정체", FS, 800, RED_TEXT, "middle"))
     b.append(L(x3, py(decision), x3 + pw, py(decision), ORANGE, 1.6, dash="5 4"))
-    b.append(_poly([(px(t / 2.0), py(need_p(other, t / 2.0))) for t in range(141)], LINE2, 2))
+    b.append(_poly([(px(t / 2.0), py(need_p(s_ch, t / 2.0))) for t in range(141)], LINE2, 2))
     b.append(_poly([(px(t / 2.0), py(group_p(t / 2.0))) for t in range(141)], ACCENT, 3))
     # deadline: a pole from the crossing up, labelled at the top (the space below is the 옥산 label's)
     b.append(L(px(deadline), py(decision), px(deadline), top, ORANGE, 1.6, dash="5 4"))
@@ -1238,7 +1232,7 @@ def fig_models():
                 anchor="end"))
     lx3 = xs[2] - 46
     b.append(L(lx3, 59, lx3 + 20, 59, ACCENT, 3.5))
-    b.append(T(lx3 + 26, 64, "%s의 필요 확률 (가장 급한 탑승자)" % who, FS, 600, INK2))
+    b.append(T(lx3 + 26, 64, "누군가 필요해질 확률 (운전자+7살)", FS, 600, INK2))
     b.append(L(lx3, 81, lx3 + 20, 81, ORANGE, 1.6, dash="5 4"))
     b.append(T(lx3 + 26, 86, "판단 마감 %d%%" % round(decision * 100), FS, 600, INK2))
     b.append(R(lx3, 97, 20, 13, 3, RED_TINT, "#F6C3B5", 1))
@@ -1246,10 +1240,11 @@ def fig_models():
 
     foot = ("① 화면 게이지는 필요 확률 50%%, 마지막 기회·계획 판단은 30%%에서 정한다(엔진 사전분포). "
             "② 가상의 성인(실제 중앙값 %d분)의 화장실 간격 %d개(점)를 차례로 넣으면 엔진의 사후 중앙값이 사전값 %d분에서 "
-            "%d분으로 실제 쪽으로 옮겨 간다. ③ 그림 1의 장면(운전자와 7살 아이 모두 마지막 화장실 %d분 뒤). 가장 먼저 "
-            "필요해질 탑승자(%s, 회색은 다른 탑승자)의 필요 확률이 %d%%에 닿는 %d분 뒤가 판단 마감이다. 마감 전 마지막 기회인 옥산휴게소(%d%%)를 지나치면 다음 "
-            "화장실 죽암휴게소(%d%%)는 마감 뒤라서 진입로 2~5km 전에 묻는다."
-            % (ps["trueMedianMin"], len(obs), round(first), round(last), elapsed, who, round(decision * 100),
+            "%d분으로 실제 쪽으로 옮겨 간다. ③ 그림 1의 장면(운전자와 7살 아이 모두 마지막 화장실 %d분 뒤). 차는 한 사람만 "
+            "필요해도 서야 하므로 판단은 누군가 필요해질 확률(파란 선, 회색은 아이 혼자)로 한다. 이 확률이 %d%%에 닿는 %d분 뒤가 "
+            "판단 마감이다. 마감 전 마지막 기회인 옥산휴게소(%d%%)를 지나치면 다음 화장실 죽암휴게소(%d%%)는 마감 뒤라서 "
+            "진입로 2~5km 전에 묻는다."
+            % (ps["trueMedianMin"], len(obs), round(first), round(last), elapsed, round(decision * 100),
                round(deadline), round(p_ok * 100), round(p_jk * 100)))
     b.append(ML(16, top + ph + 84, wrap(foot, FS, W - 32), FS, 20, 500, INK3))
     lines = len(wrap(foot, FS, W - 32))
