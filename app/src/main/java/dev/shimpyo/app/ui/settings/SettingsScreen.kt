@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -35,17 +36,22 @@ import dev.shimpyo.app.ui.occupants.HealthConsentRow
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.PleosType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
-import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.engine.Occupant
+
+/** 설정 화면이 서비스 상태에서 읽는 값. 상태 전체를 받으면 매초 다시 그려진다 (UI 감사 S3) */
+@Immutable
+data class SettingsStatus(val serviceRunning: Boolean, val status: String?, val llm: String?, val cabinSupported: Boolean)
 
 /**
  * 6. 설정 (screens.md 6.1, 정차 중에만).
  * 음성 안내, 피로가 오르면 외기로 전환(동의), 지난밤 수면, 건강 관련 정보 동의, 기록 지우기, 정보.
  * 맨 아래에 서비스 상태와 LLM 사용 여부를 작게 보여 준다.
+ * 외기 전환은 차가 내기·외기 전환을 지원할 때만 켤 수 있다(status.cabinSupported, UI 감사 #16).
  */
 @Composable
 fun SettingsScreen(
-    state: CoachUiState,
+    status: SettingsStatus,
+    occupants: List<Occupant>,
     prefs: PrefsState,
     versionName: String,
     onSetOccupants: (List<Occupant>) -> Unit,
@@ -66,12 +72,14 @@ fun SettingsScreen(
         }
         SectionTitle("차량")
         ListGroup {
+            val cabin = status.cabinSupported
             SettingRow(
                 "피로가 오르면 외기로 전환",
-                subtitle = "묻지 않고 내기순환을 꺼서 환기해요. 공조 제어를 지원하는 차에서만 동작해요",
+                subtitle = if (cabin) "묻지 않고 내기순환을 꺼서 환기해요" else "이 차에서는 쓸 수 없어요 (내기·외기 전환 미지원)",
                 icon = ShimpyoIcons.Air,
+                enabled = cabin,
                 onClick = { prefs.updateAutoFreshAir(!prefs.autoFreshAir) },
-                trailing = { PleosSwitch(prefs.autoFreshAir) },
+                trailing = { PleosSwitch(cabin && prefs.autoFreshAir, enabled = cabin) },
             )
         }
         SectionTitle("운전자")
@@ -82,7 +90,7 @@ fun SettingsScreen(
     val right: @Composable () -> Unit = {
         SectionTitle("개인정보")
         ListGroup {
-            HealthConsentRow(prefs, state.occupants, onSetOccupants)
+            HealthConsentRow(prefs, occupants, onSetOccupants)
             ListDivider()
             ClearRecordsRow(onClearRecords)
         }
@@ -92,7 +100,7 @@ fun SettingsScreen(
             ListDivider()
             LicensesRow()
         }
-        StatusFooter(state)
+        StatusFooter(status)
     }
     if (layout.landscape) {
         Row(modifier.fillMaxSize().padding(horizontal = layout.margin), horizontalArrangement = Arrangement.spacedBy(Dimens.Space.xxl)) {
@@ -168,13 +176,13 @@ private fun LicensesRow() {
 
 /** 서비스 상태, 데이터, LLM (작게) */
 @Composable
-private fun StatusFooter(state: CoachUiState) {
+private fun StatusFooter(s: SettingsStatus) {
     val c = ShimpyoTheme.colors
     Spacer(Modifier.height(Dimens.Space.xl))
     val lines = listOfNotNull(
-        if (state.serviceRunning) "코치 서비스 실행 중" else "코치 서비스 꺼짐",
-        state.status,
-        "음성 이해: " + (state.llm ?: "규칙 기반"),
+        if (s.serviceRunning) "코치 서비스 실행 중" else "코치 서비스 꺼짐",
+        s.status,
+        "음성 이해: " + (s.llm ?: "규칙 기반"),
     )
     lines.forEach { Text(it, style = PleosType.LabelMedium, color = c.textTertiary) }
     Spacer(Modifier.height(Dimens.Space.xl))

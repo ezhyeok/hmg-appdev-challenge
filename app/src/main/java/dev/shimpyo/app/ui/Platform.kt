@@ -11,12 +11,20 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import dev.hmg.pleoskit.UxRestrictionWatcher
+import dev.hmg.pleoskit.UxRestrictions
 import dev.shimpyo.app.BuildConfig
 import dev.shimpyo.app.ShimpyoApp
 import dev.shimpyo.app.coach.CoachStore
 import dev.shimpyo.app.data.Settings
 import dev.shimpyo.coach.UiCommand
 import java.io.File
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.launch
 
 /*
  * 안드로이드에 기대는 코드는 이 파일에만 둔다 (설정 저장소, 파일, 액티비티, 뒤로 키).
@@ -31,6 +39,30 @@ fun rememberAndroidHost(): AppHost {
         val app = context.applicationContext as ShimpyoApp
         AndroidHost(context.findActivity(), app)
     }
+}
+
+/**
+ * 화면용 주행 제한 구독 (CarUxRestrictionsManager). 프로세스에 하나만 둔다: 액티비티가 다시 만들어질 때(창 분할·야간 모드)
+ * 새로 연결하면 잠깐 '모름'(= 제한)이 되어 정차 중 설정 화면에서 주행 화면으로 튕긴다. 서비스와 따로 구독하므로
+ * 서비스가 늦게 뜨거나 죽어도 화면은 제한을 안다 (UI 감사 #2). Car 연결은 프로세스와 함께 끝난다.
+ */
+object UiRestrictions {
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private var watcher: UxRestrictionWatcher? = null
+
+    @Synchronized
+    fun state(context: Context): StateFlow<UxRestrictions> =
+        (watcher ?: UxRestrictionWatcher(context.applicationContext).also { w ->
+            watcher = w
+            scope.launch { w.connect() }
+        }).state
+}
+
+@Composable
+fun rememberUxRestrictions(): UxRestrictions {
+    val context = LocalContext.current
+    val flow = remember(context) { UiRestrictions.state(context) }
+    return flow.collectAsStateWithLifecycle().value
 }
 
 /** 시스템 뒤로(CCP Back 포함) */

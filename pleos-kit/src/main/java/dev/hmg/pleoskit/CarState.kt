@@ -3,7 +3,6 @@ package dev.hmg.pleoskit
 import android.car.Car
 import android.car.VehicleGear
 import android.car.VehiclePropertyIds
-import android.car.drivingstate.CarUxRestrictionsManager
 import android.car.hardware.CarPropertyValue
 import android.car.hardware.property.CarPropertyManager
 import android.content.Context
@@ -24,11 +23,10 @@ class CarState(context: Context) {
     private val appContext = context.applicationContext
     private var car: Car? = null
     private var propertyManager: CarPropertyManager? = null
-    private var uxManager: CarUxRestrictionsManager? = null
+    private val ux = UxRestrictionTracker()
 
     private val _gear = MutableStateFlow<Int?>(null)
     private val _speedMps = MutableStateFlow<Float?>(null)
-    private val _drivingRestricted = MutableStateFlow(false)
 
     /** 현재 기어. `android.car.VehicleGear` 상수(GEAR_PARK = 4, GEAR_DRIVE = 8 등). */
     val gear: StateFlow<Int?> = _gear
@@ -36,8 +34,15 @@ class CarState(context: Context) {
     /** 차속(m/s). km/h는 3.6을 곱한다. */
     val speedMps: StateFlow<Float?> = _speedMps
 
-    /** 주행 중 UX 제한이 걸려 있는지(`CarUxRestrictions.isRequiresDistractionOptimization`). true면 화면 조작을 줄여야 한다. */
-    val drivingRestricted: StateFlow<Boolean> = _drivingRestricted
+    /**
+     * 주행 중 UX 제한이 걸려 있는지(`CarUxRestrictions.isRequiresDistractionOptimization`). true면 화면 조작을 줄여야 한다.
+     * 모르면(연결 전·구독 실패·해제) true다. 예전 기본값 false는 시작 직후 주행 중에도 정차 화면을 열었다(UI 감사 #2).
+     * 모르는 상태와 기능별 제한 비트까지 보려면 [uxRestrictions]를 쓴다.
+     */
+    val drivingRestricted: StateFlow<Boolean> = ux.restricted
+
+    /** UX 제한 전체 (모르는 상태를 [UxRestrictions.Unknown]으로 구분한다) */
+    val uxRestrictions: StateFlow<UxRestrictions> = ux.state
 
     val isParked: Boolean get() = _gear.value == VehicleGear.GEAR_PARK
 
@@ -62,6 +67,8 @@ class CarState(context: Context) {
         if (car != null) return@withContext
         val c = Car.createCar(appContext)
         car = c
+        // 주행 제한부터: 권한이 필요 없고 화면이 가장 먼저 알아야 한다
+        ux.attach(c)
         val pm = c.getCarManager(Car.PROPERTY_SERVICE) as CarPropertyManager
         propertyManager = pm
         runCatching {
@@ -70,22 +77,15 @@ class CarState(context: Context) {
         runCatching {
             pm.registerCallback(speedCallback, VehiclePropertyIds.PERF_VEHICLE_SPEED, CarPropertyManager.SENSOR_RATE_NORMAL)
         }.onFailure { KitLog.w("speed subscription failed (CAR_SPEED 권한 확인): ${it.message}") }
-        runCatching {
-            val ux = c.getCarManager(Car.CAR_UX_RESTRICTION_SERVICE) as CarUxRestrictionsManager
-            uxManager = ux
-            _drivingRestricted.value = ux.currentCarUxRestrictions.isRequiresDistractionOptimization
-            ux.registerListener { r -> _drivingRestricted.value = r.isRequiresDistractionOptimization }
-        }.onFailure { KitLog.w("ux restriction subscription failed: ${it.message}") }
         Unit
     }
 
     fun release() {
         runCatching { propertyManager?.unregisterCallback(gearCallback) }
         runCatching { propertyManager?.unregisterCallback(speedCallback) }
-        runCatching { uxManager?.unregisterListener() }
+        ux.detach()
         runCatching { car?.disconnect() }
         car = null
         propertyManager = null
-        uxManager = null
     }
 }

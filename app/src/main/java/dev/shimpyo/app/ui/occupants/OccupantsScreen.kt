@@ -106,7 +106,7 @@ fun OccupantsScreen(
         OccupantList(
             list = list,
             drivenBy = drivenBy,
-            onAge = { o, age -> changeLater(list.map { if (it.id == o.id) it.copy(ageYears = age) else it }) },
+            onAge = { o, age -> changeLater(list.map { if (it.id == o.id) withAge(it, age) else it }) },
             onRemove = { o -> changeNow(list.filterNot { it.id == o.id }) },
         )
         Spacer(Modifier.height(ButtonGap))
@@ -159,56 +159,64 @@ fun OccupantsScreen(
 @Composable
 private fun OccupantList(list: List<Occupant>, drivenBy: String?, onAge: (Occupant, Int) -> Unit, onRemove: (Occupant) -> Unit) {
     val c = ShimpyoTheme.colors
+    // 좁은 세로 윈도(12.9" 628dp, WF 648dp)에서는 나이 스테퍼를 이름 아래 줄로 내린다: 한 줄이면 이름이 약 48dp만 남았다 (UI 감사 #22)
+    val narrow = LocalLayout.current.width < NARROW_ROW_WIDTH
     ListGroup {
         list.forEachIndexed { i, o ->
             if (i > 0) ListDivider()
             // 운전자는 항상 첫 번째다 (Settings 기본값, OccupantPhrase 모두 운전자를 먼저 넣는다)
             val isDriver = o.id == DRIVER.id || (i == 0 && o.type == OccupantType.ADULT)
-            Row(
-                Modifier.fillMaxWidth().heightIn(min = Dimens.Component.listItemHeight).padding(horizontal = Dimens.Space.l, vertical = Dimens.Space.s),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Labels.typeIcon(o.type), contentDescription = null, modifier = Modifier.size(Dimens.Icon.base), tint = c.iconSecondary)
-                Spacer(Modifier.width(Dimens.Space.l))
-                Column(Modifier.weight(1f)) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Text(
-                            if (isDriver) "운전자" else Labels.occupantName(o),
-                            style = PleosType.TitleSmall,
-                            color = c.textPrimary,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis,
-                            modifier = Modifier.weight(1f, fill = false),
-                        )
-                        if (o.id == drivenBy && list.size > 1) {
-                            // 지금 화장실 게이지를 정하는 사람
-                            Spacer(Modifier.width(Dimens.Space.xs))
-                            // 반전 글자: 라이트 흰색(4.9:1), 다크 static_dark_100(4.9:1)
-                            SmallChip("기준", container = c.gaugeOk, content = c.textOnFilledPrimary)
+            val stepper: @Composable () -> Unit = {
+                val age = o.ageYears ?: DEFAULT_CHILD_AGE
+                PleosStepper(
+                    value = "${age}세",
+                    onMinus = { onAge(o, (age - 1).coerceAtLeast(MIN_CHILD_AGE)) },
+                    onPlus = { onAge(o, (age + 1).coerceAtMost(MAX_CHILD_AGE)) },
+                    minusEnabled = age > MIN_CHILD_AGE,
+                    plusEnabled = age < MAX_CHILD_AGE,
+                    label = "나이",
+                    width = 300.dp,
+                )
+            }
+            Column(Modifier.fillMaxWidth().padding(horizontal = Dimens.Space.l, vertical = Dimens.Space.s)) {
+                Row(Modifier.fillMaxWidth().heightIn(min = Dimens.Component.listItemHeight - Dimens.Space.m), verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Labels.typeIcon(o.type), contentDescription = null, modifier = Modifier.size(Dimens.Icon.base), tint = c.iconSecondary)
+                    Spacer(Modifier.width(Dimens.Space.l))
+                    Column(Modifier.weight(1f)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                if (isDriver) "운전자" else Labels.occupantName(o),
+                                style = PleosType.TitleSmall,
+                                color = c.textPrimary,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false),
+                            )
+                            if (o.id == drivenBy && list.size > 1) {
+                                // 지금 화장실 게이지를 정하는 사람
+                                Spacer(Modifier.width(Dimens.Space.xs))
+                                // 반전 글자: 라이트 흰색(4.9:1), 다크 static_dark_100(4.9:1)
+                                SmallChip("기준", container = c.gaugeOk, content = c.textOnFilledPrimary)
+                            }
                         }
+                        Text(
+                            if (isDriver) "${Labels.typeName(o.type)} · ${Labels.baselineMin(o)}분마다" else "${Labels.baselineMin(o)}분마다",
+                            style = PleosType.BodyMedium,
+                            color = c.textSecondary,
+                            maxLines = 1,
+                        )
                     }
-                    Text(
-                        if (isDriver) "${Labels.typeName(o.type)} · ${Labels.baselineMin(o)}분마다" else "${Labels.baselineMin(o)}분마다",
-                        style = PleosType.BodyMedium,
-                        color = c.textSecondary,
-                        maxLines = 1,
-                    )
+                    if (o.type == OccupantType.CHILD && !narrow) {
+                        stepper()
+                        Spacer(Modifier.width(Dimens.Space.m))
+                    }
+                    if (!isDriver) {
+                        PleosIconButton(ShimpyoIcons.Close, contentDescription = "${Labels.occupantName(o)} 빼기", onClick = { onRemove(o) })
+                    }
                 }
-                if (o.type == OccupantType.CHILD) {
-                    val age = o.ageYears ?: DEFAULT_CHILD_AGE
-                    PleosStepper(
-                        value = "${age}세",
-                        onMinus = { onAge(o, (age - 1).coerceAtLeast(MIN_CHILD_AGE)) },
-                        onPlus = { onAge(o, (age + 1).coerceAtMost(MAX_CHILD_AGE)) },
-                        minusEnabled = age > MIN_CHILD_AGE,
-                        plusEnabled = age < MAX_CHILD_AGE,
-                        label = "나이",
-                        width = 300.dp,
-                    )
-                    Spacer(Modifier.width(Dimens.Space.m))
-                }
-                if (!isDriver) {
-                    PleosIconButton(ShimpyoIcons.Close, contentDescription = "${Labels.occupantName(o)} 빼기", onClick = { onRemove(o) })
+                if (o.type == OccupantType.CHILD && narrow) {
+                    Spacer(Modifier.height(Dimens.Space.xs))
+                    Row(Modifier.padding(start = Dimens.Icon.base + Dimens.Space.l)) { stepper() }
                 }
             }
         }
@@ -279,6 +287,16 @@ private fun TypeGrid(types: List<OccupantType>, enabled: Boolean, onAdd: (Occupa
     }
 }
 
+/**
+ * 아이 나이를 바꾼다. 이름이 옛 나이를 담고 있으면("7살 아이", 음성 설정이 붙인 이름) 그 숫자도 바꾼다
+ * (UI 감사 #21: 나이를 8세로 바꿔도 "7살 아이"로 남았다)
+ */
+fun withAge(o: Occupant, age: Int): Occupant {
+    val old = o.ageYears ?: return o.copy(ageYears = age)
+    val label = o.label.replace(Regex("(?<!\\d)$old(\\s*)(살|세)")) { m -> "$age${m.groupValues[1]}${m.groupValues[2]}" }
+    return o.copy(ageYears = age, label = label)
+}
+
 private fun newOccupant(type: OccupantType): Occupant = Occupant(
     id = "o${System.currentTimeMillis()}",
     type = type,
@@ -292,3 +310,5 @@ private const val DEFAULT_CHILD_AGE = 5
 private const val MIN_CHILD_AGE = 3
 private const val MAX_CHILD_AGE = 12
 private const val STEPPER_DEBOUNCE_MS = 700L
+/** 이보다 좁은 윈도에서는 탑승자 행을 두 줄로 놓는다 (LayoutSpec.margin의 좁은 기준과 같다) */
+private val NARROW_ROW_WIDTH = 700.dp

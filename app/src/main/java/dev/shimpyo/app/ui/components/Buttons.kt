@@ -34,7 +34,6 @@ import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.DriveType
 import dev.shimpyo.app.ui.theme.PleosButtonType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
-import dev.shimpyo.coach.VoiceState
 
 /** Basic button 크기 [가이드: basic_size 도식] — 높이 100/80/64, 반경 32/24/16, 아이콘 48/40/32 */
 enum class ButtonSize(val height: Dp, val radius: Dp, val paddingH: Dp, val icon: Dp) {
@@ -97,7 +96,7 @@ fun PleosButton(
     }
 }
 
-/** Icon button (Basic) 80×80, 반경 20, 아이콘 48. [active]이면 고정 링(움직이지 않음)을 두른다 */
+/** Icon button (Basic) 80×80, 반경 20, 아이콘 48. [active]이면 고정 링(움직이지 않음)을 두른다. 주행 중 마이크는 [size] 100 */
 @Composable
 fun PleosIconButton(
     icon: ImageVector,
@@ -107,6 +106,7 @@ fun PleosIconButton(
     enabled: Boolean = true,
     active: Boolean = false,
     tint: Color = ShimpyoTheme.colors.iconPrimary,
+    size: Dp = Dimens.Button.iconButton,
 ) {
     val c = ShimpyoTheme.colors
     val interaction = remember { MutableInteractionSource() }
@@ -114,7 +114,7 @@ fun PleosIconButton(
     val shape = RoundedCornerShape(Dimens.Radius.iconButton)
     Box(
         modifier = modifier
-            .size(Dimens.Button.iconButton)
+            .size(size)
             .semantics { this.contentDescription = contentDescription }
             .pressable(interaction, enabled = enabled, cornerRadius = Dimens.Radius.iconButton, onClick = onClick)
             .clip(shape)
@@ -159,41 +159,35 @@ fun UrgentButton(onClick: () -> Unit, modifier: Modifier = Modifier, compact: Bo
 }
 
 /**
- * 마이크 버튼과 음성 상태. "듣는 중"과 "말하는 중"을 글자로 나눠 보여 준다(screens.md 0.4).
- * 듣는 중에는 Filled 마이크 + 고정 링. 음성을 쓸 수 없으면 사선 마이크.
+ * 마이크 버튼과 음성 상태 ([micModel]). "듣는 중"과 "말하는 중"을 글자로 나눠 보여 준다(screens.md 0.4).
+ * 듣는 중에는 Filled 마이크 + 고정 링. 듣기를 쓸 수 없으면 사선 마이크.
+ * 주행 중에는 높이 100(앱의 주행 중 터치 최소)으로 키운다 (UI 감사 #25: 80이었다).
  */
 @Composable
-fun VoiceButton(voice: VoiceState, voiceEnabled: Boolean, onClick: () -> Unit, modifier: Modifier = Modifier) {
+fun VoiceButton(mic: MicModel, onClick: () -> Unit, modifier: Modifier = Modifier, driving: Boolean = false) {
     val c = ShimpyoTheme.colors
-    val available = voiceEnabled && voice != VoiceState.UNAVAILABLE
-    val status = when {
-        !available -> "음성 꺼짐"
-        voice == VoiceState.LISTENING -> "듣는 중"
-        voice == VoiceState.SPEAKING -> "말하는 중"
-        voice == VoiceState.THINKING -> "생각하는 중"
-        else -> null
-    }
     Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        if (status != null) {
+        if (mic.status != null) {
             Text(
-                status,
+                mic.status,
                 style = DriveType.GaugeLabel,
-                color = if (voice == VoiceState.LISTENING && available) c.voiceActive else c.textSecondary,
+                color = if (mic.active) c.voiceActive else c.textSecondary,
                 maxLines = 1,
             )
             Spacer(Modifier.width(Dimens.Space.m))
         }
         PleosIconButton(
-            icon = when {
-                !available -> ShimpyoIcons.MicOff
-                voice == VoiceState.LISTENING -> ShimpyoIcons.MicFilled
-                voice == VoiceState.SPEAKING -> ShimpyoIcons.VolumeUp
-                else -> ShimpyoIcons.Mic
+            icon = when (mic.icon) {
+                MicIcon.MIC -> ShimpyoIcons.Mic
+                MicIcon.MIC_ACTIVE -> ShimpyoIcons.MicFilled
+                MicIcon.SPEAKER -> ShimpyoIcons.VolumeUp
+                MicIcon.MIC_OFF -> ShimpyoIcons.MicOff
             },
-            contentDescription = if (available) "말하기" else "음성 꺼짐",
+            contentDescription = mic.description,
             onClick = onClick,
-            active = available && voice == VoiceState.LISTENING,
-            tint = if (available && voice == VoiceState.LISTENING) c.voiceActive else c.iconPrimary,
+            active = mic.active,
+            tint = if (mic.active) c.voiceActive else c.iconPrimary,
+            size = if (driving) Dimens.Touch.driving else Dimens.Button.iconButton,
         )
     }
 }
