@@ -1,42 +1,50 @@
-# 쉼표 구조 (2026-11-11)
+# 쉼표 구조 (2026-11-12)
 
 PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판단 로직의 수식은 `rest-engine/README.md`.
 
 ## 1. 모듈
 
 ```
-┌──────────────────────────── app (dev.shimpyo.app) ────────────────────────────┐
-│  ui/ (Compose)  ←── CoachStore.state (StateFlow) ──  coach/CoachService      │
-│        │                                                │   ▲                 │
-│        └──── UiCommand (SharedFlow) ───────────────────►│   │ 1초마다          │
-│                                                         ▼   │                 │
-│  data/StopRepository (assets, 격자 색인)      rest-engine/CoachEngine.update() │
-│  data/RouteOracle (requestTrip으로 경로 거리)   (순수 Kotlin, 안드로이드 의존 없음) │
-│  voice/VoiceAgent, IntentParser (TTS/STT, 규칙 + 선택적 LLM)                    │
-└───────────────────────────────────────┬───────────────────────────────────────┘
-                                        │
+┌───────────────────────── app (dev.shimpyo.app): 안드로이드 껍데기 ─────────────────────────┐
+│ ui/ (Compose) ◄── CoachStore.state ──┐            CoachService: 조립만 (포트 구현 + 루프 띄우기) │
+│      │                               │ UiSink     CarSignals (CarState·Vehicle·Location → 허브) │
+│      └── UiCommand (Channel) ────────┼──────────► KitNaviPort · KitCabin · VoiceAgent · LLM 해석 │
+│                                      │            Settings · MemoryStore · StopHistoryStore · TripStore │
+└──────────────────────────────────────┼──────────────────────────────────────────────────────────┘
+┌─────────── rest-engine/coach (dev.shimpyo.coach): 코치 계층, 순수 Kotlin ───────────────────────┐
+│ CoachCore (액터) ── WorldSwitch(실제/시연 세계 + 엔진 + 여정) ── PromptMachine ── StopRecorder    │
+│     │ 읽기         NaviTracker(내비 조회 → NaviSnapshot, epoch)   CandidateProvider(후보 → CandidateSnap) │
+│     │              PositionTracker · Odometer · SignalHub      GoToRunner · RouteOracle · StopRepository │
+│     ▼ Ports.kt (NaviPort, VoicePort, CabinPort, StopIndex, HistoryPort, MemoryPort, SettingsPort, UiSink …) │
+└───────────────────────────────────────────────────────────────────────────────────────────────┘
+┌─────────── rest-engine (dev.shimpyo.engine): 판단 엔진, 순수 Kotlin ── CoachEngine.update() ──────┐
+└───────────────────────────────────────────────────────────────────────────────────────────────┘
                      pleos-kit (dev.hmg.pleoskit): SDK를 코루틴으로 감싼 공통 모듈
-                     VehicleKit · NaviKit · TtsKit · SttKit · LocationKit · CarState
-                                        │
               Pleos Connect SDK (Vehicle, NaviHelper, TTS, STT, FusedLocation, LLM) + AAOS Car API
 ```
 
-- **rest-engine**를 따로 둔 이유: 판단 로직을 에뮬레이터 없이 JVM 단위 테스트로 검증하고, 시나리오(정체·졸음·급해)를 재현 가능한 테스트로 남기기 위해서다. composite build(`includeBuild`)라 앱은 `dev.shimpyo:rest-engine` 좌표로 쓴다.
-- **pleos-kit**가 SDK의 함정(호출 스레드 블로킹, 앱이 얼려지는 문제, 제어 결과 미반영, 내비 요청 간격)을 감춘다. 규칙은 `pleos-kit/README.md`.
+- **rest-engine**: "언제 무엇을 권할지"를 정하는 엔진. 입력(신호·경로·후보·의도) → 출력(게이지·추천·질문). JVM 테스트 252개.
+- **rest-engine/coach**: 엔진을 차에서 돌리는 실행 계층. 안드로이드에 의존하지 않고 바깥은 모두 포트(`Ports.kt`) 뒤에 있어서, 서비스 전체 흐름
+  (귀성길 시연 → 질문 → '응' → 내비 경유지)을 가짜 포트와 가상 시간으로 JVM에서 끝까지 돌린다(`CoachCoreTest`). 부품별 설계는
+  `docs/design/coach-layer/`(navi, candidates, prompt, world, data, core, ui).
+- **app**: 포트를 SDK·파일·화면으로 구현하고 조립한다. 판단하지 않는다.
+- **pleos-kit**: SDK의 함정(호출 스레드 블로킹, 앱이 얼려지는 문제, 제어 결과 미반영, 내비 요청 간격)을 감춘다. `pleos-kit/README.md`.
+- composite build(`includeBuild`)라 앱은 `dev.shimpyo:rest-engine`, `dev.shimpyo:coach` 좌표로 쓴다.
 
 ## 2. 실행 흐름
 
-1. `MainActivity`가 실행 중 권한(차속, 위치)을 받고 `CoachService`(포그라운드 서비스)를 시작한다. 서비스가 포그라운드여야 내비가 화면 앞으로 와도 앱이 얼려지지 않는다.
-2. `CoachService`가 신호를 모은다.
-   - AAOS `CarState`: 기어, 차속, 주행 중 UX 제한
-   - Vehicle SDK: 조향각(이벤트마다 표본), 브레이크, 방향지시등, 크루즈, 도어 열림, 공조(전원·내기순환·온도)
-   - NaviHelper: 15초마다 경로 상태(정체 목록)와 목적지까지 남은 거리·시간. 회전 안내(TBT, 경로 위 휴게소·다음 회전)는 다음 화장실·회전이 8km 안이면 5초, 멀면 20초, 아무것도 없으면 30초마다 받고, 그 사이에는 차속을 적분한 주행 거리로 경로 거리·정체 위치·남은 거리를 매초 줄여 엔진에 넣는다(`NaviPoll`, `CoachService.liveRoute`)
-   - FusedLocation: 위치와 진행 방향 (끊기면 내비의 현재 위치)
-3. 정차 후보 6만여 곳은 `assets/data/stops.bin`(열 단위 이진 표, rest-engine `StopTable`)을 한 번 읽어 메모리에 둔다. 격자 색인은 행 번호만 들고, 고속도로 휴게소·졸음쉼터 532곳 전용 색인을 따로 둔다. 거리·방향을 거른 뒤 통과한 행만 `StopCandidate`로 만든다. 20초마다 진행 방향 앞쪽 60km 안의 화장실 기회(휴게소, 화장실 있는 졸음쉼터)를 고속도로 색인으로 추리고, 상위 6곳은 `requestTrip`으로 실제 경로 거리·시간을 구한다. 경로 거리가 직선거리보다 지나치게 길면 반대 방향(유턴 필요)으로 보고 뺀다.
-   - 휴게소·졸음쉼터는 데이터에 그 시설로 들어가는 차로의 방위(`hdg`)가 있다. 내 진행 방향(2km보다 멀면 '나 → 시설' 방위)과 90도 넘게 다르면 반대 차로 시설로 보고 `requestTrip` 전에 뺀다(`StopRepository.oppositeLane`). 길안내 중에는 회전 안내(TBT)의 경로 위 시설을 쓰므로 방향이 저절로 맞다.
-4. 1초마다 `CoachEngine.update(CoachInput)`을 부른다. 엔진은 화장실·피로 게이지, 운전 스타일 편차, 다음 추천, 지금 물어볼 질문, 공조 동작을 돌려준다.
-5. 질문이 나오면 `VoiceAgent`가 TTS로 묻고 STT로 "응/아니"를 듣는다. 대답이 없으면 화면 버튼으로 받는다. 수락하면 `NaviKit.addWaypoint`(길안내 중) 또는 `startRoute`.
-6. 기어 P와 문 열림으로 정차를 기록한다. 화장실 정차 간격은 엔진의 개인 모델을 갱신하고, 기기 안(`filesDir`)에만 저장한다.
+1. `MainActivity`가 실행 중 권한(차속, 위치)을 받고 `CoachService`(포그라운드 서비스)를 시작한다. 포그라운드여야 내비가 앞에 와도 얼려지지 않는다.
+   권한을 나중에 받으면 `PermissionsChanged`로 신호 수집을 다시 잇는다. 주행 중 UX 제한은 화면이 직접 구독한다(모르면 제한).
+2. `CarSignals`가 신호를 `SignalHub`(기어·차속·조향·제동·방향지시등·크루즈·문·공조)와 `PositionTracker`(위치 SDK, 끊기면 내비 위치)에 모은다.
+   연결이 실패하면 2초부터 최대 1분 간격으로 다시 한다.
+3. `NaviTracker`가 내비 조회를 혼자 한다: 경로 상태·목적지 15초, 길안내 중 TBT 5~20초(다음 화장실·회전 거리와 주행 거리 보정에 따라), 내비 이벤트와
+   경유지 추가 뒤에는 곧바로. 경로가 바뀔 때마다 epoch를 올리고 옛 TBT를 새 경로와 섞지 않는다. 결과는 불변 `NaviSnapshot` 하나.
+4. `CandidateProvider`가 엔진에 넣을 정차 후보를 만든다: 길안내 중이면 TBT의 경로 위 휴게소·졸음쉼터를 이름으로 공공데이터(`stops.bin` 6만여 곳)와
+   맞추고(같은 이름은 차로 방위로), 아니면 진행 방향 60km 반경 검색 + 가까운 6곳 `requestTrip` 보정. 어디까지 빠짐없이 넣었는지(`candidatesUntilM`)도 준다.
+5. `CoachCore`가 1초마다 틱: 정차 판정 → 여정 → 내비·후보를 달린 만큼 투영 → 세계(실제/시연)가 입력을 바꿈 → `CoachEngine.update` →
+   `PromptMachine`(질문 상태 기계)이 효과를 냄 → 효과 실행(음성으로 묻기, 내비 경유지, 외기 전환…) → 화면 상태 한 번 갱신.
+6. 질문을 수락하면 `GoToRunner`가 명령 직전에 내비 모드를 다시 읽어 경유지 추가(길안내 중) 또는 새 길안내를 하고, 성공했을 때만 엔진에 수락을 알린다.
+7. 기어 P와 문 열림으로 정차를 기록한다(`StopRecorder`, 엔진과 같은 규칙). 실제 세계만 기록·학습·여정 맥박을 기기 안(`filesDir`)에 저장한다.
 
 ## 3. 판단 엔진 (요약)
 
@@ -59,10 +67,13 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
 주장하지 않는 것: 의료 진단, 정확한 졸음 감지. 게이지는 '권유 시점'이고, 판단 근거를 화면과 음성으로 함께 보여 준다.
 
 ## 4. 스레드와 동시성
-- SDK 호출은 kit의 전용 스레드에서 실행된다 (`SdkThreads`). 앱은 코루틴으로 부른다.
-- 엔진은 상태를 가진 객체라 `Mutex` 하나로 감싸 한 번에 하나의 호출만 받는다.
-- 음성은 `VoiceAgent`의 `Mutex`로 질문이 겹치지 않게 한다. 질문은 한 번에 하나.
-- 내비 조회는 `NaviKit`이 한 번에 하나씩 보내고 응답 이벤트를 기다린다. 경로 변경 명령 사이에는 3초 간격을 둔다.
+- 코치 디스패처 하나(`Dispatchers.Default.limitedParallelism(1)`)에서 `CoachCore`(액터)·`NaviTracker`·`CandidateProvider` 루프가 돈다. 그래서 코치 상태에
+  잠금이 없다. 코어는 우편함 하나를 차례로 처리하고 처리 중에는 일시 중단하지 않는다. 오래 걸리는 일(음성, 내비 명령, LLM, 파일 저장)은 효과로
+  띄우고 결과를 메시지로 받는다. 시연 전환도 명령 메시지라 틱 중간에 끼지 않는다.
+- 부품 사이에는 불변 스냅샷(`NaviSnapshot`, `CandidateSnap`)만 오간다. 다른 루프가 코어를 부르지 않고 `CoachGates`만 읽는다.
+- 시계 둘: `CoachClock`(엔진과 세계 상태, 시연이면 가상·배속), `ElapsedClock`(질문 수명, 조회 간격, 환기 문, 위치 신선도처럼 시연 전환을 넘는 것).
+- SDK 호출은 kit의 전용 스레드에서 실행된다(`SdkThreads`). 내비 요청은 kit이 한 번에 하나씩, 경로 변경 명령은 3초 간격.
+- 파일: 시작 때 IO에서 읽고, 학습은 IO 효과로, 정차 기록·여정 맥박은 앱의 쓰기 스레드(한 번에 하나, 맡긴 순서)로 AtomicFile에 쓴다.
 
 ## 5. 데이터
 - 휴게소·졸음쉼터·공중화장실·주유소·공영주차장: `app/src/main/assets/data/`, 출처와 라이선스는 `tools/data/README.md`.
@@ -70,9 +81,10 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
 
 ## 6. 시연
 - 차량 신호: Virtual Console HTTP API를 `tools/vc/vc.sh`로 조작 (`shimpyo-*.vc` 시나리오).
-- 위치·정체: 앱의 시연 모드(`DemoDirector`)가 시나리오대로 넣는다. 화면에 시연 중임을 표시한다.
+- 위치·시각·정체·경로: 시연 세계(`CoachWorld.Demo` + 불변 `DemoRun`)가 덧씌운다. 실제 위치는 계속 받으므로 시연을 끄면 바로 실제 위치다.
 - 시연 경로는 앱에 든 실제 휴게소·졸음쉼터 좌표를 잇는다. 그래서 후보와 공백은 실제 데이터에서 나온다(귀성길: 옥산휴게소 → 죽암휴게소 21km 공백에 20km·60분 정체).
-- 시연을 시작하면 빈 학습 상태의 새 `CoachEngine`을 만들고 탑승자의 마지막 화장실을 시나리오 값으로 정한다. 매번 같은 조건에서 시작하고, 시연 중에는 개인 학습 파일(`memory.json`)에 쓰지 않는다. 시연을 끄면 저장된 학습 상태로 엔진을 다시 만든다(시연 시계는 배속이라 실제 시각으로 돌아올 때 시계가 거꾸로 가는 것도 이걸로 피한다).
+- 시연은 빈 학습 상태의 새 엔진(질문 수명은 배속만큼 늘림)으로 시작하고 기록·학습·여정을 저장하지 않는다. 시연을 켜면 실제 엔진과 여정을 옆에 두고,
+  끄면 그대로 되돌린다(피로·화장실 시계가 이어진다). 다른 코드는 '시연 중인가'를 묻지 않고 세계의 정책(`persistsHistory` 등)을 묻는다.
 
 ## 7. 알려진 제약 (에뮬레이터)
 - 주행 시간 API(Trip 계열)는 에뮬레이터가 지원하지 않아 앱이 기어·차속으로 직접 잰다.

@@ -410,6 +410,11 @@ class CoachCore(private val d: CoachDeps) {
                 is PromptEffect.Show -> {
                     val stop = e.prompt?.stop?.id?.let { id -> lastInput?.candidates?.firstOrNull { it.id == id } }
                     ui.update { copy(prompt = e.prompt, promptReasons = e.reasons, promptStop = stop) }
+                    val p = e.prompt
+                    if (p == null) log.i("prompt hidden") else {
+                        val at = (stop?.routeDistanceM ?: stop?.straightDistanceM)?.let { " at ${it.toLong()}m" } ?: ""
+                        log.i("prompt shown: ${p.kind} ${p.stop?.name ?: "-"}$at (${p.id})")
+                    }
                 }
                 is PromptEffect.Ask -> startAsk(e)
                 PromptEffect.CancelVoice -> cancelCardVoice()
