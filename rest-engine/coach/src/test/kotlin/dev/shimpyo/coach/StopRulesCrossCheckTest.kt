@@ -196,17 +196,111 @@ class StopRulesCrossCheckTest {
 
     @Test
     fun creepingBetweenParks() {
-        // 정체 속에서 P와 기어가기를 되풀이한다 (2분씩 다섯 번, 사이마다 시속 20km로 2분 = 670m). 지금은 엔진도 감지기도 '다시 대기'로
-        // 이어 세어 18분 정차 하나로 본다. 엔진이 다시 대기에 '정차가 시작된 뒤 움직인 거리 300m 이하'를 더하면(엔진 닫힘 검증 E4)
-        // 여기서 어긋난다: 그때 StopDetector에도 같은 규칙을 넣는다 (다시 대기 사이의 차속을 적분해 300m를 넘으면 새 정차)
-        val b = Both()
-        repeat(5) { i ->
-            b.park(2 * min, doorAtMs = if (i == 0) min else null)
-            if (i < 4) b.drive(2 * min, 20f)
+        // 정체 속에서 P와 기어가기를 되풀이한다 (2분씩 다섯 번, 사이마다 시속 20km로 2분 = 670m). 예전에는 엔진도 감지기도 '다시 대기'로
+        // 이어 세어 18분 정차 하나로 봤다: 달린 적 없는 휴식이 생기고, 문이 한 번 열렸으면 화장실 시계까지 돌아갔다.
+        // 한 정차를 시작한 뒤 P 밖에서 움직인 거리가 300m를 넘으면 다시 대기가 아니다 (엔진 닫힘 검증 E4): 2분짜리 정차 다섯이다
+        Both().let { b ->
+            repeat(5) { i ->
+                b.park(2 * min, doorAtMs = if (i == 0) min else null)
+                if (i < 4) b.drive(2 * min, 20f)
+            }
+            b.driveOff()
+            check("P 2분 · 시속 20km 2분 다섯 번", restroom = false, rest = false, b)
         }
-        b.driveOff()
-        assertEquals("화장실 정차를 다르게 본다 (엔진 ${b.out!!.restroom.minutes}분, 감지기 ${b.stops})", b.engineSawRestroomStop, b.detectorSawRestroomStop)
-        assertEquals("휴식을 다르게 본다 (엔진 ${b.out!!.fatigue.minutes}분, 감지기 ${b.stops})", b.engineSawRest, b.detectorSawRest)
+        // 시속 15km로 2분(500m)도 넘는다 (엔진 AuditDecisionsTest.stopAndGoInParkIsNotARestOrARestroomStop의 순서)
+        Both().let { b ->
+            repeat(5) { i ->
+                b.park(2 * min, doorAtMs = if (i == 2) min else null)
+                if (i < 4) b.drive(2 * min, 15f)
+            }
+            b.driveOff()
+            check("P 2분 · 시속 15km 2분 다섯 번", restroom = false, rest = false, b)
+        }
+    }
+
+    @Test
+    fun reparkingOnlyWithinThreeHundredMetresOfTheStop() {
+        // 다시 대기는 그 정차를 시작한 뒤 움직인 거리가 모두 합쳐 300m 이하일 때만이다. 거리는 차속을 틱마다 더해 잰다 (지난 틱의 차속으로
+        // 이번 틱까지 달렸다고 본다). 시간(3분)과 최고 차속(30km/h)은 넘지 않는 순서들이다
+        Both().let { b ->
+            b.park(10 * min)
+            b.drive(50_000, 20f) // 278m
+            b.park(5 * min)
+            b.driveOff()
+            check("278m 옮김: 같은 정차", restroom = false, rest = true, b)
+        }
+        Both().let { b ->
+            b.park(10 * min)
+            b.drive(60_000, 20f) // 333m
+            b.park(5 * min)
+            b.driveOff()
+            check("333m 옮김: 정차 둘", restroom = false, rest = false, b)
+        }
+        // 여러 번 옮기면 거리를 이어 더한다: 150m + 200m. 따로 세면 둘 다 300m 아래라 18분 정차가 된다
+        Both().let { b ->
+            b.park(6 * min)
+            b.drive(54_000, 10f) // 150m
+            b.park(5 * min)
+            b.drive(72_000, 10f) // 200m
+            b.park(5 * min)
+            b.driveOff()
+            check("150m + 200m: 두 번째 옮김에서 새 정차", restroom = false, rest = false, b)
+        }
+        Both().let { b ->
+            b.park(6 * min)
+            b.drive(36_000, 10f) // 100m
+            b.park(5 * min)
+            b.drive(36_000, 10f) // 100m
+            b.park(5 * min)
+            b.driveOff()
+            check("100m + 100m: 같은 정차", restroom = false, rest = true, b)
+        }
+        // 새 정차가 시작되면 거리도 새로 센다: 앞 정차에서 333m를 움직였어도 새 정차에서 100m 옮긴 것은 다시 대기다
+        Both().let { b ->
+            b.park(2 * min)
+            b.drive(60_000, 20f) // 333m: 새 정차
+            b.park(10 * min)
+            b.drive(36_000, 10f) // 100m
+            b.park(5 * min)
+            b.driveOff()
+            check("새 정차의 거리는 0부터", restroom = false, rest = true, b)
+        }
+        // 차속을 모르는 동안은 다시 대기로 볼 수 있는 가장 빠른 속도(시속 30km)로 움직였다고 본다
+        Both().let { b ->
+            b.park(10 * min)
+            repeat(30) { b.feed(Gear.DRIVE, null) } // 250m로 본다
+            b.park(5 * min)
+            b.driveOff()
+            check("차속 모름 30초: 같은 정차", restroom = false, rest = true, b)
+        }
+        Both().let { b ->
+            b.park(10 * min)
+            repeat(40) { b.feed(Gear.DRIVE, null) } // 333m로 본다
+            b.park(5 * min)
+            b.driveOff()
+            check("차속 모름 40초: 정차 둘", restroom = false, rest = false, b)
+        }
+        // 화장실 정차도 같다: 2분(문) 서고 400m 기어간 뒤 2분은 화장실 정차가 아니다
+        Both().let { b ->
+            b.park(2 * min, doorAtMs = min)
+            b.drive(72_000, 20f) // 400m
+            b.park(2 * min)
+            b.driveOff()
+            check("2분(문) → 400m → 2분", restroom = false, rest = false, b)
+        }
+    }
+
+    @Test
+    fun speedNoiseOnTheTickTheCarParksAgain() {
+        // 다시 P가 된 틱에 함께 온 차속은 잡음이다 (P에서는 바퀴가 잠긴다): 다시 대기의 최고 차속에 넣지 않는다
+        Both().let { b ->
+            b.park(10 * min)
+            b.drive(30_000, 10f)
+            b.feed(Gear.PARK, 45f)
+            b.park(5 * min)
+            b.driveOff()
+            check("다시 세운 틱의 차속 잡음", restroom = false, rest = true, b)
+        }
     }
 
     @Test
@@ -218,6 +312,30 @@ class StopRulesCrossCheckTest {
             b.park(2 * min)
             b.driveOff()
             check("정차 중 시계가 뒤로", restroom = true, rest = false, b)
+        }
+    }
+
+    @Test
+    fun aRestoredStopThatIsMovedToAnotherSpotAroundTheRestart() {
+        // 휴게소에서 2분(문 열림) 서 있다가 옮겨 대는 사이에 앱이 다시 떴다: 마지막 맥박은 20초 전(그때는 P), 지금은 D로 기어가는 중이고
+        // 곧 다시 선다. 보지 못한 20초는 차속을 모르는 것이라 시속 30km로 본다(167m). 그 뒤 60m를 더 가서 다시 서면 같은 정차다
+        fun restored() = Both(ParkState(start - 140_000, doorSeen = true), lastSeen = start - 20_000)
+
+        restored().let { b ->
+            b.drive(20_000, 10f) // 56m
+            b.park(5 * min)
+            b.driveOff()
+            check("재시작을 낀 옮겨 대기: 같은 정차 (2분 + 5분, 문)", restroom = true, rest = false, b)
+        }
+        restored().let { b ->
+            b.drive(60_000, 10f) // 167m를 더해 300m를 넘는다
+            b.park(5 * min)
+            b.driveOff()
+            check("재시작 뒤 멀리 옮김: 앞 정차는 2분으로 끝났다", restroom = false, rest = false, b)
+        }
+        restored().let { b ->
+            b.drive(5 * min, 60f)
+            check("재시작 뒤 그대로 떠남", restroom = false, rest = false, b)
         }
     }
 

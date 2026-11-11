@@ -33,7 +33,7 @@ PT 기술 질의응답용. 코드: `rest-engine/coach/src/main/kotlin/dev/shimpy
 | `VoiceDesk` | 음성 작업 모두(묻기·듣기·탑승자 말하기·해석·말), 무엇을 취소할지, 대답을 말로 낼지 화면 알림으로 낼지, '생각하는 중' (7장) | 작업들, 알림을 거둘 때 | `VoiceDeskTest` 18 |
 | `Crew` | 탑승자: 세계마다의 목록, 건강 정보 동의, 자는 중 표시, 말로 설정 (7장) | `AsleepMarks`, 마지막으로 본 동의 | `CrewTest` 6, `AsleepMarksTest` 8 |
 | `PlanKeeper` | 계획을 언제 다시 세우고 번호를 언제 올리는지 (순수) | 원함·요청·재료 키·세운 때·번호 | `PlanKeeperTest` 9 |
-| `StopRecorder`(`StopDetector`) | 정차 판정과 기록, 되돌린 정차의 판정 (prompt.md 4장) | 지금 정차, 다시 대기, 판정 대기 | `StopDetectorTest` 34, `StopRecorderTest` 13 |
+| `StopRecorder`(`StopDetector`) | 정차 판정과 기록, 되돌린 정차의 판정 (prompt.md 4장) | 지금 정차, 다시 대기, 판정 대기 | `StopDetectorTest` 41, `StopRecorderTest` 13 |
 | `WorldSwitch`(`TripSession`, `CoachWorld`) | 세계(실제·시연)와 엔진·여정 한 벌 (world.md) | 지금 세계, 옆에 둔 실제 세계 | `WorldSwitchTest` 20, `TripSessionTest` 19, `CoachWorldTest` 10 |
 | `CoreRules.kt` | `FreshAirGate`(환기 문·되돌리기·한 번에 하나), `MemorySaver`(학습 저장 시점), `TravelHeading`(진행 방향), `HealthConsent`(동의), `CoreRules`(검색 위치, 후보 더하기, 고른 정차의 목적) | 각자 작은 상태 | `CoreRulesTest` 10, `TravelHeadingTest` 4 |
 
@@ -282,7 +282,7 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 | `CoachCoreVoiceTest` 20 | R-F2(마이크에서 학습 파일까지), R-F3, R-F4, R-F8, R-F9, R-F11, UI-12, 멈추기(StopVoice), 말로 설정(DescribeOccupants) |
 | `CoachCoreTripTest` 13 | SV-N2, SV-N3(재시작: 늦은 기어, 아직 P, 판정 전, 기어 없음, 시연 끄기), SV-N7(이어받은 수락), 새 여정, 종료(shutdown), 새 코어의 화면 초기화 |
 | `CoachCoreAsleepTest` 6 | U4 (화면·말·화장실 정차·탑승자 빠짐·세계 전환·07:00, 엔진의 `RESTROOM_ASLEEP` 이유) |
-| `StopRulesCrossCheckTest` 8 | 엔진의 정차 규칙과 `StopDetector`가 같은 신호 순서를 같게 본다 (prompt.md 4.4) |
+| `StopRulesCrossCheckTest` 11 | 엔진의 정차 규칙과 `StopDetector`가 같은 신호 순서를 같게 본다 (prompt.md 4.4) |
 | `closure/UiSeamPinnedTest` 10 | 화면이 계약에서 기대하는 것 (그대로) |
 
 다른 담당이 닫은 것 가운데 코어까지 이어서 보는 두 가지도 코어 테스트로 옮겼다: 묻는 말은 필요가 아니다(R-F2,
@@ -341,8 +341,6 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
   `accepted {stopId, at}`를 읽고 쓴다(없으면 null). `CoachStore.resetTransient`가 `goToPending`·`notice`도 지운다(코어도 시작할 때 지운다).
 - **화면이 바꿀 것**: `goToPending`으로 진행 표시(자기 시간 제한 없음), `notice` 표시, [다시 시도]는 `GoTo`만, 계획 화면을 떠나거나 주행을
   시작하면 `ClosePlan`, 아이 탑승자에 '자는 중'(`SetAsleep`), 급해 목록에서 고를 때 급해 질문의 거절을 보내지 않아도 된다.
-- **엔진의 다시 대기 규칙(E4)**: 엔진이 '정차가 시작된 뒤 움직인 거리 300m 이하'를 더하면 `StopRulesCrossCheckTest.creepingBetweenParks`가
-  어긋난다. 그때 `StopDetector`에 같은 규칙을 넣는다.
 - 급해 목록에서 고른 곳을 주행 중 재시작 뒤에 이어받는 것은 그 정차가 경로 후보일 때만 된다(급해 결과는 대개 경로 후보가 아니다).
 - 들르기 결과가 감시(140초)보다 늦게 오면 결과는 버려지지만 내비에는 들어갔을 수 있다 (prompt.md의 남은 위험과 같다).
 - LLM 해석은 에뮬레이터에서 응답하지 않는다(첫 호출 40초 뒤 스스로 꺼짐). 그동안 마이크 표시가 THINKING이다.
