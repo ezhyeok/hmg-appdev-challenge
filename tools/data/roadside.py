@@ -153,27 +153,60 @@ _NOT_REST = re.compile(r"경비실|서비스센터|지정점|정비|카센터|�
 LEGACY_NODE_ID = 1_000_000_000   # OSM nodes created before ~2011 (bulk POI imports, often stale)
 
 
-def label_heading(mw, lat, lon, dest, max_m=500):
+LABEL_MIN_KM = 15         # a destination closer than this does not tell the direction (송탄 is inside 평택)
+LABEL_TRACE_M = 30000     # how far the carriageways are followed to see where they go
+LABEL_MIN_GAP = 0.3       # progress(serving) - progress(other) for a label to decide (~ road within 80 deg of it)
+LABEL_MIN_WALK_M = 3000   # the longer of the two chains must reach this to decide ...
+LABEL_MIN_SHORT_M = 500   # ... and the shorter one this (it may end where the expressway ends, 금성 near 제천)
+
+
+def _hit(mw, s):
+    return {"hdg": round(mw.heading_along(s[3], s[4], s[5])) % 360, "dist": s[0], "way": s[3], "both": False}
+
+
+def label_heading(mw, lat, lon, dest, max_m=500, other=None, min_km=LABEL_MIN_KM):
     """(heading, decisive) of the carriageway that a direction label ('부산방향') selects.
 
-    The straight-line bearing to the destination is only a proxy for the route direction;
-    the label is `decisive` when that bearing is within 60 degrees of one carriageway (and
-    so >120 from the other). Near-perpendicular cases (e.g. 경부선 near 건천 runs east
-    before turning south to 부산) are left to geometry.
+    The two carriageways next to the point are followed for 30 km and the one that gets closer to
+    the destination serves it (`Motorways.progress_toward`). The old test compared the local bearing
+    with the straight line to the destination and failed where the road bends on its way there
+    (경부선 at 대신 runs north-east towards 부산, 호남선 at 동광주 west-south-west towards 천안).
+    `other` is where the other direction goes (the twin's label, or the shelter's 'X기점' origin); when
+    given, a carriageway must serve `dest` better than `other` (ring roads where both labels lie on one
+    side do not decide). A destination too close to tell (순천방향 at 순천졸음쉼터) is decided by `other`
+    alone: the carriageway leading away from the origin.
+    The heading is the carriageway's travel direction around the point (`Motorways.heading_along`).
     """
-    if not dest or dest not in DEST:
+    def usable(d):
+        return d and d in DEST and common.haversine_m(lat, lon, *DEST[d]) >= min_km * 1000
+
+    labels = [(d, sign) for d, sign in ((dest, 1), (other, -1)) if usable(d) and (sign > 0 or other != dest)]
+    if not labels:
         return None, False
-    dla, dlo = DEST[dest]
-    if common.haversine_m(lat, lon, dla, dlo) < 15000:
+    pair = mw.carriageway_pair(lat, lon, max_m)
+    if not pair:
         return None, False
-    tb = common.bearing_deg(lat, lon, dla, dlo)
-    h = mw.heading_toward(lat, lon, tb, max_m)
-    if not h:
-        return None, False
-    return h, angle_diff(h["hdg"], tb) <= 60
+    scores = []
+    for s in pair:
+        p, walked = 0.0, float("inf")
+        for d, sign in labels:
+            pd, wd = mw.progress_toward(s[3], s[4], s[5], DEST[d], LABEL_TRACE_M)
+            p, walked = p + sign * pd, min(walked, wd)
+        scores.append((p, walked))
+    gap_needed = LABEL_MIN_GAP * len(labels)
+    if len(pair) == 1:
+        # only one carriageway close by: it serves the label or the label wants the far one
+        (p, walked), s = scores[0], pair[0]
+        if p <= 0:
+            return None, False
+        return _hit(mw, s), p >= gap_needed / 2 and walked >= LABEL_MIN_WALK_M
+    i = 0 if scores[0][0] >= scores[1][0] else 1
+    gap = scores[i][0] - scores[1 - i][0]
+    walks = sorted(w for _, w in scores)
+    return _hit(mw, pair[i]), gap >= gap_needed and walks[1] >= LABEL_MIN_WALK_M and walks[0] >= LABEL_MIN_SHORT_M
 
 
-def resolve_heading(mw, lat, lon, dest, both, max_m=500):
+def resolve_heading(mw, lat, lon, dest, both, max_m=500, other=None):
     """(heading, method, geometry_conflict, motorway_hit).
 
     A decisive direction label picks the carriageway; otherwise the site is assigned to
@@ -183,7 +216,7 @@ def resolve_heading(mw, lat, lon, dest, both, max_m=500):
     geo = mw.heading_for(lat, lon, max_m=min(max_m, 350))
     if both:
         return None, None, False, geo
-    lab, decisive = label_heading(mw, lat, lon, dest, max_m)
+    lab, decisive = label_heading(mw, lat, lon, dest, max_m, other=other)
     geo_h = geo["hdg"] if geo and not geo["both"] else None
     if lab and decisive:
         conflict = geo_h is not None and angle_diff(geo_h, lab["hdg"]) > 90
@@ -236,19 +269,20 @@ def _b(v):
 def resolve_pairs(mw, pre, keyf, issues, label, max_m):
     """Joint heading assignment for the two directions of one facility.
 
-    When the two direction labels point to clearly different sides (>=120 degrees apart),
-    each record takes the carriageway closest to its own label bearing even if that alone
-    would not be decisive. When the labels do not separate the directions (ring roads
-    such as 대구외곽순환선: '달서방향'/'동대구방향' both lie south-east) and the two nearby
-    records got the same carriageway, the heading is left empty rather than guessed.
+    Close twins (< 2 km) are decided with both labels at once (a carriageway must serve its own
+    label better than the twin's, see `label_heading`): that separates directions even when one
+    label alone is weak. When one destination is too close to tell (송탄 inside 평택), the record
+    with the usable label decides and the other takes the opposite carriageway. Two directions of
+    one facility cannot share a heading: if they still do, the labels cannot tell which is wrong and
+    the heading is left empty rather than guessed (ring roads such as 대구외곽순환선: '달서방향'/'동대구방향').
     """
     groups = collections.defaultdict(list)
     for p in pre:
         if p["dest"] and not p["both"]:
             groups[keyf(p)].append(p)
 
-    def usable(q):
-        return q["dest"] in DEST and common.haversine_m(q["lat"], q["lon"], *DEST[q["dest"]]) >= 15000
+    def usable(q, min_km=LABEL_MIN_KM):
+        return q["dest"] in DEST and common.haversine_m(q["lat"], q["lon"], *DEST[q["dest"]]) >= min_km * 1000
 
     def assign(q, h, why):
         if q["hdg"] is not None and angle_diff(q["hdg"], h["hdg"]) > 60:
@@ -257,34 +291,32 @@ def resolve_pairs(mw, pre, keyf, issues, label, max_m):
         geo = mw.heading_for(q["lat"], q["lon"], max_m=min(max_m, 350))
         q["conflict"] = bool(geo and geo["hdg"] is not None and not geo["both"] and angle_diff(geo["hdg"], h["hdg"]) > 90)
 
+    def opposite_of(q, h):
+        """The carriageway near q running against heading h."""
+        for s in mw.carriageway_pair(q["lat"], q["lon"], max_m):
+            if angle_diff(s[2], h["hdg"]) > 120:
+                return _hit(mw, s)
+        return None
+
     for ps in groups.values():
         if len(ps) != 2 or ps[0]["dest"] == ps[1]["dest"]:
             continue
         a, b = ps
         close = common.haversine_m(a["lat"], a["lon"], b["lat"], b["lon"]) < 2000
+        if not close:
+            continue
         ua, ub = usable(a), usable(b)
         if ua and ub:
-            tba = common.bearing_deg(a["lat"], a["lon"], *DEST[a["dest"]])
-            tbb = common.bearing_deg(b["lat"], b["lon"], *DEST[b["dest"]])
-            if angle_diff(tba, tbb) >= 120:
-                ha = mw.heading_toward(a["lat"], a["lon"], tba, max_m)
-                hb = mw.heading_toward(b["lat"], b["lon"], tbb, max_m)
-                if ha and hb and (not close or angle_diff(ha["hdg"], hb["hdg"]) > 120):
-                    assign(a, ha, "decided by the pair of labels")
-                    assign(b, hb, "decided by the pair of labels")
-                continue
-            if close and a["hdg"] is not None and b["hdg"] is not None and angle_diff(a["hdg"], b["hdg"]) < 120:
-                issues.append(f"{label} {a['name']}: labels {a['dest']}/{b['dest']} do not separate the carriageways "
-                              f"and both points got heading ~{a['hdg']}; heading left empty")
-                a["hdg"] = b["hdg"] = None
-                a["conflict"] = b["conflict"] = False
-        elif (ua or ub) and close:
-            # one label is usable (the other destination is too close, e.g. 송탄 is inside 평택):
-            # the other record takes the opposite carriageway
+            ha, da = label_heading(mw, a["lat"], a["lon"], a["dest"], max_m, other=b["dest"])
+            hb, db = label_heading(mw, b["lat"], b["lon"], b["dest"], max_m, other=a["dest"])
+            if ha and hb and da and db and angle_diff(ha["hdg"], hb["hdg"]) > 120:
+                assign(a, ha, "decided by the pair of labels")
+                assign(b, hb, "decided by the pair of labels")
+        elif ua or ub:
             f, o = (a, b) if ua else (b, a)
             hf, decisive = label_heading(mw, f["lat"], f["lon"], f["dest"], max_m)
             if hf and decisive:
-                ho = mw.heading_toward(o["lat"], o["lon"], (hf["hdg"] + 180) % 360, max_m)
+                ho = opposite_of(o, hf)
                 if ho:
                     assign(f, hf, "label")
                     assign(o, ho, f"opposite of the {f['dest']}방향 record")
@@ -295,17 +327,14 @@ def resolve_pairs(mw, pre, keyf, issues, label, max_m):
         a, b = ps
         if (a["hdg"] is not None and b["hdg"] is not None and angle_diff(a["hdg"], b["hdg"]) < 60
                 and common.haversine_m(a["lat"], a["lon"], b["lat"], b["lon"]) < 3000):
-            # retry with nearby destinations (>= 3 km) when their bearings are clearly opposite
-            if all(q["dest"] in DEST and common.haversine_m(q["lat"], q["lon"], *DEST[q["dest"]]) >= 3000 for q in (a, b)):
-                tba = common.bearing_deg(a["lat"], a["lon"], *DEST[a["dest"]])
-                tbb = common.bearing_deg(b["lat"], b["lon"], *DEST[b["dest"]])
-                if angle_diff(tba, tbb) >= 120:
-                    ha = mw.heading_toward(a["lat"], a["lon"], tba, max_m)
-                    hb = mw.heading_toward(b["lat"], b["lon"], tbb, max_m)
-                    if ha and hb and angle_diff(ha["hdg"], hb["hdg"]) > 120:
-                        assign(a, ha, "pair of nearby destinations")
-                        assign(b, hb, "pair of nearby destinations")
-                        continue
+            # retry with nearby destinations (>= 3 km)
+            if usable(a, 3) and usable(b, 3):
+                ha, da = label_heading(mw, a["lat"], a["lon"], a["dest"], max_m, other=b["dest"], min_km=3)
+                hb, db = label_heading(mw, b["lat"], b["lon"], b["dest"], max_m, other=a["dest"], min_km=3)
+                if ha and hb and da and db and angle_diff(ha["hdg"], hb["hdg"]) > 120:
+                    assign(a, ha, "pair of nearby destinations")
+                    assign(b, hb, "pair of nearby destinations")
+                    continue
             issues.append(f"{label} {a['name']}: {a['dest']}/{b['dest']} records got the same heading ~{a['hdg']} "
                           f"and the labels cannot tell which is wrong; heading left empty")
             a["hdg"] = b["hdg"] = None
@@ -484,6 +513,12 @@ def kec_shelter_dir(s):
     return (fix_dest(m.group(1)) if m else None), (s or None)
 
 
+def kec_shelter_origin(s):
+    """'서울기점 + 부산종점' -> '서울' (where the other direction goes)."""
+    m = re.search(r"([가-힣]+?)기점", common.clean(s))
+    return fix_dest(m.group(1)) if m else None
+
+
 def _load_install(raw):
     """한국도로공사_졸음쉼터 설치현황 (name, route, milepost, direction), if downloaded."""
     p = os.path.join(raw, "datagokr", "drowsy_shelters_install.csv")
@@ -495,8 +530,28 @@ def _load_install(raw):
              "year": common.to_int(r.get("설치년도"))} for r in rows]
 
 
+_RT_ALIAS = {"서울외곽": "수도권제1순환", "서울외곽순환": "수도권제1순환", "대전라남도부순환": "대전남부순환"}
+
+
 def _rt_norm(s):
     return re.sub(r"[\s()]|선$|고속도로$", "", common.clean(s)).replace("광주광역시", "광주")
+
+
+def _rt_keys(s):
+    """Route name keys: '남해선(순천부산)' -> {남해선순천부산, 남해, 순천부산}; renamed routes map to the new name
+    (서울외곽선 -> 수도권제1순환). The installation list names segments in brackets, the standard data does not."""
+    s = common.clean(s)
+    keys = set()
+    m = re.match(r"^([^()]+)\(([^()]+)\)$", s)
+    for x in ([s, m.group(1), m.group(2)] if m else [s]):
+        k = re.sub(r"\s|선$|고속도로$", "", x).replace("광주광역시", "광주")
+        k = re.sub(r"선$", "", k)
+        keys.add(_RT_ALIAS.get(k, k))
+    return keys
+
+
+def _same_route(a, b):
+    return bool(_rt_keys(a) & _rt_keys(b))
 
 
 def build_drowsy(raw, mw, rest_areas, rep):
@@ -520,7 +575,7 @@ def build_drowsy(raw, mw, rest_areas, rep):
         dest, raw_dir = kec_shelter_dir(r.get("ROAD_ROUTE_DRC"))
         rt = common.clean(r.get("ROAD_ROUTE_NM")) or None
         # second KEC source: installation list (name, route, milepost, direction)
-        cands = [i for i in install if i["n"] == name and _rt_norm(i["rt"]) == _rt_norm(rt)]
+        cands = [i for i in install if i["n"] == name and _same_route(i["rt"], rt)]
         inst = next((i for i in cands if _same_direction(lat, lon, i["dest"], dest)), None)
         if cands and not inst:
             alt = {i["dest"] for i in cands}
@@ -533,7 +588,8 @@ def build_drowsy(raw, mw, rest_areas, rep):
                     dest, inst = a, cands[0]
             if not inst:
                 issues.append(f"KEC shelter {disp}: direction '{dest}' not in the installation list ({sorted(alt)})")
-        hdg, method, conflict, hit = resolve_heading(mw, lat, lon, dest, False, max_m=300)
+        origin = kec_shelter_origin(r.get("ROAD_ROUTE_DRC"))
+        hdg, method, conflict, hit = resolve_heading(mw, lat, lon, dest, False, max_m=300, other=origin)
         pre.append({"r": r, "name": disp, "base": name, "dest": dest, "raw_dir": raw_dir, "rt": rt, "inst": inst,
                     "lat": lat, "lon": lon, "both": False, "hdg": hdg, "conflict": conflict, "hit": hit})
     resolve_pairs(mw, pre, lambda p: (p["r"].get("ROAD_ROUTE_NO"), p["base"]), issues, "KEC shelter", 300)
