@@ -724,7 +724,7 @@ def _navi_window(ww, wh):
     # next guidance card and remaining distance
     o.append(R(10, 10, ww - 20, 44, 10, WHITE, LINE, 1))
     o.append(wc_marker(32, 32, 12, True))
-    o.append(TS(52, 38, [("4km  ", 800, INK), ("옥산휴게소", 600, INK2)], 16))
+    o.append(TS(52, 38, [("2.9km  ", 800, INK), ("옥산휴게소", 600, INK2)], 16))
     o.append(R(0, wh - 34, ww, 34, 0, WHITE))
     o.append(L(0, wh - 34, ww, wh - 34, LINE, 1))
     o.append(TS(ww / 2, wh - 12, [("남은 거리 ", 500, INK3), ("310km", 800, INK)], FS, "middle"))
@@ -764,7 +764,7 @@ def fig_hero(screen=None):
         b.append(chip(gx - w / 2, y, s, FS, TINT, ACCENT_D, 24, 700)[0])
     cap_y = dy + dh + 38
     b.append(TS(wins[0] + ww / 2, cap_y, [("Pleos 내비", 700, INK2), (" (도식)", 500, INK3)], FS, "middle"))
-    b.append(TS(wins[1] + ww / 2, cap_y, [("쉼표", 700, INK2), (" (앱 UI 코드 렌더링)", 500, INK3)], FS, "middle"))
+    b.append(TS(wins[1] + ww / 2, cap_y, [("쉼표", 700, INK2), (" (에뮬레이터 실제 화면)", 500, INK3)], FS, "middle"))
 
     x0 = dx + dw + 22
     colw = W - 12 - x0
