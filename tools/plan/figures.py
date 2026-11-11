@@ -285,44 +285,56 @@ def band(x, y, w, h, label, sub, fill):
 
 
 def fig_architecture():
-    W, H = 850, 560
+    """Four layers: app shell (Android) → coach layer (pure Kotlin, ports) → engine (pure Kotlin) / pleos-kit → platform."""
+    W, H = 858, 716
     b = []
-    # ---- app band
-    b.append(band(8, 8, 618, 248, "쉼표 앱", "app · Kotlin, Compose", SURF))
-    b.append(box(24, 72, 168, 76, "화면 (Compose)", ["주행·계획·급해", "탑승자·기록·설정"]))
-    b.append(box(24, 166, 168, 76, "VoiceAgent", ["TTS·STT 대화", "규칙 의도 분류"]))
-    b.append(box(236, 72, 182, 170, "CoachService", ["포그라운드 서비스", "신호 수집 (SignalHub)", "1초마다 엔진 호출",
-                                                     "질문·경유지·공조 실행", "정차 기록"], stroke=INK2))
-    right = [("RouteOracle", "requestTrip으로 경로 거리"), ("StopRepository", "공공데이터 · 격자 색인"),
-             ("개인 기록", "탑승자·정차·학습, 기기 안")]
-    for i, (t, sub) in enumerate(right):
-        y = 72 + i * 58
-        b.append(R(446, y, 168, 50, 10, WHITE, LINE2, 1.3))
-        b.append(T(458, y + 21, t, 12.5, 800, INK))
-        b.append(T(458, y + 39, sub, 11.5, 500, INK3))
-        b.append(L(420, y + 25, 444, y + 25, INK3, 1.5, marker="arrG"))
-    # screen <-> service, voice <-> service
-    for y0, lab_a, lab_b in [(98, "명령", "상태"), (192, "대답", "질문")]:
-        b.append(L(194, y0, 234, y0, INK3, 1.5, marker="arrG"))
-        b.append(L(234, y0 + 14, 194, y0 + 14, INK3, 1.5, marker="arrG"))
-        b.append(T(214, y0 - 6, lab_a, 10.5, 600, INK3, "middle"))
-        b.append(T(214, y0 + 29, lab_b, 10.5, 600, INK3, "middle"))
-    # service <-> engine lanes
-    b.append(PATH("M 300 72 L 300 26 L 637 26", stroke=ACCENT, sw=2, marker="arrA"))
-    b.append(T(470, 20, "CoachInput (신호 묶음) · 1초마다", 11.5, 700, ACCENT_D, "middle"))
-    b.append(PATH("M 640 46 L 352 46 L 352 70", stroke=ACCENT, sw=2, marker="arrA"))
-    b.append(T(498, 62, "게이지 · 질문 · 추천 · 공조 동작", 11.5, 700, ACCENT_D, "middle"))
+    # ---- app band (Android shell)
+    b.append(band(8, 8, 834, 116, "쉼표 앱", "app · 안드로이드 껍데기 (Kotlin, Compose)", SURF))
+    b.append(box(24, 40, 172, 72, "화면 (Compose)", ["주행·계획·급해", "탑승자·기록·설정"]))
+    b.append(box(214, 40, 180, 72, "CoachService", ["포그라운드 서비스", "부품을 조립만 한다"]))
+    b.append(box(412, 40, 414, 72, "포트 구현 (어댑터)", ["KitNaviPort · KitCabin · VoiceAgent · CarSignals",
+                                                        "설정·학습·정차·여정 저장소 (원자적 쓰기, 기기 안)"]))
+    b.append(L(196, 76, 212, 76, INK3, 1.5))
+    # ---- coach band (pure Kotlin)
+    cy, ch = 150, 284
+    y0 = cy + 64
+    b.append(band(8, cy, 626, ch, "코치 계층", "rest-engine/coach · 순수 Kotlin", SURF))
+    b.append(box(24, y0, 172, 80, "NaviTracker", ["내비 조회 · 경로 세대", "주행 거리로 거리 보정"]))
+    b.append(box(24, y0 + 92, 172, 80, "CandidateProvider", ["내비 휴게소 + 공공데이터", "아는 범위까지만 판단"]))
+    b.append(box(222, y0, 190, 172, "CoachCore (액터)", ["우편함 하나 · 코루틴 하나", "1초마다 엔진 호출", "명령·대답·내비 결과 처리",
+                                                       "질문·경유지·공조 실행", "화면 상태 발행"], stroke=INK2))
+    side = [("PromptMachine", "질문 카드·음성 상태기계"), ("WorldSwitch", "실제/시연 전환 · 여정 이어가기"),
+            ("StopRecorder", "정차 감지·기록 (좌표 없이)")]
+    for i, (t, sub) in enumerate(side):
+        y = y0 + i * 60
+        b.append(R(438, y, 180, 52, 10, WHITE, LINE2, 1.3))
+        b.append(T(450, y + 21, t, 12.5, 800, INK))
+        b.append(T(450, y + 39, sub, 11, 500, INK3))
+        b.append(L(414, y + 26, 436, y + 26, INK3, 1.5, marker="arrG"))
+    for y in (y0 + 40, y0 + 132):
+        b.append(L(198, y, 220, y, INK3, 1.5, marker="arrG"))
+    b.append(T(24, cy + ch - 16, "안드로이드 없이 JVM에서 테스트 (가짜 포트 · 가상 시간)", 11.5, 600, INK3))
+    # app <-> coach: commands/state through CoachStore; everything outside goes through ports the app implements
+    b.append(L(318, 114, 318, y0 - 2, INK3, 1.5, marker="arrG"))
+    b.append(T(326, 142, "명령 ↓ · 화면 상태 ↑ (CoachStore)", 11, 600, INK3))
+    b.append(L(612, 114, 612, cy + 2, INK3, 1.5, dash="4 3", marker="arrG"))
+    b.append(T(620, 142, "포트 구현: 내비·음성·공조·저장소·신호", 11, 600, INK3))
     # ---- engine
-    b.append(R(640, 8, 202, 248, 14, TINT, ACCENT, 1.5))
-    b.append(T(654, 32, "rest-engine", 14, 800, ACCENT_D))
-    b.append(T(654, 50, "판단 엔진 · 순수 Kotlin", 12, 500, INK2))
-    b.append(T(654, 70, "CoachEngine.update()", 12, 700, INK))
+    ex, ew = 648, 194
+    b.append(R(ex, cy, ew, ch, 14, TINT, ACCENT, 1.5))
+    b.append(T(ex + 14, cy + 26, "rest-engine", 14, 800, ACCENT_D))
+    b.append(T(ex + 14, cy + 44, "판단 엔진 · 순수 Kotlin", 12, 500, INK2))
     items = ["화장실 필요 모델", "운전 스타일 편차", "피로 모델", "마지막 기회", "급해 순위", "피트스톱 플래너", "묻는 타이밍"]
     for i, s_ in enumerate(items):
-        b.append(R(654, 82 + i * 24, 174, 20, 10, WHITE))
-        b.append(T(666, 96 + i * 24, s_, 11.5, 600, INK2))
+        b.append(R(ex + 14, cy + 62 + i * 26, ew - 28, 21, 10, WHITE))
+        b.append(T(ex + 26, cy + 77 + i * 26, s_, 11.5, 600, INK2))
+    # core <-> engine lanes: above and below the component row
+    b.append(PATH("M 360 %d L 360 %d L %d %d" % (y0, cy + 46, ex - 3, cy + 46), stroke=ACCENT, sw=2, marker="arrA"))
+    b.append(T(505, cy + 40, "CoachInput (신호·경로·후보) · 1초마다", 11.5, 700, ACCENT_D, "middle"))
+    b.append(PATH("M %d %d L 372 %d L 372 %d" % (ex, cy + ch - 22, cy + ch - 22, y0 + 174), stroke=ACCENT, sw=2, marker="arrA"))
+    b.append(T(510, cy + ch - 28, "게이지 · 질문 · 추천 · 공조 동작", 11.5, 700, ACCENT_D, "middle"))
     # ---- kit band: five kit modules over the five platform APIs, same columns so the connectors stay vertical
-    ky = 284
+    ky = cy + ch + 16
     b.append(band(8, ky, 834, 104, "pleos-kit", "SDK를 코루틴·Flow로 감싼 공통 모듈", SURF))
     cw, cgap = 149.2, 14.0
     cols = [24 + i * (cw + cgap) for i in range(5)]
@@ -340,12 +352,10 @@ def fig_architecture():
         b.append(C(x + 14 + 2.2, ky + 18, 2.2, ACCENT))
         b.append(T(x + 14 + 7, ky + 22, r_, 11, 600, INK2))
         x += 14 + 7 + tw(r_, 11, True)
-    # app -> kit
-    b.append(L(327, 258, 327, ky - 2, INK3, 1.5, marker="arrG"))
-    b.append(L(108, 258, 108, ky - 2, INK3, 1.5, marker="arrG"))
-    b.append(L(530, 258, 530, ky - 2, INK3, 1.5, marker="arrG"))
+    # app adapters -> kit along the right margin (the coach layer and the engine never touch the SDK)
+    b.append(PATH("M 826 76 L 850 76 L 850 %d L 829 %d" % (ky + 62, ky + 62), stroke=INK3, sw=1.5, marker="arrG"))
     # ---- platform band
-    py = 412
+    py = ky + 118
     b.append(band(8, py, 834, 140, "", "", SURF2))
     plat = [("Vehicle SDK", ["조향·브레이크·방향지시등", "크루즈·도어·공조"]),
             ("NaviHelper", ["회전 안내·경로 상태", "requestTrip·경유지"]),
