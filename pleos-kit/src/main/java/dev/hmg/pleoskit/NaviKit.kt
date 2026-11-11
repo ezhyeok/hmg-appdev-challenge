@@ -212,6 +212,8 @@ class NaviKit(context: Context) {
      */
     suspend fun addWaypoint(waypoint: RequestWaypointInfo, confirmTimeoutMs: Long = 30_000): Boolean = mutex.withLock {
         val before = runCatching { waypointsLocked() }.getOrNull()
+        // 이미 경유지면 다시 넣지 않는다: 같은 곳을 또 보내면 목록이 늘지 않아 '확인 실패'가 됐다 (2026-11-12 에뮬레이터)
+        if (before != null && isWaypoint(before, waypoint.latitude, waypoint.longitude)) return@withLock true
         command("addWaypoint") { raw.addWaypoint(waypoint) }
         pollUntil(confirmTimeoutMs) { waypointAdded(before, waypointsLocked(), waypoint.latitude, waypoint.longitude) }
     }
@@ -306,7 +308,11 @@ class NaviKit(context: Context) {
          * 순수 함수라 JVM 테스트(NaviKitRulesTest)로 지킨다.
          */
         fun waypointAdded(before: List<WaypointInfo>?, after: List<WaypointInfo>, lat: Double, lon: Double): Boolean =
-            if (before != null) after.size > before.size else after.any { distanceM(it.latitude, it.longitude, lat, lon) <= WAYPOINT_MATCH_M }
+            if (before != null) after.size > before.size else isWaypoint(after, lat, lon)
+
+        /** 요청한 좌표(약 [WAYPOINT_MATCH_M] 안)가 경유지 목록에 있는지 */
+        fun isWaypoint(list: List<WaypointInfo>, lat: Double, lon: Double): Boolean =
+            list.any { distanceM(it.latitude, it.longitude, lat, lon) <= WAYPOINT_MATCH_M }
 
         private fun distanceM(lat1: Double, lon1: Double, lat2: Double, lon2: Double): Double {
             val r = 6_371_000.0

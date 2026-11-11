@@ -35,6 +35,15 @@ class KitRulesTest {
     }
 
     @Test
+    fun aPlaceAlreadyInTheWaypointsIsRecognisedSoItIsNotSentAgain() {
+        // 같은 곳을 또 보내면 목록이 늘지 않아 확인 실패(FAILED)가 됐다 (2026-11-12 에뮬레이터, 급해 결과를 두 번 고름)
+        val sk = wp(37.3990, 127.1100, "주유소")
+        assertTrue(NaviKit.isWaypoint(listOf(sk), 37.3991, 127.1101))
+        assertFalse(NaviKit.isWaypoint(listOf(sk), 37.40, 127.12))
+        assertFalse(NaviKit.isWaypoint(emptyList(), 37.3990, 127.1100))
+    }
+
+    @Test
     fun carGearValuesMapToEngineGears() {
         assertEquals(Gear.PARK, CarSignals.gearOf(4))
         assertEquals(Gear.DRIVE, CarSignals.gearOf(8))
