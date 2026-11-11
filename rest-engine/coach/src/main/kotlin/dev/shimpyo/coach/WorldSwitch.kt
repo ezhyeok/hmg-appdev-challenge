@@ -140,6 +140,35 @@ class WorldSwitch(
         return next
     }
 
+    /**
+     * 건강 정보 동의를 거뒀다: 사용자가 넣은 건강 유형 탑승자를 모든 세계에서 뺀다. 동의는 세계와 무관한 설정 하나인데 탑승자는
+     * 세계마다 따로라서, 시연 중에 동의를 끄면 옆에 둔 실제 세계의 임신부가 시연을 끈 뒤 동의 없이 돌아와 게이지의 기준이 됐다
+     * (UI 닫힘 검증 N3). 설정에 저장된 실제 탑승자(시연 중이면 옆에 둔 세계의 것)와 시연에서 사용자가 고친 탑승자가 대상이다.
+     * 시나리오가 정한 시연 탑승자는 사용자의 정보가 아니라 그대로 둔다. 바뀐 것이 있으면 true
+     */
+    fun dropHealthOccupants(): Boolean {
+        var changed = false
+        val saved = settings.occupants
+        if (saved.any { HealthConsent.isHealth(it.type) }) {
+            settings.occupants = HealthConsent.allowed(saved, consent = false)
+            val real = this.real
+            real.engine.setProfile(real.profile(settings))
+            changed = true
+        }
+        val a = active
+        val w = a.world
+        if (w is CoachWorld.Demo && w.occupantsEdited) {
+            val edited = w.occupants(settings)
+            if (edited.any { HealthConsent.isHealth(it.type) }) {
+                val next = a.with(world = w.withOccupants(HealthConsent.allowed(edited, consent = false)))
+                current = next
+                next.engine.setProfile(next.profile(settings))
+                changed = true
+            }
+        }
+        return changed
+    }
+
     /** 설정(수면 시간 등)이 바뀌었다. 지금 세계의 기준점으로 프로필을 다시 넘긴다 (서비스 감사 D4: 시연 중이면 시연 여정이 리셋됐다) */
     fun profileChanged() {
         val a = active

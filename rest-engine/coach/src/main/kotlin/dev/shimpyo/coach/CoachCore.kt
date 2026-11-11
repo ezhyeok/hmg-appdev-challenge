@@ -88,6 +88,8 @@ class CoachCore(private val d: CoachDeps) {
     private var demoSinceWall: Long? = null
     /** 화면 알림(CoachUiState.notice)을 거둘 실제 시각. 알림이 없으면 null */
     private var noticeUntilMs: Long? = null
+    /** 마지막으로 본 건강 정보 동의 (처음에는 모름). 꺼진 것을 보면 건강 유형 탑승자를 뺀다 */
+    private var healthConsentSeen: Boolean? = null
 
     /** 내비에 넣는 중인 들르기 (한 번에 하나다, PromptMachine). 어느 세계에서 시작했고 급해 목록에서 고른 것인지 */
     private class GoToStart(val generation: Int, val urgentPick: Boolean)
@@ -163,6 +165,7 @@ class CoachCore(private val d: CoachDeps) {
         recorder.restore(a.session.restoredPark, now, lastSeenMs = loaded.heartbeat?.savedAt ?: now)
         memorySaver.loaded(loaded.memory)
         enterWorld(a)
+        enforceHealthConsent()
         started = true
         val shown = shownHistory(now)
         ui.update {
@@ -236,6 +239,7 @@ class CoachCore(private val d: CoachDeps) {
     private fun tick() {
         val el = d.elapsed.elapsedMs()
         d.odometer.advance(d.hub.speedKph)
+        enforceHealthConsent()
         var a = worlds.active
         val t = a.clock.now()
         val real = d.positions.current.value?.fix
@@ -581,6 +585,20 @@ class CoachCore(private val d: CoachDeps) {
     private fun setOccupants(list: List<Occupant>) {
         val a = worlds.setOccupants(HealthConsent.allowed(list, d.settings.healthConsent))
         ui.update { copy(occupants = a.world.occupants(d.settings)) }
+    }
+
+    /**
+     * 건강 정보 동의가 꺼져 있으면(화면이 설정을 바꾼다: 명령은 오지 않는다) 건강 유형 탑승자를 모든 세계에서 뺀다 (UI 닫힘 검증 N3).
+     * 동의 값이 바뀐 때와 시작할 때만 탑승자를 본다 (동의 읽기는 싸고, 탑승자 읽기는 설정을 다시 푼다)
+     */
+    private fun enforceHealthConsent() {
+        val consent = d.settings.healthConsent
+        if (consent == healthConsentSeen) return
+        healthConsentSeen = consent
+        if (!consent && worlds.dropHealthOccupants()) {
+            log.i("health consent off: health-type occupants removed")
+            ui.update { copy(occupants = occupants()) }
+        }
     }
 
     /**

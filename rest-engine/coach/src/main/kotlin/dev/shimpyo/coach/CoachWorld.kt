@@ -121,6 +121,9 @@ sealed class CoachWorld {
         /** 시연 경로는 가상이라 실제 내비의 목적지를 보이지 않는다 */
         override fun destinationName(navi: String?): String? = null
 
+        /** 사용자가 이 시연의 탑승자를 고쳤는지 (아니면 시나리오가 정한 탑승자다) */
+        val occupantsEdited: Boolean get() = occupantsOverride != null
+
         /** 이 시연의 탑승자만 바꾼 세계 (같은 시연, 같은 시각) */
         fun withOccupants(list: List<Occupant>): Demo = Demo(run, list)
     }

@@ -385,6 +385,57 @@ class CoachCoreTest {
         assertEquals(listOf("driver", "p"), rig.state.occupants.map { it.id })
     }
 
+    @Test
+    fun withdrawingHealthConsentDuringADemoAlsoStopsUsingHealthOccupantsOfTheRealTrip() = runTest {
+        // 건강 정보 동의는 세계와 무관한 설정 하나인데 탑승자는 세계마다 따로다. 시연 중에는 화면의 탑승자가 시연 탑승자라 동의 스위치를
+        // 꺼도 SetOccupants 없이 동의만 꺼진다. 예전에는 시연을 끄면 실제 탑승자(임신부)가 동의 없이 그대로 돌아와 화장실 게이지의
+        // 기준이 됐다 (UI 닫힘 검증 N3). 코어가 동의가 꺼진 것을 보면 모든 세계와 설정에서 건강 유형 탑승자를 뺀다
+        val pregnant = Occupant("p", OccupantType.PREGNANT, label = "임신부")
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER, pregnant), healthConsent = true))
+        rig.park()
+        rig.start()
+        rig.run(2_000)
+        assertEquals("전제: 동의한 실제 탑승자", listOf("driver", "p"), rig.state.occupants.map { it.id })
+        rig.command(UiCommand.Demo("holiday"))
+        rig.run(2_000)
+        rig.settings.healthConsent = false // 화면: prefs.updateHealthConsent(false)
+        rig.run(2_000)
+        assertEquals("시연 탑승자는 그대로", listOf("driver", "kid"), rig.state.occupants.map { it.id })
+        assertEquals("설정에서도 뺀다", listOf("driver"), rig.settings.occupants.map { it.id })
+        rig.command(UiCommand.Demo(null))
+        rig.run(2_000)
+        assertTrue("동의를 철회했는데 건강 유형 탑승자를 쓴다: ${rig.state.occupants.map { it.type }}", rig.state.occupants.none { HealthConsent.isHealth(it.type) })
+        assertTrue("화장실 게이지의 기준이 동의 없는 건강 유형 탑승자다", rig.state.restroom?.drivenBy != "p")
+    }
+
+    @Test
+    fun withdrawingHealthConsentInTheRealWorldRemovesTheOccupantAtOnce() = runTest {
+        val pregnant = Occupant("p", OccupantType.PREGNANT, label = "임신부")
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER, KID, pregnant), healthConsent = true))
+        rig.drive(60f)
+        rig.start()
+        rig.run(2_000)
+        rig.settings.healthConsent = false
+        rig.run(1_000)
+        assertEquals(listOf("driver", "kid"), rig.state.occupants.map { it.id })
+        assertEquals(listOf("driver", "kid"), rig.settings.occupants.map { it.id })
+        // 다시 동의해도 뺀 사람이 저절로 돌아오지 않는다
+        rig.settings.healthConsent = true
+        rig.run(2_000)
+        assertEquals(listOf("driver", "kid"), rig.state.occupants.map { it.id })
+    }
+
+    @Test
+    fun healthOccupantsStoredWithoutConsentAreRemovedAtStart() = runTest {
+        // 서비스가 꺼져 있는 동안 동의를 거뒀다 (또는 예전 판이 동의 없이 저장했다)
+        val oab = Occupant("o", OccupantType.OAB, label = "과민성 방광")
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER, oab), healthConsent = false))
+        rig.park()
+        rig.start()
+        assertEquals(listOf("driver"), rig.state.occupants.map { it.id })
+        assertEquals(listOf("driver"), rig.settings.occupants.map { it.id })
+    }
+
     // ------------------------------------------------------------ 재시작
 
     @Test
