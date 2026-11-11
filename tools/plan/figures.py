@@ -281,7 +281,7 @@ def fig_architecture():
     # ---- app band
     b.append(band(8, 8, 618, 248, "쉼표 앱", "app · Kotlin, Compose", SURF))
     b.append(box(24, 72, 168, 76, "화면 (Compose)", ["주행·계획·급해", "탑승자·기록·설정"]))
-    b.append(box(24, 166, 168, 76, "VoiceAgent", ["TTS·STT 대화", "규칙 의도 분류 (+LLM)"]))
+    b.append(box(24, 166, 168, 76, "VoiceAgent", ["TTS·STT 대화", "규칙 의도 분류"]))
     b.append(box(236, 72, 182, 170, "CoachService", ["포그라운드 서비스", "신호 수집 (SignalHub)", "1초마다 엔진 호출",
                                                      "질문·경유지·공조 실행", "정차 기록"], stroke=INK2))
     right = [("RouteOracle", "requestTrip으로 경로 거리"), ("StopRepository", "공공데이터 · 격자 색인"),
@@ -312,19 +312,25 @@ def fig_architecture():
     for i, s_ in enumerate(items):
         b.append(R(654, 82 + i * 24, 174, 20, 10, WHITE))
         b.append(T(666, 96 + i * 24, s_, 11.5, 600, INK2))
-    # ---- kit band
+    # ---- kit band: five kit modules over the five platform APIs, same columns so the connectors stay vertical
     ky = 284
     b.append(band(8, ky, 834, 104, "pleos-kit", "SDK를 코루틴·Flow로 감싼 공통 모듈", SURF))
-    cols = [24, 162, 300, 438, 576, 714]
-    cw = 128
+    cw, cgap = 149.2, 14.0
+    cols = [24 + i * (cw + cgap) for i in range(5)]
     kit = [("VehicleKit", "신호·제어"), ("NaviKit", "조회·경로 변경"), ("CarState", "기어·차속·UX 제한"),
            ("TtsKit · SttKit", "ON_DEVICE"), ("LocationKit", "위치 Flow")]
     for (name, sub), x in zip(kit, cols):
         b.append(box(x, ky + 34, cw, 56, name, [sub], center=True))
-    b.append(T(718, ky + 44, "kit이 지키는 규칙", 11.5, 800, INK2))
-    for i, r_ in enumerate(["SDK 전용 스레드", "포그라운드 서비스", "제어 후 다시 읽기", "내비 요청 직렬화"]):
-        b.append(C(722, ky + 59 + i * 14.5, 2.2, ACCENT))
-        b.append(T(729, ky + 63 + i * 14.5, r_, 11, 600, INK2))
+    # kit rules on the band's title line, right-aligned
+    rules = ["SDK 전용 스레드", "포그라운드 서비스", "제어 후 다시 읽기", "내비 요청 직렬화"]
+    head = "kit이 지키는 규칙"
+    x = 826 - (tw(head, 11.5, True) + sum(14 + 7 + tw(r_, 11, True) for r_ in rules))
+    b.append(T(x, ky + 22, head, 11.5, 800, INK2))
+    x += tw(head, 11.5, True)
+    for r_ in rules:
+        b.append(C(x + 14 + 2.2, ky + 18, 2.2, ACCENT))
+        b.append(T(x + 14 + 7, ky + 22, r_, 11, 600, INK2))
+        x += 14 + 7 + tw(r_, 11, True)
     # app -> kit
     b.append(L(327, 258, 327, ky - 2, INK3, 1.5, marker="arrG"))
     b.append(L(108, 258, 108, ky - 2, INK3, 1.5, marker="arrG"))
@@ -336,12 +342,10 @@ def fig_architecture():
             ("NaviHelper", ["회전 안내·경로 상태", "requestTrip·경유지"]),
             ("AAOS Car API", ["기어·차속", "CarUxRestrictions"]),
             ("TTS · STT", ["ON_DEVICE", "네트워크 없이 동작"]),
-            ("FusedLocation", ["위치·진행 방향"]),
-            ("LLM SDK", ["선택 기능", "(없으면 규칙으로)"])]
+            ("FusedLocation", ["위치·진행 방향"])]
     for (name, lines), x in zip(plat, cols):
-        dash = "5 4" if name == "LLM SDK" else None
-        b.append(box(x, py + 14, cw, 74, name, lines, center=True, dash=dash))
-    for x in cols[:5]:
+        b.append(box(x, py + 14, cw, 74, name, lines, center=True))
+    for x in cols:
         b.append(L(x + cw / 2, ky + 90, x + cw / 2, py + 12, INK3, 1.4))
     b.append(T(22, py + 116, "Pleos Connect", 13.5, 800, INK2))
     b.append(T(22 + tw("Pleos Connect", 13.5, True) + 8, py + 116,
@@ -383,7 +387,7 @@ def fig_engine():
     for i, (t, ls) in enumerate(pl):
         b.append(comp(442, ys[i], 196, 82, i + 4, t, ls))
     b.append(comp(662, 46, 172, 82, 7, "묻는 타이밍", ["회전·대화 뒤 침묵 +", "톰프슨 샘플링"]))
-    b.append(comp(662, 140, 172, 82, 8, "음성 의도", ["규칙 분류가 기본", "LLM은 선택"]))
+    b.append(comp(662, 140, 172, 82, 8, "음성 의도", ["한국어 규칙 분류", "응/아니 · 급해 · 탑승자"]))
     b.append(R(662, 234, 172, 82, 10, TINT, ACCENT, 1.3))
     b.append(T(676, 258, "출력", 13.5, 800, ACCENT_D))
     b.append(ML(676, 280, ["게이지 2개 · 질문 1개", "추천 · 정차 계획 · 공조"], 12, 16.5, 600, INK2))
@@ -414,12 +418,12 @@ def fig_engine():
 # ------------------------------------------------------------------ figure 5: MAU funnel
 
 def fig_funnel():
-    W, H = 850, 256
+    W = 850
     b = []
-    rows = [("국내 Pleos 탑재 차량", "누적 추정, 2030", 3670659, "367만 대", "#93BBFF"),
+    rows = [("국내 Pleos 탑재 차량", "누적 추정, 2030 (2026년분 8.3만 대 포함)", 3670659, "367만 대", "#93BBFF"),
             ("앱마켓에서 앱을 쓰는 운전자", "A 30%", 1101198, "110만 명", "#5E98FF"),
             ("쉼표 설치", "B 10%", 110120, "11.0만 명", "#2C7BFF"),
-            ("월 1회 이상 사용 (MAU)", "C 35%", 38542, "3.85만", ACCENT)]
+            ("월 1회 이상 사용 (MAU)", "C 35% · 쓰는 순간별 가중", 38542, "3.85만", ACCENT)]
     x0, maxw = 300, 420
     for i, (name, sub, v, label, col) in enumerate(rows):
         y = 18 + i * 54
@@ -431,8 +435,12 @@ def fig_funnel():
         if i == 3:
             b.append(T(x0 + w + 12 + tw(label, 15, True), y + 25, "  탑재 차량의 1.05%", 12.5, 500, INK3))
     b.append(L(x0, 12, x0, 232, LINE2, 1))
-    b.append(T(16, 246, "막대 길이 = 탑재 차량 대비 비율. A·B·C는 가정이며, 가장 불확실한 A(앱마켓 이용률)는 42dot 자료로 검증해야 한다.",
-               12, 500, INK3))
+    note = []                      # one sentence group per line, wrapped only if a line is too long
+    for s in ("막대 길이 = 탑재 차량 대비 비율. MAU = 그 달에 질문에 답했거나 화면·음성으로 직접 쓴 사용자.",
+              "A·B·C는 가정이며 가장 불확실한 A(앱마켓 이용률)는 42dot 자료로 검증해야 한다."):
+        note += wrap(s, 12, W - 32)
+    b.append(ML(16, 250, note, 12, 17, 500, INK3))
+    H = int(250 + 17 * (len(note) - 1) + 12)
     return svg(W, H, b)
 
 
@@ -662,52 +670,128 @@ def wc_marker(cx, cy, r=15, filled=True):
 
 # ------------------------------------------------------------------ hero (box 1)
 
+def _along(pts, s):
+    """Point at arc length s along the polyline pts."""
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        seg = math.hypot(x2 - x1, y2 - y1)
+        if s <= seg:
+            t = s / seg if seg else 0.0
+            return x1 + (x2 - x1) * t, y1 + (y2 - y1) * t
+        s -= seg
+    return pts[-1]
+
+
+def _cut(pts, s0, s1):
+    """The part of the polyline pts between arc lengths s0 and s1."""
+    out, acc = [_along(pts, s0)], 0.0
+    for (x1, y1), (x2, y2) in zip(pts, pts[1:]):
+        acc += math.hypot(x2 - x1, y2 - y1)
+        if s0 < acc < s1:
+            out.append((x2, y2))
+    return out + [_along(pts, s1)]
+
+
+def _navi_window(ww, wh):
+    """Navigation window as a flat schematic we draw ourselves (not a real navi UI), local coordinates.
+
+    Scene A: 옥산휴게소 4 km ahead, 20 km congestion from 1 km after it, 죽암휴게소 at 25.2 km. Arc lengths along
+    the route are schematic: the first 5 km are stretched so the car and the 옥산 marker stay apart.
+    """
+    o = [R(0, 0, ww, wh, 0, SURF2)]
+    for d in ("M -10 192 C 60 180 150 206 %.0f 174" % (ww + 10), "M 150 -10 C 160 36 186 62 %.0f 70" % (ww + 10),
+              "M -10 98 C 36 106 72 100 112 110", "M 156 %.0f C 166 300 204 284 %.0f 278" % (wh + 10, ww + 10),
+              "M -10 290 C 30 282 64 292 100 284"):
+        o.append(PATH(d, stroke=WHITE, sw=5))
+    road = [(94, wh + 8), (100, 298), (104, 262), (108, 226), (122, 190), (128, 150), (122, 112), (114, 82),
+            (118, 46), (126, -10)]
+    route = road[2:]                                  # from the car forward
+    s_ok, s_jam0, s_jam1, s_jk = 40.0, 50.0, 176.0, 178.0
+    o.append(_poly(road, LINE2, 14))
+    o.append(_poly(road, WHITE, 10))
+    o.append(_poly(route, ACCENT, 6))
+    o.append(_poly(_cut(route, s_jam0, s_jam1), RED, 6))
+    mx_, my_ = _along(route, (s_jam0 + s_jam1) / 2)
+    w = tw("정체 20km", FS, True) + 20
+    o.append(chip(mx_ - 16 - w, my_ - 12, "정체 20km", FS, RED_TINT, RED_TEXT, 24, 800)[0])
+    jx, jy = _along(route, s_jk)
+    o.append(wc_marker(jx, jy, 11, False))
+    o.append(R(jx + 16, jy - 12, tw("죽암휴게소", FS, True) + 20, 24, 12, WHITE, LINE2, 1))
+    o.append(T(jx + 26, jy + 5.4, "죽암휴게소", FS, 700, INK))
+    ox, oy = _along(route, s_ok)
+    o.append(wc_marker(ox, oy, 11, True))
+    o.append(C(104, 262, 13, INK2, WHITE, 2.5))
+    o.append(icon("Navigation", 104 - 9, 262 - 9.5, 18, WHITE))
+    # next guidance card and remaining distance
+    o.append(R(10, 10, ww - 20, 44, 10, WHITE, LINE, 1))
+    o.append(wc_marker(32, 32, 12, True))
+    o.append(TS(52, 38, [("4km  ", 800, INK), ("옥산휴게소", 600, INK2)], 16))
+    o.append(R(0, wh - 34, ww, 34, 0, WHITE))
+    o.append(L(0, wh - 34, ww, wh - 34, LINE, 1))
+    o.append(TS(ww / 2, wh - 12, [("남은 거리 ", 500, INK3), ("310km", 800, INK)], FS, "middle"))
+    return ''.join(o)
+
+
 def fig_hero(screen=None):
-    W, H = 850, 440
+    W = 850
     path = screen or hero_screen_path()
     iw, ih = image_size(path)
     b = []
-    # display frame sized to the screenshot (portrait app window or landscape emulator capture)
-    max_w, max_h = 352.0, 336.0
-    sc = min(max_w / iw, max_h / ih)
-    dw, dh = iw * sc, ih * sc
-    bez = 11
-    fx, fy = 24 + bez, 14 + bez + (max_h - dh) / 2
+    # Pleos Connect display: the app area split into two portrait windows, Pleos navi (schematic) | 쉼표
+    ww = 238.0
+    wh = ww * ih / float(iw)                          # 840×1184 screen → 238×335.5
+    side, btop, bbot, gap = 10.0, 16.0, 12.0, 8.0
+    dx, dy = 12.0, 16.0
+    dw, dh = 2 * side + 2 * ww + gap, btop + wh + bbot
+    wins = (dx + side, dx + side + ww + gap)
+    wy = dy + btop
     b.append('<filter id="soft" x="-30%" y="-30%" width="160%" height="160%"><feGaussianBlur stdDeviation="10"/>'
              '</filter>')
-    b.append('<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="26" fill="#000000" opacity="0.18" '
-             'filter="url(#soft)"/>' % (fx - bez + 4, fy - bez + 12, dw + 2 * bez - 8, dh + 2 * bez - 8))
-    b.append(R(fx - bez, fy - bez, dw + 2 * bez, dh + 2 * bez, 26, "#1D1E21"))
-    b.append('<clipPath id="scr"><rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="15"/></clipPath>'
-             % (fx, fy, dw, dh))
-    b.append('<image x="%.1f" y="%.1f" width="%.1f" height="%.1f" preserveAspectRatio="xMidYMid slice" '
-             'clip-path="url(#scr)" xlink:href="%s"/>' % (fx, fy, dw, dh, image_uri(path)))
+    b.append('<rect x="%.1f" y="%.1f" width="%.1f" height="%.1f" rx="22" fill="#000000" opacity="0.16" '
+             'filter="url(#soft)"/>' % (dx + 6, dy + 12, dw - 12, dh - 8))
+    b.append(R(dx, dy, dw, dh, 20, "#1D1E21"))
+    for x in wins:                                    # window bar handles
+        b.append(R(x + ww / 2 - 16, dy + 6, 32, 4, 2, "#55575E"))
+    b.append('<clipPath id="win"><rect x="0" y="0" width="%.1f" height="%.1f" rx="8"/></clipPath>' % (ww, wh))
+    b.append('<g transform="translate(%.1f %.1f)"><g clip-path="url(#win)">%s</g></g>'
+             % (wins[0], wy, _navi_window(ww, wh)))
+    b.append('<g transform="translate(%.1f %.1f)"><g clip-path="url(#win)"><image x="0" y="0" width="%.1f" '
+             'height="%.1f" preserveAspectRatio="xMidYMid slice" xlink:href="%s"/></g></g>'
+             % (wins[1], wy, ww, wh, image_uri(path)))
+    # what passes between the two windows
+    gx = wins[0] + ww + gap / 2
+    for s, y in (("경로·정체 읽기 →", dy - 8), ("← ‘응’이면 경유지", dy + dh - bbot)):
+        w = tw(s, FS, True) + 20
+        b.append(chip(gx - w / 2, y, s, FS, TINT, ACCENT_D, 24, 700)[0])
+    cap_y = dy + dh + 38
+    b.append(TS(wins[0] + ww / 2, cap_y, [("Pleos 내비", 700, INK2), (" (도식)", 500, INK3)], FS, "middle"))
+    b.append(TS(wins[1] + ww / 2, cap_y, [("쉼표", 700, INK2), (" (앱 UI 코드 렌더링)", 500, INK3)], FS, "middle"))
 
-    x0 = fx + dw + bez + 34
-    colw = W - 18 - x0
-    b.append(TS(x0, 40, [("차에는 주행가능거리, 사람에게는 ", 800, INK), ("쉼표", 800, ACCENT)], 21))
+    x0 = dx + dw + 22
+    colw = W - 12 - x0
+    b.append(TS(x0, 44, [("차에는 주행가능거리,", 800, INK)], 23))
+    b.append(TS(x0, 74, [("사람에게는 ", 800, INK), ("쉼표", 800, ACCENT)], 23))
     sub = wrap("탑승자의 다음 화장실·휴식까지 남은 시간을 계산하는 차량용 휴식 코치", 15.5, colw)
-    b.append(ML(x0, 66, sub, 15.5, 21, 500, INK3))
-    props = [("Wc", "정체 전 마지막 화장실", "경로 위 휴게소·정체를 읽어 화장실 공백 앞에서 먼저 묻는다"),
-             ("Group", "탑승자별 AI 예측", "아이·어르신·임신부마다 다른 시간, 정차 기록으로 우리 가족에게 맞춰진다"),
-             ("Mic", "‘응’ 한마디", "화면 조작 없이 경유지 추가, 정차·휴식은 차가 알아서 기록")]
-    y = 66 + 21 * len(sub) + 14
+    b.append(ML(x0, 102, sub, 15.5, 21, 500, INK3))
+    props = [("Wc", "정체 전 마지막 화장실", "경로 위 휴게소·정체를 내비에서 읽어 화장실 공백 앞에서 먼저 묻는다"),
+             ("Group", "탑승자별 화장실·피로 게이지", "아이·어르신·임신부마다 다른 시간, 정차 기록으로 우리 가족에게 맞춰진다"),
+             ("Mic", "‘응’ 한마디", "화면 조작 없이 경유지 추가, 정차·휴식은 기어와 도어로 저절로 기록")]
+    y = 102 + 21 * (len(sub) - 1) + 28
     for i, (ic, title, desc) in enumerate(props):
-        b.append(C(x0 + 25, y + 25, 25, TINT))
-        b.append(icon(ic, x0 + 25 - 15, y + 25 - 15, 30, ACCENT))
-        tx_ = x0 + 64
-        b.append(TS(tx_, y + 19, [("%s " % "①②③"[i], 800, ACCENT), (title, 800, INK)], 18.5))
-        lines = wrap(desc, 15.5, W - 18 - tx_)
-        b.append(ML(tx_, y + 44, lines, 15.5, 21, 500, INK2))
-        y += max(66, 44 + 21 * len(lines)) + 14
+        b.append(C(x0 + 19, y + 24, 19, TINT))
+        b.append(icon(ic, x0 + 19 - 12, y + 24 - 12, 24, ACCENT))
+        tx_ = x0 + 48
+        b.append(TS(tx_, y + 18, [("%s " % "①②③"[i], 800, ACCENT), (title, 800, INK)], 18))
+        lines = wrap(desc, 15.5, W - 12 - tx_)
+        b.append(ML(tx_, y + 41, lines, 15.5, 21, 500, INK2))
+        y += 41 + 21 * (len(lines) - 1) + 28
     # evidence strip
+    H = int(cap_y + 14 + 46)
     sy = H - 46
-    b.append(R(16, sy, W - 32, 36, 18, SURF2))
+    b.append(R(8, sy, W - 16, 36, 12, SURF2))
     parts = [("Pleos ", 700, INK2), ("NaviHelper · Vehicle · TTS/STT · FusedLocation", 500, INK2),
-             (" + AAOS Car API", 500, INK2), ("   |   ", 400, MUTED), ("판단 엔진 테스트 141개", 700, INK),
-             ("   |   ", 400, MUTED), ("에뮬레이터 검증", 700, INK)]
-    size = FS
-    b.append(TS(W / 2, sy + 23.5, parts, size, "middle"))
+             (" + AAOS Car API", 500, INK2), ("  |  ", 400, MUTED), ("판단 엔진 테스트 141개", 700, INK),
+             ("  |  ", 400, MUTED), ("SDK 동작 에뮬레이터 확인", 700, INK)]
+    b.append(TS(W / 2, sy + 23.5, parts, FS, "middle"))
     return svg(W, H, b)
 
 
@@ -716,7 +800,7 @@ def fig_hero(screen=None):
 def fig_scene():
     W, H = 850, 474
     b = []
-    b.append(TS(16, 36, [("옥산휴게소를 지나면, 다음 화장실은 ", 800, INK), ("63분 뒤", 800, RED_TEXT)], 24))
+    b.append(TS(16, 36, [("지금 옥산휴게소를 지나치면, 다음 화장실까지 ", 800, INK), ("63분", 800, RED_TEXT)], 24))
     b.append(T(16, 64, "추석 경부고속도로 하행 · 7살 아이 동승 · 마지막 화장실 55분 전", 15.5, 500, INK3))
 
     # distance axis (km)
@@ -842,12 +926,12 @@ def fig_gapmap(path=None):
 
     row(176, 186, "시속 100km", "평균 %d분 · 최대 %d분" % (st["meanMin100"], st["maxMin100"]), 100.0, False)
     row(240, 274, "시속 20km 정체", "평균 %d분 · 최대 %d분" % (st["meanMin20"], st["maxMin20"]), 20.0, True)
-    # 옥산→죽암 = the scene above
+    # 옥산→죽암 (whole gap at 20 km/h; the scene's 63 min has only 20 km of congestion, so no link to it)
     ok = next((g for g in gaps if g["from"].startswith("옥산") and g["to"].startswith("죽암")), None)
     if ok:
         cxg = (kx(ok["startKm"]) + kx(ok["endKm"])) / 2
         b.append(L(cxg, 296, cxg, 306, INK3, 1.2))
-        b.append(T(cxg - 8, 323, "옥산→죽암 (위 장면)", 15, 600, INK2))
+        b.append(T(cxg, 323, "옥산→죽암", 15, 600, INK2, "middle"))
     # legend (right side of the 20 km/h title line)
     lx = W - 18
     for label, col in (("60분 초과", RED), ("30~60분", ORANGE), ("30분 미만", CALM)):
@@ -883,8 +967,8 @@ def fig_loop():
          ["와이블 생존모형 · 베이즈 갱신", "Three-Process Model"]),
         (324, "판단", "경로 위 화장실 공백, 마지막 기회, 운전 부하가 낮은 순간",
          ["requestTrip (진행 방향)", "CarUxRestrictions"]),
-        (36, "묻고 실행", "음성으로 한 번 묻고, ‘응’이면 경유지 추가, 필요하면 환기",
-         ["TTS·STT · addWaypoint", "setHvacRecirculation"]),
+        (36, "묻고 실행", "음성으로 한 번 묻고, ‘응’이면 경유지를 넣는다",
+         ["TTS·STT · addWaypoint", "requestRoute"]),
         (108, "학습", "정차 기록 → 개인 모델 베이즈 갱신, 질문 수락률 → 묻는 거리 톰프슨 샘플링",
          ["기기 안에만 저장"]),
     ]
@@ -1032,6 +1116,16 @@ def _poly(points, color, width=2.5, dash=None):
     return a + '/>'
 
 
+def _interp(xs, ys, x):
+    """Linear interpolation of the sampled curve (xs ascending), clamped at both ends."""
+    if x <= xs[0]:
+        return ys[0]
+    for (x1, y1), (x2, y2) in zip(zip(xs, ys), zip(xs[1:], ys[1:])):
+        if x <= x2:
+            return y1 + (y2 - y1) * (x - x1) / float(x2 - x1)
+    return ys[-1]
+
+
 def fig_models():
     d = _load("engine_curves.json")
     W, H = 850, 404
@@ -1040,7 +1134,7 @@ def fig_models():
     xs = [62.0, 344.0, 622.0]
     heads = [("① 탑승자별 필요 확률", "마지막 화장실 이후 (분)"),
              ("② 기록으로 개인에 맞춘다", "기록된 화장실 정차 (번째)"),
-             ("③ 운전 패턴 편차", "주행 시간 (분)")]
+             ("③ 장면 A: 왜 지금 묻나", "앞으로의 시간 (분)")]
     for (t1, t2), x in zip(heads, xs):
         b.append(T(x - 46, 34, t1, 17, 800, INK))
         b.append(T(x + pw, top + ph + 46, t2, FS, 500, INK3, "end"))
@@ -1090,40 +1184,53 @@ def fig_models():
     b.append(L(lx2, 103, lx2 + 20, 103, INK3, 1.4, dash="5 4"))
     b.append(T(lx2 + 26, 108, "실제 중앙값 %d분" % ps["trueMedianMin"], FS, 600, INK2))
 
-    # ③ driving-style statistic: the EWMA S the engine accumulates (continuous), with its limits
-    ds = d["drivingStyle"]
-    ev, th = ds["events"], ds["thresholds"]
-    ucl = float(th["ewmaUcl3Sigma"])
-    s_adv = th["deviationAdvance"] * 2.0 * ucl          # deviation = clamp(S / (2·UCL), 0, 1)
-    rows = [r for r in ds["perMinute"] if r["ewmaS"] is not None]
-    smax = max(r["ewmaS"] for r in rows)
-    ytop = max(5.0, math.ceil(smax))
-    px, py = _axes(b, xs[2], top, pw, ph, (0, 60), (-1, ytop), (0, 20, 40, 60),
-                   [v for v in range(0, int(ytop) + 1, 2)], lambda v: "%d" % v, lambda v: "%d" % v)
-    ready = ev["baselineReadyAtMinute"]
-    b.append(R(px(0), top, px(ready) - px(0), ph, 0, SURF2))
-    b.append(ML(px(ready / 2.0), py(3.0), ["기준선", "만드는 중"], FS, 19, 600, INK3, "middle"))
-    b.append(L(xs[2], py(ucl), xs[2] + pw, py(ucl), INK3, 1.3, dash="2 3"))
-    b.append(L(xs[2], py(s_adv), xs[2] + pw, py(s_adv), ORANGE, 1.6, dash="5 4"))
-    b.append(_poly([(px(r["minute"]), py(r["ewmaS"])) for r in rows], ACCENT, 3))
-    adv = ev["stageAdvancedAtMinute"]
-    b.append(L(px(adv), top, px(adv), top + ph, RED, 1.5, dash="3 3"))
-    b.append(T(px(adv) - 7, top + 20, "%d분 한 단계 앞당김" % adv, FS, 800, RED_TEXT, "end"))
-    b.append(T(px(adv) - 7, top + 40, "‘혹시 졸리세요?’", FS, 600, INK2, "end"))
+    # ③ scene A (그림 1): driver + 7-year-old, both 55 min after the last restroom. The group need probability
+    # P(Δ) = 1 − S_adult(55+Δ)·S_child(55+Δ) is RestroomNeedModel.groupNeedProb; where it reaches the decision
+    # probability is groupDeadlineMin. S = 1 − cdf, interpolated from the engine's own curves.
+    elapsed, decision = 55.0, 0.3
+    ok_min, jam0, jam1, jk_min = 2.4, 3.0, 63.0, 63.0     # 옥산 2.4 min, congestion 3–63 min, 죽암 63 min
+    s_ad, s_ch = nd["series"]["ADULT"]["cdf"], nd["series"]["CHILD_7"]["cdf"]
+
+    def group_p(dl):
+        return 1.0 - (1.0 - _interp(ts, s_ad, elapsed + dl)) * (1.0 - _interp(ts, s_ch, elapsed + dl))
+
+    lo, hi = 0.0, 70.0
+    for _ in range(50):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if group_p(mid) < decision else (lo, mid)
+    deadline = lo
+    p_ok, p_jk = group_p(ok_min), group_p(jk_min)
+    x3 = xs[2]
+    b.append(R(x3 + pw * jam0 / 70.0, top, pw * (jam1 - jam0) / 70.0, ph, 0, RED_TINT))
+    px, py = _axes(b, x3, top, pw, ph, (0, 70), (0, 1), (0, 20, 40, 60), (0, 0.3, 0.5, 1.0),
+                   lambda v: "%d" % v, lambda v: "%d%%" % round(v * 100))
+    b.append(T(px((jam0 + jam1) / 2), top + ph - 10, "정체", FS, 800, RED_TEXT, "middle"))
+    b.append(L(x3, py(decision), x3 + pw, py(decision), ORANGE, 1.6, dash="5 4"))
+    b.append(_poly([(px(t / 2.0), py(group_p(t / 2.0))) for t in range(141)], ACCENT, 3))
+    # deadline: a pole from the crossing up, labelled at the top (the space below is the 옥산 label's)
+    b.append(L(px(deadline), py(decision), px(deadline), top, ORANGE, 1.6, dash="5 4"))
+    b.append(C(px(deadline), py(decision), 4.5, ORANGE, WHITE, 1.5))
+    b.append(T(px(deadline) + 7, top + 16, "마감 %d분" % round(deadline), FS, 800, INK))
+    b.append(wc_marker(px(ok_min), py(p_ok), 10, True))
+    b.append(wc_marker(px(jk_min), py(p_jk), 10, False))
+    b.append(TS(px(ok_min) + 15, py(p_ok) + 11, [("옥산 ", 800, INK), ("%d%%" % round(p_ok * 100), 800, ACCENT_D)]))
+    b.append(TS(x3 + pw, py(p_jk) - 19, [("죽암 ", 800, INK), ("%d%%" % round(p_jk * 100), 800, ACCENT_D)],
+                anchor="end"))
     lx3 = xs[2] - 46
     b.append(L(lx3, 59, lx3 + 20, 59, ACCENT, 3.5))
-    b.append(T(lx3 + 26, 64, "EWMA 통계량 S (λ %.1f)" % th["ewmaLambda"], FS, 600, INK2))
-    b.append(L(lx3, 81, lx3 + 20, 81, INK3, 1.3, dash="2 3"))
-    b.append(T(lx3 + 26, 86, "3σ 관리한계 S = %.1f" % ucl, FS, 600, INK2))
-    b.append(L(lx3, 103, lx3 + 20, 103, ORANGE, 1.6, dash="5 4"))
-    b.append(T(lx3 + 26, 108, "앞당김 기준 S = %.1f (편차 %.1f)" % (s_adv, th["deviationAdvance"]), FS, 600, INK2))
+    b.append(T(lx3 + 26, 64, "누군가 필요해질 확률 (운전자+7살)", FS, 600, INK2))
+    b.append(L(lx3, 81, lx3 + 20, 81, ORANGE, 1.6, dash="5 4"))
+    b.append(T(lx3 + 26, 86, "판단 마감 %d%%" % round(decision * 100), FS, 600, INK2))
+    b.append(R(lx3, 97, 20, 13, 3, RED_TINT, "#F6C3B5", 1))
+    b.append(T(lx3 + 26, 108, "정체 구간", FS, 600, INK2))
 
     foot = ("① 화면 게이지는 필요 확률 50%%, 마지막 기회·계획 판단은 30%%에서 정한다(엔진 사전분포). "
             "② 가상의 성인(실제 중앙값 %d분)의 화장실 간격 %d개(점)를 차례로 넣으면 엔진의 사후 중앙값이 사전값 %d분에서 "
-            "%d분으로 실제 쪽으로 옮겨 간다. ③ 40분부터 운전이 흐트러지는 가상 주행. 정속 구간 특징의 강건 z점수를 "
-            "EWMA로 누적한 S가 앞당김 기준 %.1f을 넘고 5분 안 3번 이상 이어진 %d분에 피로 단계를 한 단계 앞당기고 묻는다. "
-            "편차만으로는 휴식 권고를 넘기지 않는다."
-            % (ps["trueMedianMin"], len(obs), round(first), round(last), s_adv, adv))
+            "%d분으로 실제 쪽으로 옮겨 간다. ③ 그림 1의 장면(운전자와 7살 아이 모두 마지막 화장실 %d분 뒤). 누군가 "
+            "필요해질 확률이 %d%%에 닿는 %d분 뒤가 판단 마감이다. 마감 전 마지막 기회인 옥산휴게소(%d%%)를 지나치면 다음 "
+            "화장실 죽암휴게소(%d%%)는 마감 뒤라서 4km 전에 묻는다."
+            % (ps["trueMedianMin"], len(obs), round(first), round(last), elapsed, round(decision * 100),
+               round(deadline), round(p_ok * 100), round(p_jk * 100)))
     b.append(ML(16, top + ph + 84, wrap(foot, FS, W - 32), FS, 20, 500, INK3))
     lines = len(wrap(foot, FS, W - 32))
     H = int(top + ph + 84 + 20 * (lines - 1) + 14)
@@ -1137,7 +1244,7 @@ def fig_effect():
     W = 850
     b = []
     b.append(T(16, 32, "화장실 위기: 급해진 뒤 30분 넘게 화장실에 못 간 여정", 19, 800, INK))
-    b.append(T(16, 58, "운전자 + 7살 아이 · 명절 정체 · 정책마다 같은 여정 %d번 (엔진 코드 시뮬레이션)" % main["trips"],
+    b.append(T(16, 58, "운전자 + 7살 아이 · 명절 정체 · 정책마다 같은 여정 {:,}번 (엔진 코드 시뮬레이션)".format(main["trips"]),
                15.5, 500, INK3))
     pol = [("nowLike", "지금처럼", MUTED), ("every2h", "2시간마다 휴게소", MUTED),
            ("shimpyoP07", "쉼표 (수락 70%)", "#5E98FF"), ("shimpyoP10", "쉼표 (수락 100%)", ACCENT)]
@@ -1162,32 +1269,26 @@ def fig_effect():
         b.append(L(vx(hi), y + bh / 2 - 6, vx(hi), y + bh / 2 + 6, INK, 1.6))
         b.append(T(vx(hi) + 8, y + bh / 2 + 5.5, "%d%%" % round(m["value"] * 100), 15.5, 800, INK))
 
-    # other occupants: paired difference (쉼표 70% − 지금처럼) with 95% CI
-    fx0, fx1 = 694.0, 826.0
-    lo_r, hi_r = -0.30, 0.10
-
-    def fxv(v):
-        return fx0 + (fx1 - fx0) * (v - lo_r) / (hi_r - lo_r)
-
-    b.append(T(500, 92, "다른 탑승 조건 (명절 정체)", 16, 800, INK))
-    b.append(T(500, 114, "쉼표(수락 70%) − 지금처럼, %p", FS, 500, INK3))
+    # other occupants: crisis share, 2-hour rule vs 쉼표 (same holiday traffic, same trips per condition)
+    tx0 = 462.0
+    b.append(T(tx0, 92, "다른 탑승 조건 (명절 정체) · 화장실 위기", 16, 800, INK))
+    tcols = [("every2h", "2시간마다", 616.0), ("shimpyoP07", "쉼표 70%", 703.0), ("shimpyoP10", "쉼표 100%", 790.0)]
     others = [("child4_holiday_sigma0.3", "아이 4세"), ("elderly_holiday_sigma0.3", "어르신"),
-              ("oabDriver_holiday_sigma0.3", "과민성 방광"), ("adults_holiday_sigma0.3", "어른 2명")]
-    oy0 = 146.0
-    b.append(L(fxv(0), oy0 - 16, fxv(0), oy0 + 3 * 36 + 14, INK3, 1.2))
-    b.append(T(fxv(0), oy0 + 3 * 36 + 34, "0", FS, 500, INK3, "middle"))
-    b.append(T(fxv(-0.2), oy0 + 3 * 36 + 34, "−20", FS, 500, INK3, "middle"))
+              ("oabDriver_holiday_sigma0.3", "과민성 방광 운전자"), ("adults_holiday_sigma0.3", "어른 2명")]
+    hy, rh = 126.0, 32.0
+    b.append(R(660, hy - 22, W - 14 - 660, 38 + rh * (len(others) - 1) + 34, 10, TINT))
+    for key, label, cx_ in tcols:
+        ours = key.startswith("shimpyo")
+        b.append(T(cx_, hy, label, FS, 800 if ours else 600, ACCENT_D if ours else INK3, "middle"))
+    b.append(L(tx0, hy + 10, W - 14, hy + 10, LINE2, 1))
     for i, (key, label) in enumerate(others):
-        c = cond[key]
-        diff = c["vsNowLike"]["shimpyoP07"]["crisisOver30MinShareDiff"]
-        y = oy0 + i * 36
-        now = c["policies"]["nowLike"]["crisisOver30MinShare"]["value"]
-        withs = c["policies"]["shimpyoP07"]["crisisOver30MinShare"]["value"]
-        b.append(T(500, y + 5, label, FS, 600, INK2))
-        b.append(T(fx0 - 10, y + 5, "%d→%d%%" % (round(now * 100), round(withs * 100)), FS, 700, INK, "end"))
-        lo, hi = diff["ci95"]
-        b.append(L(fxv(lo), y, fxv(hi), y, ACCENT, 2))
-        b.append(C(fxv(diff["mean"]), y, 5.5, ACCENT, WHITE, 1.5))
+        y = hy + 38 + i * rh
+        b.append(T(tx0, y, label, FS, 600, INK2))
+        for pkey, _, cx_ in tcols:
+            v = cond[key]["policies"][pkey]["crisisOver30MinShare"]["value"]
+            ours = pkey.startswith("shimpyo")
+            b.append(T(cx_, y, "%d%%" % round(v * 100), 15.5, 800 if ours else 500, ACCENT_D if ours else INK2,
+                       "middle"))
 
     # cost: compare with the recommended behaviour (2-hour rest), not with "never rest"
     vs = main["vsNowLike"]
@@ -1196,16 +1297,13 @@ def fig_effect():
     d_min = vs["shimpyoP07"]["extraTripMin"]["mean"] - vs["every2h"]["extraTripMin"]["mean"]
     r2h = pp["every2h"]["crisisOver30MinShare"]["value"]
     r07 = pp["shimpyoP07"]["crisisOver30MinShare"]["value"]
-    now_min = vs["shimpyoP07"]["extraTripMin"]["mean"]
-    rest_min = vs["every2h"]["extraTripMin"]["mean"]
-    long_share = pp["nowLike"]["stretchOver2h30Share"]["value"]
     cy = y0 + 4 * (bh + gap) + 60
     b.append(TS(16, cy, [("대가 ", 800, INK),
                          ("권장 습관인 2시간마다 휴게소와 비교하면, 쉼표(수락 70%%)는 여정당 정차 %.2f회·%d분이 늘고 "
                           "위기는 %d%%→%d%%로 준다." % (d_stops, round(d_min), round(r2h * 100), round(r07 * 100)),
                           500, INK2)], 15.5))
-    b.append(T(16, cy + 23, "지금처럼보다 늘어나는 %d분 중 %d분은 지침이 권하는 2시간 휴식 몫이다(지금처럼은 %d%%의 여정에서 "
-               "2시간 30분 넘게 쉬지 않았다)." % (round(now_min), round(rest_min), round(long_share * 100)), 15.5, 500, INK2))
+    b.append(T(16, cy + 23, "2시간마다 규칙은 운전자가 빠짐없이 지킨다고 가정한 값이다. 정차 횟수·소요 시간·연속 주행은 "
+               "본문 표에 함께 적었다.", 15.5, 500, INK2))
     free_max = max(c["policies"][k]["crisisOver30MinShare"]["value"]
                    for c in d["conditions"] if c["traffic"] == "free" for k in c["policies"])
     free_note = ("정체가 없으면 네 정책 모두 0%. " if free_max == 0

@@ -188,6 +188,6 @@ private val ATTRIBUTION = listOf(
     "공중화장실·비상벨·CCTV·주유소 등: 행정안전부 지방행정 인허가·생활편의 데이터(LOCALDATA)",
     "휴게소·졸음쉼터: 한국도로공사, 전국휴게소정보·졸음쉼터 표준데이터 (공공데이터포털)",
     "주차장: 전국주차장정보표준데이터, 각 지방자치단체 (공공데이터포털)",
-    "© OpenStreetMap contributors, ODbL 1.0: 고속도로 선형, 민자고속도로 휴게소·졸음쉼터, 주유소 일부",
+    "© OpenStreetMap contributors, ODbL 1.0 (openstreetmap.org/copyright): 고속도로 선형, 민자고속도로 휴게소·졸음쉼터, 주유소·LPG충전소, 공중화장실 일부",
     "아이콘: Google Material Symbols, Apache License 2.0",
 )

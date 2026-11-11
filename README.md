@@ -49,6 +49,17 @@ adb shell am start -n dev.shimpyo.app/.MainActivity --es demo urgent    # 밤 11
 ./gradlew -p rest-engine test       # 판단 엔진 단위 테스트 (JVM)
 ```
 
+## 기획서 수치와 그림 재현
+
+기획서의 분석과 시뮬레이션은 저장소 코드로 다시 만들 수 있습니다.
+
+```
+python3 -I -B tools/plan/analysis.py     # 경부고속도로 화장실 공백, 공중화장실 시설 비율 → docs/plan/data/analysis.json
+./gradlew -p rest-engine runSim          # 판단 엔진으로 돌린 귀성길 시뮬레이션(조건·정책마다 5,000회, 약 20분)
+                                         #   → docs/plan/data/effect_sim.json, engine_curves.json (-PsimTrips=500이면 빠르게)
+python3 -I tools/plan/figures.py         # 기획서 그림 → docs/plan/assets/
+```
+
 ## 구조
 
 - `rest-engine/` 판단 엔진 (순수 Kotlin, 단위 테스트) — 설명: `rest-engine/README.md`
