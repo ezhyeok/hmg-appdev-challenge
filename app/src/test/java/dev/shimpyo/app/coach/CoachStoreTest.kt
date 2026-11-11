@@ -17,9 +17,9 @@ class CoachStoreTest {
     @Test
     fun commandsSentBeforeCollectorStartsAreDelivered() = runBlocking {
         CoachStore.send(UiCommand.Demo("holiday"))
-        CoachStore.send(UiCommand.DismissUrgent)
+        CoachStore.send(UiCommand.DismissUrgent(0))
         val got = withTimeout(2_000) { CoachStore.commands.take(2).toList() }
-        assertEquals(listOf(UiCommand.Demo("holiday"), UiCommand.DismissUrgent), got)
+        assertEquals(listOf(UiCommand.Demo("holiday"), UiCommand.DismissUrgent(0)), got)
     }
 
     @Test

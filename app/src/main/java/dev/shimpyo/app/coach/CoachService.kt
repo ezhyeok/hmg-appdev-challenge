@@ -445,7 +445,7 @@ class CoachService : PleosForegroundService() {
         serviceScope.launch {
             guard("command") {
                 when (command) {
-                    UiCommand.Urgent -> urgent()
+                    is UiCommand.Urgent -> urgent()
                     UiCommand.Listen -> listenAndHandle()
                     UiCommand.MakePlan -> makePlan()
                     is UiCommand.Answer -> answer(command.promptId, command.accept)
@@ -453,7 +453,10 @@ class CoachService : PleosForegroundService() {
                     is UiCommand.SetOccupants -> setOccupants(command.occupants)
                     UiCommand.DescribeOccupants -> describeOccupants()
                     is UiCommand.Demo -> startDemo(command.scenario)
-                    UiCommand.DismissUrgent -> CoachStore.update { copy(urgent = null) }
+                    is UiCommand.DismissUrgent -> CoachStore.update { copy(urgent = null) }
+                    UiCommand.StopVoice -> voice.stop()
+                    UiCommand.DismissGoToResult -> CoachStore.update { copy(goToResult = null) }
+                    UiCommand.PermissionsChanged -> Unit
                     UiCommand.ClearRecords -> clearRecords()
                     UiCommand.ProfileChanged -> engineLock.withLock { engine.setProfile(profileFor(CoachStore.state.value.occupants)) }
                 }

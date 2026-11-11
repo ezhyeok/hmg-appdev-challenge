@@ -155,12 +155,12 @@ fun ShimpyoContent(
     fun requestUrgent() {
         urgentFailed = false
         urgentPending = true
-        send(UiCommand.Urgent)
+        send(UiCommand.Urgent(0))
     }
     fun closeUrgent() {
         val p = current.prompt
         if (p?.kind == PromptKind.URGENT_RESULT) send(UiCommand.Answer(p.id, false))
-        if (current.urgent != null) send(UiCommand.DismissUrgent)
+        if (current.urgent != null) send(UiCommand.DismissUrgent(0))
         urgentPending = false
         urgentFailed = false
         pickingId = null
