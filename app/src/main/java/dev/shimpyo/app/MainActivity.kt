@@ -103,7 +103,7 @@ class MainActivity : ComponentActivity() {
 
     /**
      * 서비스를 시작한다. 실행 인텐트에서 넘기는 것은 [LaunchExtras.pick]이 고른 값뿐이다: 시연 전환(`demo`, 이름을 확인해서)과,
-     * debug 빌드에서만 개발용 점검 옵션. 받은 extras 묶음을 통째로 넘기지 않는다 (닫힘 검증 UI-N1: 제출용 빌드에서도
+     * debug 빌드에서만 개발용 점검 옵션(selftest·route·verify·probe). 받은 extras 묶음을 통째로 넘기지 않는다 (닫힘 검증 UI-N1: 제출용 빌드에서도
      * `--ez selftest true`가 좌석·창문을 움직였다). 한 인텐트는 한 번만 넘긴다.
      */
     private fun startCoach() {
@@ -116,10 +116,12 @@ class MainActivity : ComponentActivity() {
                 demo = runCatching { received.getStringExtra(LaunchExtras.DEMO) }.getOrNull(),
                 flag = { name -> runCatching { received.getBooleanExtra(name, false) }.getOrDefault(false) },
                 debugBuild = BuildConfig.DEBUG,
+                text = { name -> runCatching { received.getStringExtra(name) }.getOrNull() },
             )
             picked.demo?.let { forward.putExtra(LaunchExtras.DEMO, it) }
             picked.devFlags.forEach { forward.putExtra(it, true) }
-            if (!picked.isEmpty) Log.i(TAG, "launch options: demo=${picked.demo} dev=${picked.devFlags}")
+            picked.devTexts.forEach { (name, value) -> forward.putExtra(name, value) }
+            if (!picked.isEmpty) Log.i(TAG, "launch options: demo=${picked.demo} dev=${picked.devFlags + picked.devTexts.keys}")
         }
         PleosForegroundService.start(this, CoachService::class.java, forward)
     }

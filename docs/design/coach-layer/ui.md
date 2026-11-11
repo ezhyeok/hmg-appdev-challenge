@@ -201,7 +201,7 @@ compact 세로 윈도에서 결과 카드는 `FitColumn`(줄을 빼는 판단은
 없는 번호(null)는 빈 LongArray, 있는 번호는 한 칸짜리 LongArray로 저장한다(닫힘 UI-N4). 예전에는 '번호는 0 이상'이라 보고 null을 -1로 적어서, 코치가 음성으로 연 요청(음수 번호)을 따르던 화면이 다시 만들어지면 번호를 잃었다.
 
 `MainActivity`:
-- 런처라 exported다. 실행 인텐트에서는 `LaunchExtras.pick`이 고른 값만 서비스로 넘긴다(닫힘 UI-N1): 시연 전환 `demo`(시연 이름이 아니면 "off"로 바꾼다. 화면 시연 패널과 같은 일만 한다)는 어느 빌드에서나, 개발용 점검 옵션(`selftest`·`route`·`verify`)은 debug 빌드에서만. 받은 extras 묶음을 통째로 넘기지 않는다. 예전에는 제출용 빌드에서도 `am start … --ez selftest true`가 운전석 등받이·창문·실내등을 움직였다.
+- 런처라 exported다. 실행 인텐트에서는 `LaunchExtras.pick`이 고른 값만 서비스로 넘긴다(닫힘 UI-N1): 시연 전환 `demo`(시연 이름이 아니면 "off"로 바꾼다. 화면 시연 패널과 같은 일만 한다)는 어느 빌드에서나, 개발용 점검 옵션(`selftest`·`route`·`verify`, 문자열 `probe`)은 debug 빌드에서만. 받은 extras 묶음을 통째로 넘기지 않는다. 서비스도 같은 이름을 빌드 종류로 다시 거른다(코치 서비스의 `DevHooks`): 두 목록이 어긋나면 debug 점검이 조용히 돌지 않으므로 `ReleaseSurfaceTest.theActivityForwardsExactlyTheExtrasTheServiceReads`가 견준다(`DevHooks`가 없는 가지에서는 건너뛴다). 예전에는 제출용 빌드에서도 `am start … --ez selftest true`가 운전석 등받이·창문·실내등을 움직였다.
 - 서비스는 권한과 관계없이 화면이 보일 때 시작한다(이미 돌면 다시 부르지 않음). 서비스가 멈췄다가 화면으로 돌아오면 다시 시작한다.
 - 실행 중 권한(차속·위치)은 정차 중임을 실제로 읽었을 때 한 번만 묻는다(`PermissionPolicy`). 주행 중(모를 때 포함)에는 시스템 권한 창을 띄우지 않고 정차할 때까지 기다린다. 다시 만들어져도 다시 묻지 않는다.
 - 빠진 권한이 새로 허용되면(권한 창 결과, 또는 설정 앱에서 허용하고 돌아옴) `PermissionsChanged`를 보낸다.

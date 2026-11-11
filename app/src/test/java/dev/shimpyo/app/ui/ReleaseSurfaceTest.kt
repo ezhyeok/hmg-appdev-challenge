@@ -94,10 +94,11 @@ class ReleaseSurfaceTest {
         assertEquals("off", LaunchExtras.pick("", everything, debugBuild = false).demo)
         assertNull(LaunchExtras.pick(null, everything, debugBuild = false).demo)
         assertTrue(LaunchExtras.pick(null, everything, debugBuild = false).isEmpty)
-        // 제출용 빌드는 다른 extra를 읽지도 않는다
+        // 제출용 빌드는 다른 extra를 읽지도 않는다 (Boolean도 문자열도)
         val asked = ArrayList<String>()
-        LaunchExtras.pick(null, { asked += it; true }, debugBuild = false)
+        val release = LaunchExtras.pick(null, { asked += it; true }, debugBuild = false, text = { asked += it; "restroom" })
         assertTrue(asked.toString(), asked.isEmpty())
+        assertTrue(release.isEmpty)
     }
 
     @Test
@@ -107,8 +108,32 @@ class ReleaseSurfaceTest {
         assertEquals(listOf("selftest", "route"), r.devFlags)
         assertNull(r.demo)
         val asked = ArrayList<String>()
-        LaunchExtras.pick(null, { asked += it; false }, debugBuild = true)
-        assertEquals(listOf("selftest", "route", "verify"), asked)
+        LaunchExtras.pick(null, { asked += it; false }, debugBuild = true, text = { asked += it; null })
+        assertEquals(listOf("selftest", "route", "verify", "probe"), asked)
+        // 문자열 옵션(SDK 실험 이름)도 debug에서만, 길이를 잘라 넘긴다. 빈 값은 넘기지 않는다
+        val probe = LaunchExtras.pick(null, { false }, debugBuild = true, text = { if (it == "probe") "waypoint-twice" else "x" })
+        assertEquals(mapOf("probe" to "waypoint-twice"), probe.devTexts)
+        assertEquals(LaunchExtras.MAX_TEXT, LaunchExtras.pick(null, { false }, true, text = { "p".repeat(500) }).devTexts.getValue("probe").length)
+        assertTrue(LaunchExtras.pick(null, { false }, true, text = { " " }).isEmpty)
+    }
+
+    @Test
+    fun theActivityForwardsExactlyTheExtrasTheServiceReads() {
+        // 서비스는 개발용 옵션의 이름을 따로 갖고 있다(코치 서비스의 DevHooks, 앱 담당). 화면 쪽 목록과 어긋나면 debug 점검이
+        // 조용히 돌지 않는다. DevHooks가 들어오기 전(이 가지)에는 건너뛴다
+        val hooks = try {
+            Class.forName("dev.shimpyo.app.coach.DevHooks")
+        } catch (e: ClassNotFoundException) {
+            org.junit.Assume.assumeTrue("DevHooks가 아직 없다", false)
+            return
+        }
+        val extras = try {
+            hooks.getMethod("getEXTRAS").invoke(hooks.getField("INSTANCE").get(null)) as List<*>
+        } catch (e: ReflectiveOperationException) {
+            fail("DevHooks.EXTRAS를 읽지 못했다 (이름이 바뀌었으면 LaunchExtras와 이 시험을 함께 고칠 것): $e")
+            return
+        }
+        assertEquals(extras.toSet(), (listOf(LaunchExtras.DEMO) + LaunchExtras.DEV_FLAGS + LaunchExtras.DEV_TEXTS).toSet())
     }
 
     @Test
