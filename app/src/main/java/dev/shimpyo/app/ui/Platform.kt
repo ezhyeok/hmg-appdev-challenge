@@ -11,6 +11,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.platform.LocalContext
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import dev.hmg.pleoskit.UxRestrictionWatcher
 import dev.hmg.pleoskit.UxRestrictions
@@ -69,6 +71,16 @@ fun rememberUxRestrictions(): UxRestrictions {
 /** 시스템 뒤로(CCP Back 포함) */
 @Composable
 fun PlatformBackHandler(enabled: Boolean = true, onBack: () -> Unit) = BackHandler(enabled, onBack)
+
+/**
+ * 화면이 가려질 때(다른 앱이 앞으로 옴, 뒤로 보냄: 액티비티 ON_STOP)와 다시 보일 때(ON_START) 부른다.
+ * 가려진 동안에는 Compose가 다시 그리지 않으므로(프레임 시계가 멈춘다) 상태 변화로는 알 수 없다: 그 순간에 바로 부른다.
+ */
+@Composable
+fun PlatformVisibilityEffect(onHidden: () -> Unit, onShown: () -> Unit) {
+    LifecycleEventEffect(Lifecycle.Event.ON_STOP) { onHidden() }
+    LifecycleEventEffect(Lifecycle.Event.ON_START) { onShown() }
+}
 
 private class AndroidHost(private val activity: Activity?, private val app: ShimpyoApp) : AppHost {
     override val prefs: PrefsState = AndroidPrefs(app.settings, app.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE))

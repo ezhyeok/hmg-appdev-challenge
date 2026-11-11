@@ -11,6 +11,7 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -147,9 +148,13 @@ fun ShimpyoContent(
         }
     }
     // 계획 화면이 보이는 동안만 코치가 계획을 고쳐 세운다. 다른 화면으로 가거나 주행을 시작하면(주행 화면만 그린다) 닫고,
-    // 다시 열면 이어서 요청한다 (리뷰 R-F12: 한 번 요청한 계획을 화면을 떠난 뒤에도 30초마다 다시 세웠다)
+    // 다시 열면 이어서 요청한다 (리뷰 R-F12: 한 번 요청한 계획을 화면을 떠난 뒤에도 30초마다 다시 세웠다).
+    // 앱이 가려질 때(경유지를 넣어 내비가 앞으로 옴, 뒤로 보냄)도 바로 닫는다: 가려진 동안에는 화면이 다시 그려지지 않아
+    // 그 뒤의 주행 시작을 알 수 없다. 다시 보이면 그때의 화면으로 다시 판단한다
+    var shownAgain by remember { mutableIntStateOf(0) }
+    PlatformVisibilityEffect(onHidden = { actions.planVisibility(false) }, onShown = { shownAgain++ })
     val planVisible = shown == Screen.PLAN
-    LaunchedEffect(planVisible, state.plan != null) { actions.planVisibility(planVisible) }
+    LaunchedEffect(planVisible, state.plan != null, shownAgain) { actions.planVisibility(planVisible) }
 
     // 급해: 요청 번호로 코치의 진행 상태를 짝짓는다 (UrgentModel). 답 기다림 시간 초과는 그 번호에만 붙이고 저장한다:
     // Boolean 하나로 두면 [다시 시도]로 새 번호를 보낸 첫 프레임에 앞 요청의 '초과'가 보이고, 다시 만들어지면 8초를 또 기다렸다
