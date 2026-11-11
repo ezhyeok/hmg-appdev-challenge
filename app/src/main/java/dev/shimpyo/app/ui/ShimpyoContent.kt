@@ -49,6 +49,7 @@ import dev.shimpyo.app.ui.urgent.UrgentStatus
 import dev.shimpyo.app.ui.urgent.adoptUrgentRequest
 import dev.shimpyo.app.ui.urgent.rememberDismissed
 import dev.shimpyo.app.ui.urgent.settleDismissed
+import dev.shimpyo.app.ui.urgent.urgentQuestion
 import dev.shimpyo.app.ui.urgent.urgentView
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.GoToOutcome
@@ -188,11 +189,11 @@ fun ShimpyoContent(
             }
         }
     }
-    LaunchedEffect(ui.goToPendingId) {
-        if (ui.goToPendingId != null) {
+    LaunchedEffect(ui.goToSentId) {
+        if (ui.goToSentId != null) {
             delay(GOTO_TIMEOUT_MS)
-            if (ui.goToPendingId != null) {
-                ui.goToPendingId = null
+            if (ui.goToSentId != null) {
+                ui.goToSentId = null
                 overlays.toast(NO_GOTO_RESULT)
             }
         }
@@ -203,7 +204,7 @@ fun ShimpyoContent(
         val r = goTo ?: return@LaunchedEffect
         if (r.at == ui.seenGoToAt) return@LaunchedEffect
         ui.seenGoToAt = r.at
-        if (ui.goToPendingId == r.stop.id) ui.goToPendingId = null
+        if (ui.goToSentId == r.stop.id) ui.goToSentId = null
         val view = urgent
         if (ui.pickingId == r.stop.id) {
             ui.pickingId = null
@@ -245,7 +246,7 @@ fun ShimpyoContent(
                         onRetry = { actions.requestUrgent(replacing = urgent.requestId) },
                         maxChars = restriction.maxChars,
                         cabinSupported = state.cabinSupported,
-                        question = state.prompt?.takeIf { state.serviceRunning && it.kind != PromptKind.URGENT_RESULT },
+                        question = urgentQuestion(state),
                         onAnswer = { p, accept -> actions.answer(p, accept) },
                         badge = badge,
                         badgeShort = badgeShort,
@@ -299,7 +300,7 @@ fun ShimpyoContent(
                                     Screen.PLAN -> PlanScreen(
                                         state = state,
                                         planRequested = ui.planRequested,
-                                        goToPendingId = ui.goToPendingId,
+                                        goToPendingId = ui.goToSentId,
                                         onMakePlan = { actions.makePlan() },
                                         onGoTo = { actions.goTo(it) },
                                     )
@@ -347,7 +348,7 @@ fun ShimpyoContent(
  * Kotlin 2.0.0 Compose 컴파일러에서 기억되지 않을 수 있었다).
  */
 @Stable
-private class ContentActions(
+internal class ContentActions(
     private val ui: ContentState,
     private val host: AppHost,
     private val overlays: OverlayState,
@@ -400,16 +401,16 @@ private class ContentActions(
 
     /** 계획 화면의 경유지 넣기. 결과(또는 시간 초과)까지 같은 요청을 막는다 */
     fun goTo(stop: StopCandidate) {
-        if (ui.goToPendingId != null) return
-        ui.goToPendingId = stop.id
+        if (ui.goToSentId != null) return
+        ui.goToSentId = stop.id
         host.send(UiCommand.GoTo(stop))
         overlays.toast("${Labels.withObject(shortStopName(stop.name))} 내비에 넣는 중이에요")
     }
 
     /** 주행 화면의 경유지 실패 카드 [다시 시도] */
     fun retryGoTo(stop: StopCandidate) {
-        if (ui.goToPendingId != null) return
-        ui.goToPendingId = stop.id
+        if (ui.goToSentId != null) return
+        ui.goToSentId = stop.id
         host.send(UiCommand.DismissGoToResult)
         host.send(UiCommand.GoTo(stop))
     }
@@ -429,6 +430,13 @@ private class ContentActions(
         ui.planRequested = true
         host.send(UiCommand.MakePlan)
     }
+
+    // RED 단계 자리 표시
+    fun planVisibility(visible: Boolean) = Unit
+
+    fun describe(m: dev.shimpyo.app.ui.components.DescribeModel) = host.send(UiCommand.DescribeOccupants)
+
+    fun setAsleep(occupantId: String, asleep: Boolean) = Unit
 }
 
 private const val GOTO_TIMEOUT_MS = 12_000L

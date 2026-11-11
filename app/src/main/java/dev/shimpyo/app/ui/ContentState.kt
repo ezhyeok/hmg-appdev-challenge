@@ -19,7 +19,7 @@ import dev.shimpyo.coach.voice.Hangul
  * @property urgentResultsFor 옛 코치에서 결과 목록을 이미 보인 요청 (그 뒤 목록이 지워지면 끝난 것)
  * @property ackExpiredFor 코치 답을 기다리다 시간을 넘긴 요청 (다시 만들어져도 '찾는 중'으로 돌아가지 않게)
  * @property pickingId 급해 결과에서 고르고 결과를 기다리는 곳
- * @property goToPendingId 계획 화면·다시 시도에서 내비에 넣고 결과를 기다리는 곳
+ * @property goToSentId 계획 화면·다시 시도에서 내비에 넣고 결과를 기다리는 곳
  * @property seenGoToAt 이미 알린 들르기 결과의 시각 (다시 만들어질 때 같은 토스트를 또 띄우지 않게)
  * @property planRequestedGen 계획을 요청한 때의 CoachUiState.planGeneration (이보다 커지면 새 계획이 왔다)
  */
@@ -33,9 +33,10 @@ class ContentState(
     urgentResultsFor: Long? = null,
     ackExpiredFor: Long? = null,
     pickingId: String? = null,
-    goToPendingId: String? = null,
+    goToSentId: String? = null,
     seenGoToAt: Long = 0L,
     planRequestedGen: Long = 0L,
+    planWanted: Boolean = false,
 ) {
     var screen by mutableStateOf(screen)
     var demoReturn by mutableStateOf(demoReturn)
@@ -45,9 +46,10 @@ class ContentState(
     var urgentResultsFor by mutableStateOf(urgentResultsFor)
     var ackExpiredFor by mutableStateOf(ackExpiredFor)
     var pickingId by mutableStateOf(pickingId)
-    var goToPendingId by mutableStateOf(goToPendingId)
+    var goToSentId by mutableStateOf(goToSentId)
     var seenGoToAt by mutableStateOf(seenGoToAt)
     var planRequestedGen by mutableStateOf(planRequestedGen)
+    var planWanted by mutableStateOf(planWanted)
 
     companion object {
         /** Bundle에 넣을 수 있게 null은 빈 값(-1, "")으로, 번호 묶음은 LongArray로 바꿔 저장한다. 요청 번호는 0 이상이다 */
@@ -56,7 +58,7 @@ class ContentState(
                 listOf(
                     it.screen.name, it.demoReturn.name, it.planRequested,
                     it.urgentRequested ?: -1L, it.dismissedUrgent.toLongArray(), it.urgentResultsFor ?: -1L, it.ackExpiredFor ?: -1L,
-                    it.pickingId.orEmpty(), it.goToPendingId.orEmpty(), it.seenGoToAt, it.planRequestedGen,
+                    it.pickingId.orEmpty(), it.goToSentId.orEmpty(), it.seenGoToAt, it.planRequestedGen, it.planWanted,
                 )
             },
             restore = { v ->
@@ -69,9 +71,10 @@ class ContentState(
                     urgentResultsFor = (v[5] as Long).takeIf { it >= 0 },
                     ackExpiredFor = (v[6] as Long).takeIf { it >= 0 },
                     pickingId = (v[7] as String).ifEmpty { null },
-                    goToPendingId = (v[8] as String).ifEmpty { null },
+                    goToSentId = (v[8] as String).ifEmpty { null },
                     seenGoToAt = v[9] as Long,
                     planRequestedGen = v[10] as Long,
+                    planWanted = v[11] as Boolean,
                 )
             },
         )
@@ -93,3 +96,10 @@ fun goToToast(r: GoToResult, shownOnCard: Boolean): String? {
         GoToOutcome.FAILED -> "${Hangul.eulReul(name)} 넣지 못했어요. 다시 시도해 주세요"
     }
 }
+
+/** RED 단계 자리 표시 */
+data class GoToBusy(val stopId: String, val name: String?)
+
+fun goToBusy(state: dev.shimpyo.coach.CoachUiState, sentId: String?): GoToBusy? = sentId?.let { GoToBusy(it, null) }
+
+fun goToProgressText(busy: GoToBusy): String = ""

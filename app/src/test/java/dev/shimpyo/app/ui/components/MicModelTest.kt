@@ -48,4 +48,45 @@ class MicModelTest {
         // 말하는 중이면 인식이 안 돼도 멈출 수는 있다
         assertEquals(MicAction.STOP, micModel(VoiceState.SPEAKING, true, false, true).action)
     }
+
+    @Test
+    fun ttsDownButSttUpStillListens() {
+        // 닫힘 검증 UI-12: VoiceAgent는 TTS가 안 붙으면 STT가 붙었어도 voice = UNAVAILABLE을 올린다. 예전 micModel은 UNAVAILABLE을
+        // '인식 불가'로 읽어 사선 마이크를 보이고 Listen을 보내지 않았다. 코어는 STT만 되면 듣는다 (ui.md 3.6의 표)
+        val m = micModel(VoiceState.UNAVAILABLE, ttsAvailable = false, sttAvailable = true, voiceGuidance = true)
+        assertEquals(MicAction.LISTEN, m.action)
+        assertEquals("음성 안내 꺼짐", m.status)
+        assertNotEquals(MicIcon.MIC_OFF, m.icon)
+        // 둘 다 되는데 표시만 UNAVAILABLE로 남은 경우(듣기 뒤 덮어쓰기 전)도 들을 수 있다
+        assertEquals(MicAction.LISTEN, micModel(VoiceState.UNAVAILABLE, ttsAvailable = true, sttAvailable = true, voiceGuidance = true).action)
+        // 인식이 안 되면 여전히 이유를 알린다
+        assertEquals(MicAction.EXPLAIN, micModel(VoiceState.UNAVAILABLE, ttsAvailable = true, sttAvailable = false, voiceGuidance = true).action)
+    }
+
+    @Test
+    fun describeByVoiceSaysWhyItCannotBeUsed() {
+        // 탑승자 화면의 [말로 설정]은 묻고(TTS) 듣는다(STT): 음성 안내가 켜져 있고 둘 다 돼야 한다.
+        // 예전에는 안 될 때 눌러도 조용히 아무 일도 없었다 (UI-12). 버튼이 이유를 말한다
+        val ok = describeModel(VoiceState.IDLE, ttsAvailable = true, sttAvailable = true, voiceGuidance = true)
+        assertEquals(MicAction.LISTEN, ok.action)
+        assertEquals("말로 설정", ok.label)
+        assertNull(ok.reason)
+
+        val guidanceOff = describeModel(VoiceState.IDLE, ttsAvailable = true, sttAvailable = true, voiceGuidance = false)
+        assertEquals(MicAction.EXPLAIN, guidanceOff.action)
+        assertEquals("설정에서 음성 안내를 켜면 말로 설정할 수 있어요", guidanceOff.reason)
+        val noStt = describeModel(VoiceState.IDLE, ttsAvailable = true, sttAvailable = false, voiceGuidance = true)
+        assertEquals(MicAction.EXPLAIN, noStt.action)
+        assertEquals("지금은 음성 인식을 쓸 수 없어요", noStt.reason)
+        val noTts = describeModel(VoiceState.UNAVAILABLE, ttsAvailable = false, sttAvailable = true, voiceGuidance = true)
+        assertEquals(MicAction.EXPLAIN, noTts.action)
+        assertEquals("지금은 음성 안내를 쓸 수 없어요", noTts.reason)
+
+        // 묻거나 듣거나 해석하는 중이면 누르면 멈춘다 (마이크와 같은 규칙)
+        assertEquals(MicAction.STOP, describeModel(VoiceState.LISTENING, true, true, true).action)
+        assertEquals("듣는 중", describeModel(VoiceState.LISTENING, true, true, true).label)
+        assertEquals("말하는 중", describeModel(VoiceState.SPEAKING, true, true, true).label)
+        assertEquals("생각하는 중", describeModel(VoiceState.THINKING, true, true, true).label)
+        assertEquals(MicAction.STOP, describeModel(VoiceState.SPEAKING, true, false, false).action)
+    }
 }

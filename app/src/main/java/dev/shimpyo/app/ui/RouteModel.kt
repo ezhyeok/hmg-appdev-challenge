@@ -59,6 +59,11 @@ fun remainingCongestion(c: CongestionSegment): CongestionSegment {
     return c.copy(startDistanceM = 0.0, lengthM = end, durationS = c.durationS * end / c.lengthM)
 }
 
+/** RED 단계 자리 표시: 묶지도 거르지도 않는다 (지금 화면의 동작) */
+const val JAM_JOIN_M = 0.0
+fun displayJams(congestion: List<CongestionSegment>): List<CongestionSegment> =
+    congestion.map(::remainingCongestion).filter { it.lengthM > 0.0 }
+
 /** 정체 이름표: "정체 20분" (남은 부분 기준) */
 fun congestionLabel(c: CongestionSegment): String = "정체 ${Labels.duration((remainingCongestion(c).durationS / 60.0).roundToInt())}"
 

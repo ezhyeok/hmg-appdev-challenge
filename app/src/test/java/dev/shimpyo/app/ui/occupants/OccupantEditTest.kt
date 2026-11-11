@@ -3,10 +3,16 @@ package dev.shimpyo.app.ui.occupants
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
-/** 탑승자 편집 (UI 감사 #21, #23) */
+/** 탑승자 편집 (UI 감사 #21·#23), 평소 화장실 간격(FIXLIST U3), 자는 중 표시(U4) */
 class OccupantEditTest {
+
+    private val driver = Occupant("driver", OccupantType.ADULT, label = "운전자")
+    private val kid = Occupant("k", OccupantType.CHILD, ageYears = 7)
 
     @Test
     fun ageInLabelFollowsStepper() {
@@ -29,5 +35,78 @@ class OccupantEditTest {
             Occupant("o", OccupantType.OAB),
         )
         assertEquals(listOf("driver", "k"), withoutHealth(list).map { it.id })
+    }
+
+    // ------------------------------------------------------------ 평소 간격 (U3)
+
+    @Test
+    fun usualIntervalChoicesSetTheOverrideAndAutoClearsIt() {
+        assertEquals(listOf("자동", "1시간", "1시간 30분", "2시간", "2시간 30분", "3시간"), INTERVAL_CHOICES.map(::intervalChoiceLabel))
+        assertEquals(120.0, withInterval(driver, 120).intervalOverrideMin!!, 0.0)
+        // 자동 = 유형 기본값으로 돌아간다 (엔진은 null이면 유형별 사전값을 쓴다)
+        assertNull(withInterval(driver.copy(intervalOverrideMin = 120.0), null).intervalOverrideMin)
+        // 이름·나이는 그대로
+        val named = kid.copy(label = "7살 아이")
+        assertEquals(named.copy(intervalOverrideMin = 90.0), withInterval(named, 90))
+    }
+
+    @Test
+    fun infantsAndDogsHaveNoUsualIntervalChoice() {
+        // 영아(기저귀)와 반려견은 '화장실 간격'으로 물을 대상이 아니다: 엔진의 정차 간 상한·유형 기본값만 쓴다
+        assertFalse(canSetInterval(OccupantType.INFANT))
+        assertFalse(canSetInterval(OccupantType.DOG))
+        OccupantType.entries.filter { it != OccupantType.INFANT && it != OccupantType.DOG }.forEach { assertTrue(it.name, canSetInterval(it)) }
+        val baby = Occupant("b", OccupantType.INFANT)
+        assertEquals(baby, withInterval(baby, 60))
+    }
+
+    @Test
+    fun theSelectorShowsWhatIsSetAndHighlightsIt() {
+        assertEquals("평소 간격 · 자동", intervalButtonLabel(driver))
+        assertTrue(intervalSelected(driver, null))
+        assertFalse(intervalSelected(driver, 150))
+        val set = driver.copy(intervalOverrideMin = 120.0)
+        assertEquals("평소 간격 · 2시간", intervalButtonLabel(set))
+        assertTrue(intervalSelected(set, 120))
+        assertFalse(intervalSelected(set, null))
+        // 선택지에 없는 값(다른 경로로 정해진 간격)은 그대로 보이고 어느 선택지도 켜지지 않는다
+        val odd = driver.copy(intervalOverrideMin = 75.0)
+        assertEquals("평소 간격 · 1시간 15분", intervalButtonLabel(odd))
+        assertTrue(INTERVAL_CHOICES.none { intervalSelected(odd, it) })
+    }
+
+    @Test
+    fun theRowAndTheSummarySayTheIntervalInWords() {
+        // 2026-11-12 화면: "운전자 · 어른 · 150분마다", "지금 기준: 150분마다 화장실"
+        assertEquals("어른 · 평소 2시간 30분마다", occupantSubtitle(driver, isDriver = true))
+        assertEquals("어른 · 평소 2시간마다", occupantSubtitle(driver.copy(intervalOverrideMin = 120.0), isDriver = true))
+        assertEquals("평소 1시간 45분마다", occupantSubtitle(kid, isDriver = false))
+        assertEquals("평소 1시간 45분마다 · 자는 중", occupantSubtitle(kid, isDriver = false, asleep = true))
+        // 영아·반려견은 간격을 정하지 않으므로 '평소'를 붙이지 않는다
+        assertEquals("3시간마다", occupantSubtitle(Occupant("b", OccupantType.INFANT), isDriver = false))
+
+        val alone = occupantsSummary(listOf(driver), drivenBy = "driver")!!
+        assertEquals("지금 기준: 2시간 30분마다 화장실", alone.headline)
+        assertEquals("같이 탄 사람을 더하면 기준이 바뀌어요", alone.detail)
+        val set = driver.copy(intervalOverrideMin = 120.0)
+        assertEquals("지금 기준: 2시간마다 화장실", occupantsSummary(listOf(set), drivenBy = "driver")!!.headline)
+        assertEquals("직접 정한 평소 간격이에요", occupantsSummary(listOf(set), drivenBy = "driver")!!.detail)
+
+        val family = occupantsSummary(listOf(set, kid), drivenBy = "k")!!
+        assertEquals("지금 기준: 1시간 45분마다 화장실", family.headline)
+        assertEquals("가장 엄격한 탑승자(아이 7세)를 따라요", family.detail)
+        // 게이지를 정한 사람을 아직 모르면 간격이 가장 짧은 사람
+        assertEquals("지금 기준: 1시간 45분마다 화장실", occupantsSummary(listOf(set, kid), drivenBy = null)!!.headline)
+        // 아이의 간격을 1시간으로 정하면 기준도 따라간다
+        assertEquals("지금 기준: 1시간마다 화장실", occupantsSummary(listOf(set, withInterval(kid, 60)), drivenBy = "k")!!.headline)
+        assertNull(occupantsSummary(emptyList(), drivenBy = null))
+    }
+
+    // ------------------------------------------------------------ 자는 중 (U4)
+
+    @Test
+    fun onlyChildrenCanBeMarkedAsleep() {
+        assertTrue(canSleep(kid))
+        OccupantType.entries.filter { it != OccupantType.CHILD }.forEach { assertFalse(it.name, canSleep(Occupant("x", it))) }
     }
 }

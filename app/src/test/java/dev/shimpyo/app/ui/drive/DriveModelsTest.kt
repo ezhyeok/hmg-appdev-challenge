@@ -318,6 +318,80 @@ class DriveModelsTest {
         assertTrue(stopCard(s, driving = true).chips.size <= 2)
     }
 
+    // ---------------------------------------------------------------- 내비에 넣는 중 (닫힘 검증 UI-N2)
+
+    @Test
+    fun aGoToInFlightShowsProgressAndNoRetryButtons() {
+        // 들르기를 받은 뒤 내비가 확인하는 동안(2026-11-12 에뮬레이터에서 19.5초): '들르기로 한 곳'이 아니라 진행을 보인다
+        val a = stop("a", "안성휴게소", 4.0)
+        val pending = running.copy(next = rec(a, Reason("NEXT_ACCEPTED", "…")), goToPending = a)
+        val card = stopCard(pending, driving = true)
+        assertEquals("내비에 넣는 중…", card.context)
+        assertEquals("안성휴게소", card.title)
+        assertTrue(card.meta!!, card.meta!!.startsWith("4km"))
+        assertEquals(DriveActions.None, driveActions(pending, driving = true))
+        assertEquals(DriveActions.Parked, driveActions(pending, driving = false))
+        // 다시 시도 뒤: 앞 실패 결과가 아직 남아 있어도 넣는 동안은 [다시 시도]를 두지 않는다 (또 누르면 경유지가 둘 들어간다)
+        val retrying = pending.copy(goToResult = GoToResult(a, GoToOutcome.FAILED, 1L), ahead = listOf(a))
+        assertEquals("내비에 넣는 중…", stopCard(retrying, driving = true).context)
+        assertFalse(driveActions(retrying, driving = true) is DriveActions.RetryGoTo)
+        // 질문이 오면 질문이 먼저다 (시간이 급한 결정)
+        val p = Prompt("p", PromptKind.LAST_CHANCE, "들를까요?", stop("o", "옥산휴게소", 3.0), Long.MAX_VALUE)
+        assertEquals("옥산휴게소", stopCard(pending.copy(prompt = p), driving = true).title)
+        assertTrue(driveActions(pending.copy(prompt = p), driving = true) is DriveActions.Answer)
+    }
+
+    @Test
+    fun aPendingStopOtherThanTheRecommendationShowsNoStaleDistance() {
+        // 계획 화면에서 넣은 곳(추천과 다른 곳): 지금 후보에 있으면 그 거리, 없으면 넣을 때의 거리를 지금 거리처럼 보이지 않는다
+        val asked = stop("a", "안성휴게소", 52.0)
+        val b = stop("b", "천안휴게소", 30.0)
+        val s = running.copy(next = rec(b), goToPending = asked, ahead = listOf(stop("a", "안성휴게소", 50.0), b))
+        assertEquals("안성휴게소", stopCard(s, driving = true).title)
+        assertTrue(stopCard(s, driving = true).meta!!, stopCard(s, driving = true).meta!!.startsWith("50km"))
+        assertEquals("경로 위", stopCard(s.copy(ahead = listOf(b)), driving = true).meta)
+        // 정차 중 계획 카드보다도 먼저다
+        val plan = PitStopPlan(listOf(PlannedStop(b, setOf(Purpose.RESTROOM), 10, 1_200.0)), 10)
+        assertEquals("내비에 넣는 중…", stopCard(s.copy(parked = true, plan = plan), driving = false).context)
+        // 코치가 멈췄으면 넣는 중이라고 하지 않는다
+        assertEquals("코치가 멈췄어요", stopCard(s.copy(serviceRunning = false, restroom = Gauge(40, Level.WATCH)), driving = true).title)
+    }
+
+    // ---------------------------------------------------------------- 맥락 요인 (FIXLIST U4·U5)
+
+    @Test
+    fun aSleepingChildAndAMealExplainTheRestroomGauge() {
+        val elapsed = Reason("RESTROOM_ELAPSED", "7살 아이 기준, 마지막 화장실 후 1시간 지났어요")
+        val meal = Reason("RESTROOM_AFTER_MEAL", "식사 뒤라 평소보다 조금 일찍 잡았어요")
+        val asleep = Reason("RESTROOM_ASLEEP", "7살 아이가 자는 동안은 여유를 조금 더 뒀어요")
+        // 늘 붙는 '누구 기준'보다 숫자가 평소와 다른 이유가 먼저다
+        assertEquals("식사 뒤", restroomReason(listOf(elapsed, meal), "7살 아이"))
+        assertEquals("7살 아이 자는 중", restroomReason(listOf(elapsed, meal, asleep), "7살 아이"))
+        // 직접 요청이 가장 먼저
+        assertEquals("7살 아이 요청", restroomReason(listOf(elapsed, asleep, Reason("RESTROOM_VOICED", "7살 아이가 화장실이 필요하다고 했어요")), "7살 아이"))
+        val kid = Occupant("kid", OccupantType.CHILD, ageYears = 7, label = "7살 아이")
+        val s = CoachUiState(serviceRunning = true, occupants = listOf(kid), restroom = Gauge(70, Level.OK, listOf(elapsed, asleep), drivenBy = "kid"))
+        assertEquals("7살 아이 자는 중", restroomGauge(s).reason)
+    }
+
+    // ---------------------------------------------------------------- CCP 기본 포커스 (UI 감사 #13)
+
+    @Test
+    fun defaultFocusGoesToTheAnswerButtonAndBackToUrgentWhenTheQuestionEnds() {
+        val p = Prompt("q7", PromptKind.LAST_CHANCE, "들를까요?", stop("o", "옥산휴게소", 3.0), Long.MAX_VALUE)
+        val asking = driveFocus(DriveActions.Answer(p, "들르기"))
+        assertTrue(asking.primary)
+        val retry = driveFocus(DriveActions.RetryGoTo(stop("a", "안성휴게소", 4.0)))
+        assertTrue(retry.primary)
+        // 질문이 끝나 버튼이 사라지면 급해로 옮긴다: 키가 달라야 포커스를 다시 준다
+        val idle = driveFocus(DriveActions.None)
+        assertFalse(idle.primary)
+        assertFalse(driveFocus(DriveActions.Parked).primary)
+        assertEquals(4, setOf(asking.key, retry.key, idle.key, driveFocus(DriveActions.Parked).key).size)
+        // 다른 질문이면 다시 준다
+        assertNotEquals(asking.key, driveFocus(DriveActions.Answer(p.copy(id = "q8"), "들르기")).key)
+    }
+
     // ---------------------------------------------------------------- 재검토(독립 감사) 결과
 
     @Test

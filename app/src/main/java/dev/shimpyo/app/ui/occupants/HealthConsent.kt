@@ -65,5 +65,26 @@ fun HealthConsentRow(prefs: PrefsState, occupants: List<Occupant>, onSetOccupant
     )
 }
 
+/** RED 단계 자리 표시: 팝업을 연 때의 목록으로 지운다 (UI 감사 #23의 옛 동작) */
+fun onHealthConsentTap(prefs: PrefsState, overlays: dev.shimpyo.app.ui.components.OverlayState, occupants: () -> List<Occupant>, onSetOccupants: (List<Occupant>) -> Unit) {
+    val atOpen = occupants()
+    if (!prefs.healthConsent) {
+        prefs.updateHealthConsent(true)
+    } else if (atOpen.any { it.type.isHealth }) {
+        overlays.confirm(
+            PopupSpec(
+                title = "동의를 철회할까요?",
+                confirmText = "철회하고 지우기",
+                onConfirm = {
+                    prefs.updateHealthConsent(false)
+                    onSetOccupants(withoutHealth(atOpen))
+                },
+            ),
+        )
+    } else {
+        prefs.updateHealthConsent(false)
+    }
+}
+
 /** 동의 철회 때 남길 탑승자 */
 fun withoutHealth(occupants: List<Occupant>): List<Occupant> = occupants.filterNot { it.type.isHealth }

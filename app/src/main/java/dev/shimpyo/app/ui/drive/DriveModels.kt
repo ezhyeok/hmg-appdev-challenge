@@ -392,6 +392,20 @@ sealed interface DriveActions {
     data object None : DriveActions
 }
 
+/**
+ * CCP(로터리)·키 입력의 기본 포커스 (screens.md 1.7, UI 감사 #13). 질문이나 경유지 실패 중이면 왼쪽 버튼([primary]),
+ * 아니면 급해 버튼. [key]가 바뀔 때마다 포커스를 다시 준다: 질문이 끝나 버튼이 사라지면 급해로 옮겨 포커스가 갈 곳을 잃지 않는다.
+ */
+@Immutable
+data class DriveFocus(val key: String, val primary: Boolean)
+
+fun driveFocus(actions: DriveActions): DriveFocus = when (actions) {
+    is DriveActions.Answer -> DriveFocus("answer:${actions.prompt.id}", primary = true)
+    is DriveActions.RetryGoTo -> DriveFocus("retry:${actions.stop.id}", primary = true)
+    DriveActions.Parked -> DriveFocus("parked", primary = false)
+    DriveActions.None -> DriveFocus("none", primary = false)
+}
+
 fun driveActions(state: CoachUiState, driving: Boolean): DriveActions {
     val prompt = state.prompt
     val failed = failedGoTo(state)

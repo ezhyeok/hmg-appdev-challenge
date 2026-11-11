@@ -58,5 +58,8 @@ fun driveRestriction(ux: UxRestrictions): DriveRestriction = when (ux) {
     is UxRestrictions.Unknown -> DriveRestriction.UNKNOWN
 }
 
+/** RED 단계 자리 표시 */
+fun noticeText(notice: String?, restriction: DriveRestriction): String? = notice
+
 /** 주행 중 문구 길이 제한. 넘치면 말줄임표로 자른다 */
 fun limitChars(text: String, max: Int): String = if (text.length <= max || max < 2) text else text.take(max - 1) + "…"

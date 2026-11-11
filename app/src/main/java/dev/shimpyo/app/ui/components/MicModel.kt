@@ -49,5 +49,12 @@ fun micModel(voice: VoiceState, ttsAvailable: Boolean, sttAvailable: Boolean, vo
     }
 }
 
+/** RED 단계 자리 표시 */
+@Immutable
+data class DescribeModel(val label: String, val action: MicAction, val reason: String? = null)
+
+fun describeModel(voice: VoiceState, ttsAvailable: Boolean, sttAvailable: Boolean, voiceGuidance: Boolean): DescribeModel =
+    DescribeModel(if (voice == VoiceState.LISTENING) "듣는 중" else "말로 설정", MicAction.LISTEN)
+
 fun micModel(state: CoachUiState, voiceGuidance: Boolean): MicModel =
     micModel(state.voice, state.ttsAvailable, state.sttAvailable, voiceGuidance)

@@ -101,12 +101,8 @@ fun DriveScreen(
             HumanGauge("피로", ShimpyoIcons.Rest, f.minutes, f.level, f.fraction, f.tick, f.reason, layout.compact, cell, tall = tall)
         }
     }
-    val focusKey = when (actions) {
-        is DriveActions.Answer -> "answer:${actions.prompt.id}"
-        is DriveActions.RetryGoTo -> "retry:${actions.stop.id}"
-        DriveActions.Parked -> "parked"
-        DriveActions.None -> "none"
-    }
+    val focus = driveFocus(actions)
+    val focusKey = focus.key
     val actionRow: @Composable () -> Unit = {
         ActionRow(actions, focusKey, primaryFocus, onAnswer, onRetryGoTo, onDismissGoTo, onOpenPlan, onOpenOccupants)
     }
@@ -148,7 +144,7 @@ fun DriveScreen(
             urgent()
         }
     }
-    RequestFocusOnce(if (actions is DriveActions.Answer || actions is DriveActions.RetryGoTo) primaryFocus else urgentFocus, focusKey)
+    RequestFocusOnce(if (focus.primary) primaryFocus else urgentFocus, focusKey)
 }
 
 /**

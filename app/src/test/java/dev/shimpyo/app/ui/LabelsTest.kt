@@ -126,6 +126,25 @@ class LabelsTest {
     }
 
     @Test
+    fun contextFactorsAndRequestedStopsHaveLabels() {
+        // 엔진 맥락 요인(식사 뒤, 잠든 아이)과 요청에 답한 곳의 코드 (FIXLIST U5, UI-N5). 엔진 main에 들어오기 전이라
+        // ReasonCoverageTest는 아직 이 코드를 보지 못한다: 문구는 여기서 지킨다. 문장은 엔진 CoachTexts의 것
+        assertEquals("식사 뒤", Labels.shortReason(Reason("RESTROOM_AFTER_MEAL", "식사 뒤라 평소보다 조금 일찍 잡았어요")))
+        val asleep = Reason("RESTROOM_ASLEEP", "7살 아이가 자는 동안은 여유를 조금 더 뒀어요")
+        assertEquals("자는 중", Labels.shortReason(asleep))
+        assertEquals("7살 아이 자는 중", Labels.shortReason(asleep, "7살 아이"))
+        // 이름이 길면 이름 없이 (칩 12자)
+        assertEquals("자는 중", Labels.shortReason(asleep, "우리집 둘째 꼬마 손님"))
+        assertEquals("요청하신 화장실", Labels.shortReason(Reason("NEXT_REQUESTED_RESTROOM", "말씀하신 화장실이에요")))
+        assertEquals("요청하신 곳", Labels.shortReason(Reason("NEXT_REQUESTED_CARE", "말씀하신 곳이에요")))
+        listOf("RESTROOM_AFTER_MEAL", "RESTROOM_ASLEEP", "NEXT_REQUESTED_RESTROOM", "NEXT_REQUESTED_CARE").forEach { code ->
+            val s = Labels.shortReason(Reason(code, ""), "민감 탑승자")
+            assertNotNull(code, s)
+            assertTrue("$code → '$s'", s!!.length <= DriveLimits.MAX_CHIP_CHARS)
+        }
+    }
+
+    @Test
     fun readoutAndParticles() {
         assertEquals(Labels.Readout("--", "분"), Labels.readout(null))
         assertEquals(Labels.Readout("119", "분"), Labels.readout(119))

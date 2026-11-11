@@ -5,6 +5,7 @@ import dev.hmg.pleoskit.UxRestrictions
 import dev.shimpyo.app.ui.theme.DriveLimits
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
@@ -48,6 +49,24 @@ class RestrictionTest {
     fun limitCharsKeepsShortTextAndEllipsizesLong() {
         assertEquals("안성휴게소", limitChars("안성휴게소", 10))
         assertEquals("가나다라…", limitChars("가나다라마바", 5))
+    }
+
+    @Test
+    fun aCoachNoticeIsCutToTheRestrictedStringLengthOnlyWhileDriving() {
+        // 리뷰 R-F4: 음성 안내를 끄면 "얼마나 남았어"의 대답이 말로도 화면으로도 나오지 않았다. 코치가 CoachUiState.notice로 올리고
+        // 화면이 잠깐 띄운다. 주행 중에는 다른 문구처럼 LIMIT_STRING_LENGTH의 글자 수를 지킨다
+        val answer = "다음 화장실은 12km 앞 옥산휴게소예요. 쉬지 않고 운전할 수 있는 시간은 약 40분이에요."
+        val limited = driveRestriction(known(true, active = UxRestrictionFlags.LIMIT_STRING_LENGTH, maxLen = 20))
+        assertEquals(20, noticeText(answer, limited)!!.length)
+        assertTrue(noticeText(answer, limited)!!.endsWith("…"))
+        // 정차 중에는 그대로, 제한을 모를 때(= 제한)는 앱 상한(120자)까지
+        assertEquals(answer, noticeText(answer, DriveRestriction.PARKED))
+        assertEquals(answer, noticeText(answer, DriveRestriction.UNKNOWN))
+        assertEquals(DriveLimits.MAX_STRING_LENGTH, noticeText("가".repeat(300), DriveRestriction.UNKNOWN)!!.length)
+        assertEquals(300, noticeText("가".repeat(300), DriveRestriction.PARKED)!!.length)
+        // 없거나 빈 알림은 띄우지 않는다
+        assertNull(noticeText(null, limited))
+        assertNull(noticeText("  ", DriveRestriction.PARKED))
     }
 
     @Test
