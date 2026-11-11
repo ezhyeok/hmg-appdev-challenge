@@ -13,7 +13,7 @@ import kotlin.math.round
  *   S(t) = (b / (b + t^k))^a,  분위수 Q(p) = (b((1 − p)^(−1/a) − 1))^(1/k)
  * - 사전: a0 = 3(가상 관측 3회), b0 = m0^k / (2^(1/a0) − 1). 그러면 사전 예측 중앙값이 프로필 중앙값 m0와 정확히 같다.
  * - 갱신: 그 사람 때문에 선 정차·음성 요청 a += 1, 앱이 권해서 들른 정차 a += 0.5, 모든 관측 b += t^k
- *   (다른 사람 때문에 선 정차는 '적어도 t는 버텼다'는 중도절단이라 b만 더한다).
+ *   (다른 사람 때문에 선 정차, 여럿이 타서 앞당겨 권한 정차는 '적어도 t는 버텼다'는 중도절단이라 b만 더한다).
  * 데이터가 적으면 사전값에 가깝고, 사건이 3회 쌓이면 개인 기록이 사전값과 같은 무게가 된다.
  */
 internal class NeedPosterior(
@@ -82,10 +82,12 @@ internal fun restroomLevel(minutes: Int, c: CoachConfig): Level = when {
  * - 게이지(화면) = 탑승자 중 '필요 확률 0.5까지 남은 분'이 가장 짧은 사람의 값 (SPEC 4.1). 연료계처럼 1분에 1분씩 준다.
  *   "7살 아이 기준 49분"처럼 누구 때문인지와 함께 읽히는 값이다.
  *   필요가 시작돼도 말없이 참는 경우가 많아(배뇨의 65%는 요의 없이, AI §3-A) '아직 말이 없다'를 증거로 쓰지 않는다.
- * - 판단 마감(마지막 기회·피트스톱) = 앞으로 Δ분 안에 탑승자 중 **누군가** 필요해질 확률 P(Δ) = 1 − Π S_i(e_i + Δ)가
+ * - 판단 마감(마지막 기회) = 앞으로 Δ분 안에 탑승자 중 **누군가** 필요해질 확률 P(Δ) = 1 − Π S_i(e_i + Δ)가
  *   0.3에 닿는 Δ (e_i: 마지막 화장실 뒤 지난 시간, 탑승자끼리 독립. AI §8-1 '탑승자 묶음', §8-2). 차는 한 사람만 필요해도
  *   서야 하므로, 긴 공백 앞에서 "다음 기회까지 버티지 못할 확률"은 한 사람이 아니라 묶음의 확률이다. 혼자 타면 그 사람의
- *   Q(0.3) − e와 같고 여럿이면 더 이르다 (어른 한 명 112분, 둘 83분, 넷 63분).
+ *   Q(0.3) − e와 같고 여럿이면 더 이르다 (방금 다녀온 어른 한 명 112분, 둘 84분, 넷 63분, 여덟 48분. GroupNeedTest가 지킨다).
+ * - 묶음 확률은 그 판단에만 쓴다. 피트스톱 계획의 구간 상한은 한 사람 기준 마감([soloDeadlineMin])이다: 계획은 편한 정차 간격이고
+ *   화장실이 자주 있는 길에서는 계획에 없던 정차의 값이 몇 분이다 (묶음으로 계획하면 게이지가 OK인데 '지금 쉬어야 해요'가 나온다).
  * - 게이지는 한 사람 기준, 마감은 묶음 기준인 이유 (2026-11-12 시뮬레이션, 조건마다 1,000 여정):
  *   둘 다 한 사람 기준이면 어른 둘이 탔을 때 '필요 확률 30%' 마감에서 실제로 누군가 필요할 확률이 51%(1 − 0.7²)가 되어
  *   명절 정체의 위기 비율이 14.1%로 오른다(묶음 마감은 12.0%). 둘 다 묶음 기준이면 위기는 같은데(11.9%) 게이지가 일찍 바닥나
@@ -93,6 +95,7 @@ internal fun restroomLevel(minutes: Int, c: CoachConfig): Level = when {
  *   마감이 일러도 물을 일이 없으므로 묶음 확률은 '긴 공백 앞'에서만 일한다.
  * - 그래서 여럿이 타면 게이지가 넉넉해 보이는데도 마지막 기회를 물을 수 있다(감사 O6: 어른 2명은 게이지 66분일 때 마감).
  *   그 경우는 이유에 LAST_CHANCE_GROUP('여럿이 타서')을 붙여 화면이 설명한다 (CoachEngine, [soloDeadlineMin]).
+ *   그렇게 앞당겨 권한 정차에 서면 누구의 사건으로도 배우지 않는다 ([onRestroomStop]의 groupDriven).
  * - 정차 간 상한: 어르신·임신부 걷기 2시간, 영아 카시트 2시간은 확률과 상관없이 문턱의 상한으로 건다 (AI §9-1).
  * - 음성으로 필요를 알린 사람은 바로 0(NOW).
  *
@@ -398,7 +401,8 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
 
     /**
      * 한 사람씩만 볼 때의 마감 (분): 탑승자마다 필요 확률이 p에 닿을 때까지 남은 시간(정차 간 상한 포함) 중 가장 짧은 것.
-     * 음성 요청이 있으면 0. [deadlineMin]의 위 한계이고, 묶음 확률 때문에 마지막 기회가 앞당겨졌는지 가리는 데 쓴다.
+     * 음성 요청이 있으면 0. [deadlineMin]의 위 한계다. 피트스톱 계획의 구간 상한이고, 묶음 확률 때문에 마지막 기회가
+     * 앞당겨졌는지 가리는 데도 쓴다.
      * fromReset이면 모두 방금 화장실에 다녀온 상태(e_i = 0)로 계산한다. 탑승자가 없으면 null.
      * 마감의 유효 시간은 e_i / 식사 배수다 (잠든 아이 배수는 넣지 않는다). fromReset이면 배수 1.0.
      */
@@ -457,10 +461,13 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
     /**
      * 화장실 정차: 모두의 시계를 at으로 돌린다 (정차 때 배뇨는 대개 요의 없이 기회가 와서 한다).
      * 정차 시점에 게이지를 정하던 사람(가장 급한 사람)은 사건(앱이 권한 정차면 0.5회), 나머지는 중도절단 관측이다.
+     * [groupDriven](여럿이 타서 앞당겨 권한 마지막 기회를 수락해 선 정차)이면 모두 중도절단이다: 그 정차는 공백과 인원 때문에 선 것이지
+     * 가장 급한 사람이 필요해서가 아니다. 그 사람의 0.5회 사건으로 배우면 어른 넷은 48분, 여덟은 24분 간격이 첫 탑승자의 기록이 되어
+     * 그런 정차 다섯 번에 그 사람의 중앙값이 150 → 119분으로 줄었다 (닫힘 검증 E5b: 한 사람 기준 게이지가 묶음 시각 쪽으로 끌려갔다).
      * 이미 음성으로 관측을 남긴 사람은 다시 남기지 않는다.
      * 남기는 값은 유효 시간 τ다(식사 뒤 96분 → 120분). '연달아 선 정차'를 거르는 최소 간격은 실제 시간으로 본다.
      */
-    fun onRestroomStop(at: Long, memory: PersonalMemory, suggested: Boolean = false): PersonalMemory {
+    fun onRestroomStop(at: Long, memory: PersonalMemory, suggested: Boolean = false, groupDriven: Boolean = false): PersonalMemory {
         // 잠든 시간을 정차 시각까지 쌓고 잰다. 다시 대기로 이어진 정차는 at이 지난 update보다 3분까지 앞설 수 있는데, 그 사이
         // 잔 시간(유효 1분 미만)은 나누지 않고 앞 구간에 둔다
         if (accruedMono != NONE && at > accruedMono) accrue(at, wallAt(at))
@@ -474,7 +481,7 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
             if (!t.voiced && interval >= config.restroomMinObservedMin) {
                 val tau = tauMin(t, at)
                 when {
-                    t !== driver -> censored = censored.prepend(t.id, tau, max)
+                    t !== driver || groupDriven -> censored = censored.prepend(t.id, tau, max)
                     suggested -> sugg = sugg.prepend(t.id, tau, max)
                     else -> exact = exact.prepend(t.id, tau, max)
                 }

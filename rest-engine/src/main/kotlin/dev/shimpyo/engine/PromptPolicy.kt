@@ -47,6 +47,8 @@ internal class PromptPolicy(
         val fresh: Boolean = true,
         /** 이 질문의 이유. 화장실 질문이 떠 있는 동안 엔진은 추천(CoachOutput.next)을 이 장소와 이유로 낸다 (CoachEngine.recommend) */
         val reasons: List<Reason> = emptyList(),
+        /** 여럿이 타서 앞당겨진 마지막 기회인지 (GapAnalyzer.LastChance.groupDriven). 수락해서 그곳에 서면 누구의 사건으로도 배우지 않는다 */
+        val groupDriven: Boolean = false,
     )
 
     class Issued internal constructor(
@@ -58,6 +60,7 @@ internal class PromptPolicy(
         val userInitiated: Boolean,
         val purposes: Set<Purpose>,
         val reasons: List<Reason> = emptyList(),
+        val groupDriven: Boolean = false,
     ) {
         val kind: PromptKind get() = prompt.kind
         var answered: Boolean = false
@@ -300,7 +303,7 @@ internal class PromptPolicy(
     private fun issue(c: Candidate, statKey: String?, now: Long, mono: Long): Issued {
         val ttl = config.promptTtlS * 1000L
         val p = Prompt(id = ids.next(), kind = c.kind, speech = c.speech, stop = c.stop, expiresAt = now + ttl, userRequested = c.userInitiated)
-        val iss = Issued(p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes, c.reasons)
+        val iss = Issued(p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes, c.reasons, c.groupDriven)
         iss.lastSeenD = c.distanceM ?: Double.NaN
         iss.lastSeenMono = mono
         active = iss

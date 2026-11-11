@@ -74,7 +74,15 @@ class CoachEngine(
      * [suggested]: 그곳에 서면 '앱이 권해서 들른 정차'로 배울지 (엔진의 마지막 기회·휴식 제안, 화면에서 고른 곳).
      * "화장실 급해"의 결과는 사용자가 필요를 말한 것이라 아니다 (그 사람은 말한 때 이미 사건으로 남았다)
      */
-    private class Accepted(val stopId: String, var stop: StopCandidate, var purposes: Set<Purpose>, val suggested: Boolean, val atMono: Long) {
+    private class Accepted(
+        val stopId: String,
+        var stop: StopCandidate,
+        var purposes: Set<Purpose>,
+        val suggested: Boolean,
+        /** 여럿이 타서 앞당겨진 마지막 기회였는지: 그곳에 서면 모두 '적어도 그만큼 버텼다'로만 배운다 (RestroomNeedModel.onRestroomStop) */
+        val groupDriven: Boolean,
+        val atMono: Long,
+    ) {
         var missingSince: Long = NONE
     }
 
@@ -102,6 +110,8 @@ class CoachEngine(
     }
 
     private var accepted: Accepted? = null
+    /** 지난 update의 마지막 기회 ([noteAccepted]가 고른 곳이 묶음 때문에 앞당겨진 마지막 기회인지 보는 데 쓴다) */
+    private var latestLastChance: GapAnalyzer.LastChance? = null
     private var restWantedAt = NONE
     private var mealWantedAt = NONE
     private val restAnswer = Pending()
@@ -169,7 +179,9 @@ class CoachEngine(
         val wasMealStop = meal.factor != 1.0
         meal.observe(mono, stops.sessionStart, stops.parked, stops.parked && mealIntent(mono), input.candidates, speed, dtMs)
         if (ev.restroomStopAt != NONE) {
-            memory = needs.onRestroomStop(ev.restroomStopAt, memory, suggested = accepted?.suggested == true)
+            memory = needs.onRestroomStop(
+                ev.restroomStopAt, memory, suggested = accepted?.suggested == true, groupDriven = accepted?.groupDriven == true,
+            )
             accepted = null
         }
         if (ev.restAt != NONE) {
@@ -240,6 +252,7 @@ class CoachEngine(
         val deadline = needs.deadlineMin(mono, config.restroomDecisionProbability)
         val lastChance = gap.analyze(restroomOpps, route, deadline, needs.sensitive, needs.preferredMaxGapMin())
             ?.let { if (broughtForwardByGroup(it, deadline, mono)) it.groupDriven() else it }
+        latestLastChance = lastChance
         trackAccepted(mono)
 
         val urgentList = if (urgentRequested) {
@@ -309,6 +322,7 @@ class CoachEngine(
                             PromptKind.LAST_CHANCE, speech, t.stop, t.distanceM, restroom.level, user = true, fresh = fresh,
                             purposes = purposesFor(t.stop, p, ctx),
                             reasons = if (lc != null) lastChanceReasons(lc) + requested else listOf(requested),
+                            groupDriven = lc?.groupDriven == true,
                         )
                     }
                 },
@@ -390,7 +404,7 @@ class CoachEngine(
                     ask(
                         PromptKind.LAST_CHANCE, lastChanceSpeech(lastChance), lastChance.opp.stop, lastChance.opp.distanceM,
                         restroom.level, purposes = purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx),
-                        reasons = lastChanceReasons(lastChance),
+                        reasons = lastChanceReasons(lastChance), groupDriven = lastChance.groupDriven,
                     ),
                     null,
                 )
@@ -499,7 +513,11 @@ class CoachEngine(
             input.now, mono, style.deviation, style.persistent,
             styleMuteUntil != NONE && mono < styleMuteUntil, profile.driverSleepHours, texts,
         )
-        val restroomFirstS = needs.deadlineMin(mono, p)?.let { it * 60.0 } ?: Double.POSITIVE_INFINITY
+        // 계획의 구간 상한은 한 사람 기준 마감이다(가장 급한 사람의 필요 확률 0.3). 계획은 편한 정차 간격을 잡는 것이고 화장실이 자주
+        // 있는 길에서는 계획에 없던 정차 한 번의 값이 몇 분이라, 묶음 확률(누군가 필요해질 확률)로 촘촘히 세울 이유가 없다.
+        // 묶음 확률은 값을 하는 곳, 긴 공백 앞의 마지막 기회 판단에만 쓴다. 예전에는 어른 넷이 화장실 70분 뒤 두 게이지가 모두
+        // OK(80분·120분)인데 계획이 "지금 쉬어야 할 때예요"라고 했고, 어른 여덟의 400km는 정차 5번이었다 (닫힘 검증 E5a)
+        val restroomFirstS = needs.soloDeadlineMin(mono, p)?.let { it * 60.0 } ?: Double.POSITIVE_INFINITY
         val fatigueFirstS = (fe.gauge.minutes ?: 0) * 60.0
         val sleep = profile.driverSleepHours
         val awakeNow = fatigue.awakeHours(mono)
@@ -519,7 +537,7 @@ class CoachEngine(
         }
         val n = PitStopPlanner.Needs(
             firstLegMaxS = minOf(restroomFirstS, fatigueFirstS),
-            restroomFullS = (needs.deadlineMin(mono, p, fromReset = true) ?: Double.POSITIVE_INFINITY) * 60.0,
+            restroomFullS = (needs.soloDeadlineMin(mono, p, fromReset = true) ?: Double.POSITIVE_INFINITY) * 60.0,
             fatigueFullS = { wall ->
                 val awake = if (fatigue.wakeMono == NONE) 0.0 else awakeNow + (wall - input.now) / 3_600_000.0
                 fatigue.fullRhythmWallMin(wall, awake, sleep) * 60.0
@@ -551,7 +569,8 @@ class CoachEngine(
      * - 다른 곳을 묻던 화장실 질문(마지막 기회·여유 없음·"화장실 가고 싶대"의 답, 급해 결과)은 이 선택으로 끝난다. 무시한 것으로
      *   치지 않아 쉼·시간당 횟수가 남지 않고, 그 질문에 늦게 온 대답은 받지 않는다. 밀려 있던 "다음 화장실은 …" 답도 내린다.
      * - 그곳을 다시 묻지 않는다: 사용자의 말에 답할 곳이 바로 그곳이면 "…에 들르기로 했어요"라고만 답한다 ([goingThere]).
-     * - 그 뒤 그곳에 서면 '앱이 권해서 들른 정차'(0.5회)로 배운다.
+     * - 그 뒤 그곳에 서면 '앱이 권해서 들른 정차'(0.5회)로 배운다. 그곳이 여럿이 타서 앞당겨진 마지막 기회(LAST_CHANCE_GROUP)였으면
+     *   누구의 사건으로도 배우지 않는다 (모두 '적어도 그만큼 버텼다').
      *
      * @param purposes 그 정차의 목적 (계획의 식사 정차면 MEAL 포함). 비어 있으면 화장실
      */
@@ -572,7 +591,8 @@ class CoachEngine(
             // 이미 들르기로 한 곳 (방금 수락한 질문, 또는 같은 곳을 두 번 알림): 유지 시간과 배우는 방식은 처음 것 그대로
             a.purposes = a.purposes + wanted
         } else {
-            accepted = Accepted(stop.id, InputSanitizer.candidate(stop), wanted, suggested = true, mono)
+            val group = latestLastChance?.let { it.groupDriven && it.opp.stop.id == stop.id } == true
+            accepted = Accepted(stop.id, InputSanitizer.candidate(stop), wanted, suggested = true, groupDriven = group, mono)
         }
     }
 
@@ -592,6 +612,7 @@ class CoachEngine(
             policy = PromptPolicy(config, random, promptIds)
             quiet = QuietTracker(config)
             accepted = null
+            latestLastChance = null
             restWantedAt = NONE
             mealWantedAt = NONE
             restAnswer.clear()
@@ -673,7 +694,7 @@ class CoachEngine(
                 if (stop != null) {
                     accepted = Accepted(
                         stop.id, stop, rec.purposes.ifEmpty { setOf(Purpose.RESTROOM) },
-                        suggested = rec.kind != PromptKind.URGENT_RESULT, mono,
+                        suggested = rec.kind != PromptKind.URGENT_RESULT, groupDriven = rec.groupDriven, mono,
                     )
                 } else if (rec.kind == PromptKind.REST_SUGGESTION) {
                     restWantedAt = mono
@@ -752,7 +773,8 @@ class CoachEngine(
         fresh: Boolean = true,
         purposes: Set<Purpose> = emptySet(),
         reasons: List<Reason> = emptyList(),
-    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh, reasons)
+        groupDriven: Boolean = false,
+    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh, reasons, groupDriven)
 
     /**
      * 사용자의 말에 답할 곳([stop])이 이미 들르기로 한 곳이면 '들를까요?' 대신 낼 안내, 아니면 null.
@@ -909,15 +931,19 @@ class CoachEngine(
 
     /**
      * 여럿이 타서 앞당겨진 마지막 기회인지. 판단 마감은 '누군가 필요해질 확률'이라 가장 급한 한 사람의 마감보다 이르다
-     * (RestroomNeedModel). 한 사람 기준 마감으로 다시 판정했을 때 이곳이 아니면(더 뒤이거나 물을 일이 없으면) 묶음 때문이다.
-     * 이때는 게이지(한 사람 기준)가 넉넉해 보이는데 묻게 되므로 이유를 붙인다 (감사 O6). 마지막 기회가 있을 때만 계산한다.
+     * (RestroomNeedModel). 한 사람 기준 마감으로 같은 판정을 다시 했을 때(커버리지 규칙 포함) 물을 일이 없거나 더 뒤의 기회면
+     * 묶음 때문이다. 이때는 게이지(한 사람 기준)가 넉넉해 보이는데 묻게 되므로 이유를 붙이고(감사 O6), 수락해서 선 정차를 누구의
+     * 사건으로도 배우지 않는다. 한 사람만 봐도 이곳이나 더 앞에서 묻는다면 묶음 때문이 아니다: 예전에는 '이곳이 아니면'으로 봐서
+     * 과민성 방광 탑승자 혼자여도 같은 곳에서 묻는데 '4명이 타서'가 붙었고(커버리지 없이 다시 판정했다), 한 사람 기준이 더 앞인
+     * 경우에도 붙었다 (닫힘 검증 E5c). 마지막 기회가 있을 때만 계산한다.
      */
     private fun broughtForwardByGroup(lc: GapAnalyzer.LastChance, deadlineMin: Double?, mono: Long): Boolean {
+        // 커버리지 규칙은 마감과 무관하다: 한 사람 기준으로도 같은 곳이다
         if (lc.trigger == GapAnalyzer.Trigger.PREFERENCE || needs.tracked.size < 2 || deadlineMin == null) return false
         val solo = needs.soloDeadlineMin(mono, config.restroomDecisionProbability) ?: return false
         if (solo - deadlineMin < GROUP_REASON_MIN_DIFF_MIN) return false
-        val alone = gap.analyze(restroomOpps, route, solo, needs.sensitive, null)
-        return alone == null || alone.index != lc.index
+        val alone = gap.analyze(restroomOpps, route, solo, needs.sensitive, needs.preferredMaxGapMin())
+        return alone == null || alone.index > lc.index
     }
 
     private fun lastChanceSpeech(lc: GapAnalyzer.LastChance): String = when (lc.trigger) {

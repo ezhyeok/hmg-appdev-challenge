@@ -6,7 +6,7 @@ package dev.shimpyo.engine
  * 화장실 기회 o_1..o_n을 경로 거리순으로 놓고 정체를 반영한 도착 시간 a_i를 구한다(거리순으로 단조, RouteContext).
  * 판단 마감 D는 '탑승자 중 누군가 필요해질 확률이 0.3에 닿을 때까지 남은 시간'이다 (RestroomNeedModel.deadlineMin).
  * 여럿이 타면 가장 급한 한 사람의 마감보다 이르다. 그 차이 때문에 앞당겨진 마지막 기회는 [LastChance.groupDriven]으로 표시해
- * 화면이 이유를 말하게 한다 (CoachEngine이 한 사람 기준 마감으로 한 번 더 판정해 가린다).
+ * 화면이 이유를 말하게 한다 (CoachEngine이 한 사람 기준 마감으로 한 번 더 판정해, 물을 일이 없거나 더 뒤의 기회일 때만).
  *
  * 판단 범위: 목록을 자른 곳(RouteState.candidatesUntilM) 너머나 목적지 너머 후보는 공백의 증거로 쓰지 않는다.
  * 그 앞 마지막 기회 뒤의 공백은 자른 곳까지(아래 한계) 또는 목적지까지다. 예전에는 목적지 너머 후보까지의 시간을
