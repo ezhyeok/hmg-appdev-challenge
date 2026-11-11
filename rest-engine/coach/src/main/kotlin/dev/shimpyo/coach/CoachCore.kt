@@ -66,7 +66,7 @@ class CoachCore(private val d: CoachDeps) {
     private val goTo = GoToRunner(d.navi, d.log)
     private val parser = IntentParser()
     private val desk = VoiceDesk(d.voice, d.log)
-    private val urgent = UrgentFlow()
+    private val urgent = UrgentFlow(seedMs = d.elapsed.elapsedMs())
     private val plans = PlanKeeper()
     private val freshAir = FreshAirGate()
     private val memorySaver = MemorySaver()
@@ -266,9 +266,9 @@ class CoachCore(private val d: CoachDeps) {
         if (out != null) {
             logNext(out)
             lastOutput = out
-            runEffects(machine.on(PromptEvent.EngineTick(out.prompt, out.next, out.parked), promptContext()))
+            toMachine(PromptEvent.EngineTick(out.prompt, out.next, out.parked))
             autoFreshAir(out, el)
-            urgent.onEngineNext(out.next?.stop?.id, el)
+            urgent.track(pos, out.next?.stop?.id, el)
         }
         if (freshAir.takeRevert(el, d.hub.recirculation)) revertFreshAir()
         advanceUrgent(el, a, pos, input)
@@ -340,8 +340,14 @@ class CoachCore(private val d: CoachDeps) {
 
     private fun onPromptEvent(e: PromptEvent) {
         if (e is PromptEvent.Expired) expiryJobs.remove(e.promptId)
-        runEffects(machine.on(e, promptContext()))
-        if (e is PromptEvent.GoToFinished && e.outcome != GoToOutcome.FAILED) onGoToSucceeded(e)
+        toMachine(e)
+    }
+
+    /** 질문 기계에 사건을 넣고 효과를 실행한다. 들르기 결과가 나왔으면 그 뒷일은 효과(엔진 보고 포함)가 모두 끝난 뒤에 한다 */
+    private fun toMachine(e: PromptEvent) {
+        val effects = machine.on(e, promptContext())
+        runEffects(effects)
+        for (x in effects) if (x is PromptEffect.PublishGoToResult) x.result?.let(::onGoToResult)
     }
 
     private fun runEffects(list: List<PromptEffect>) {
@@ -385,6 +391,7 @@ class CoachCore(private val d: CoachDeps) {
         // 지금 위치 기준 후보(같은 id)로 실행한다: 결과 안내의 거리가 지금 거리다 (prompt.md 6.4)
         val live = liveStop(e.stop.id) ?: e.stop
         log.i("goTo ${live.name} (request ${e.requestId}, parked=${e.parked})")
+        urgent.onGoToStarted(live)
         effect("goTo") {
             val outcome = try {
                 goTo.run(live, e.parked)
@@ -399,11 +406,13 @@ class CoachCore(private val d: CoachDeps) {
         }
     }
 
-    private fun onGoToSucceeded(e: PromptEvent.GoToFinished) {
-        log.i("goTo result: ${e.outcome} ${e.stop?.name}")
+    /** 들르기 하나가 끝났다 (기계가 결과를 올렸다: 내비의 답, 또는 감시가 끝낸 실패) */
+    private fun onGoToResult(r: GoToResult) {
+        val ok = r.outcome != GoToOutcome.FAILED
+        log.i("goTo result: ${r.outcome} ${r.stop.name}")
         // 경로를 바꿨으면 내비를 곧바로 다시 읽는다 (경로 위 안내·검색 열기는 경로를 바꾸지 않았다)
-        if (e.outcome == GoToOutcome.WAYPOINT_ADDED || e.outcome == GoToOutcome.ROUTE_STARTED) d.tracker.requestRefresh(routeChanged = true)
-        if (urgent.onGoToSucceeded(e.stop, d.elapsed.elapsedMs())) publishUrgentClosed()
+        if (r.outcome == GoToOutcome.WAYPOINT_ADDED || r.outcome == GoToOutcome.ROUTE_STARTED) d.tracker.requestRefresh(routeChanged = true)
+        if (urgent.onGoToFinished(r.stop, ok, d.elapsed.elapsedMs())) publishUrgentClosed()
     }
 
     // ------------------------------------------------------------ 음성
@@ -449,7 +458,12 @@ class CoachCore(private val d: CoachDeps) {
             is VoiceIntent.Accept -> onPromptEvent(PromptEvent.Tapped(intent.promptId, true))
             is VoiceIntent.Decline -> onPromptEvent(PromptEvent.Tapped(intent.promptId, false))
             VoiceIntent.UrgentRestroom ->
-                if (urgent.active) urgent.sayAgain() else urgentOpened(urgent.openByVoice(d.elapsed.elapsedMs()))
+                if (urgent.active) {
+                    urgent.sayAgain()
+                    advanceUrgentNow()
+                } else {
+                    urgentOpened(urgent.openByVoice(d.elapsed.elapsedMs()))
+                }
             else -> {
                 if (pendingIntents.size >= MAX_PENDING_INTENTS) pendingIntents.removeFirst()
                 pendingIntents.addLast(intent)
@@ -599,7 +613,7 @@ class CoachCore(private val d: CoachDeps) {
         pendingIntents.clear()
         expiryJobs.values.forEach { it.cancel() }
         expiryJobs.clear()
-        runEffects(machine.on(PromptEvent.Reset, promptContext()))
+        toMachine(PromptEvent.Reset)
     }
 
     private fun shownHistory(now: Long) = StopHistory.sanitize(recorder.shown, now)
@@ -610,6 +624,11 @@ class CoachCore(private val d: CoachDeps) {
     private fun urgentOpened(requestId: Long) {
         log.i("urgent $requestId")
         ui.update { copy(urgentRequestId = requestId, urgentState = UrgentState.LOCATING, urgent = null) }
+        advanceUrgentNow()
+    }
+
+    /** 틱을 기다리지 않고 급해를 한 걸음 진행한다 (명령·말에 바로 답한다). 엔진 입력이 아직 없으면 다음 틱이 한다 */
+    private fun advanceUrgentNow() {
         val input = lastInput ?: return
         val a = worlds.active
         advanceUrgent(d.elapsed.elapsedMs(), a, a.world.position(d.positions.current.value?.fix), input)

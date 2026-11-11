@@ -273,5 +273,12 @@ class CoreRig(
 
     fun memoryOf(): PersonalMemory = memory.stored
     fun appended(): List<StopLog> = history.appended
-    fun fix(lat: Double, lon: Double, heading: Float? = 180f) = positions.onFused(Fix(lat, lon, heading))
+    /**
+     * 차의 위치. 위치 SDK와 내비가 같은 곳을 본다: 테스트는 위치를 한 번만 넣고 달리므로(차속만 있다) 15초 뒤 코치가 내비 위치로
+     * 보충하는데(PositionTracker), 가짜 내비의 기본 위치(판교)가 다르면 차가 12km 옮겨 간 것처럼 된다
+     */
+    fun fix(lat: Double, lon: Double, heading: Float? = 180f) {
+        fakeNavi.location = { Fix(lat, lon, heading) }
+        positions.onFused(Fix(lat, lon, heading))
+    }
 }
