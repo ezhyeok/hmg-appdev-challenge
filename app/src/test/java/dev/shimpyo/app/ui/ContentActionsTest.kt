@@ -206,6 +206,26 @@ class ContentActionsTest {
     }
 
     @Test
+    fun leavingWhileThePlanIsStillBeingBuiltDropsTheWaitAndAsksAgainOnReturn() {
+        // [계획 세우기]를 누르고 답이 오기 전에 화면을 떠났다(또는 앱이 가려졌다). 코치는 닫힌 요청의 답을 내지 않는다:
+        // '세우는 중'을 내리지 않으면 6초 뒤 다른 화면에서 "계획을 세우지 못했어요"가 뜬다. 돌아오면 이어서 요청한다
+        val rig = Rig(ui = ContentState(Screen.PLAN))
+        rig.actions.makePlan()
+        assertTrue(rig.ui.planRequested)
+        rig.actions.planVisibility(false)
+        assertEquals(listOf(UiCommand.MakePlan, UiCommand.ClosePlan), rig.sent)
+        assertFalse("기다리던 표시를 내린다", rig.ui.planRequested)
+        rig.actions.planVisibility(true)
+        assertEquals(listOf(UiCommand.MakePlan, UiCommand.ClosePlan, UiCommand.MakePlan), rig.sent)
+        assertTrue(rig.ui.planRequested)
+        // 한 번만 잇는다: 다시 떠났다 돌아와도(계획이 아직 없고 기다리던 것도 없으면) 버튼을 눌러야 세운다
+        rig.ui.planRequested = false
+        rig.actions.planVisibility(false)
+        rig.actions.planVisibility(true)
+        assertEquals(listOf(UiCommand.MakePlan, UiCommand.ClosePlan, UiCommand.MakePlan, UiCommand.ClosePlan), rig.sent)
+    }
+
+    @Test
     fun aScreenThatNeverAskedForAPlanSendsNoClosePlan() {
         val rig = Rig()
         rig.actions.planVisibility(false)

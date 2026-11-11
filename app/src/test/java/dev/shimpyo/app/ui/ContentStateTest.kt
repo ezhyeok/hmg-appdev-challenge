@@ -27,7 +27,7 @@ class ContentStateTest {
         val before = ContentState(
             screen = Screen.PLAN, demoReturn = Screen.HISTORY, planRequested = true,
             urgentRequested = 42L, dismissedUrgent = setOf(40L, 41L), pickingId = "u1", goToSentId = "ra-anseong", seenGoToAt = 99L,
-            urgentResultsFor = 42L, ackExpiredFor = 42L, planRequestedGen = 3L, planWanted = true,
+            urgentResultsFor = 42L, ackExpiredFor = 42L, planRequestedGen = 3L, planWanted = true, planResume = true,
         )
         val after = recreate(before)
         assertEquals(Screen.PLAN, after.screen)
@@ -42,6 +42,7 @@ class ContentStateTest {
         assertEquals("ra-anseong", after.goToSentId)
         assertEquals(99L, after.seenGoToAt)
         assertEquals(true, after.planWanted)
+        assertEquals(true, after.planResume)
 
         val empty = recreate(ContentState(Screen.DRIVE))
         assertNull(empty.urgentRequested)
@@ -51,6 +52,7 @@ class ContentStateTest {
         assertNull(empty.goToSentId)
         assertEquals(emptySet<Long>(), empty.dismissedUrgent)
         assertFalse(empty.planWanted)
+        assertFalse(empty.planResume)
     }
 
     @Test

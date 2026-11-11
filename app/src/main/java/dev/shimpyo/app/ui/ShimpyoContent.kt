@@ -474,21 +474,28 @@ internal class ContentActions(
         ui.planRequestedGen = state().planGeneration
         ui.planRequested = true
         ui.planWanted = true
+        ui.planResume = false
         host.send(UiCommand.MakePlan)
     }
 
     /**
      * 계획 화면이 보이는지([visible])에 맞춰 코치의 계획 갱신을 닫거나 잇는다 (리뷰 R-F12).
-     * 안 보이면(다른 화면, 주행 시작) 요청해 둔 계획을 닫는다(ClosePlan, 한 번). 다시 보이는데 계획이 이미 있으면 이어서 요청한다:
-     * 떠 있는 동안 코치가 지나친 정차를 빼고 다시 세운다(UI 감사 #4). 계획이 없으면 [계획 세우기]를 눌러야 세운다.
+     * 안 보이면(다른 화면, 주행 시작, 앱이 가려짐) 요청해 둔 계획을 닫는다(ClosePlan, 한 번). 답을 기다리던 요청은 코치가 버리므로
+     * '세우는 중'도 내린다: 그대로 두면 6초 뒤 다른 화면에서 "계획을 세우지 못했어요"가 뜬다.
+     * 다시 보이는데 계획이 이미 있거나 답을 기다리다 닫은 것이면 이어서 요청한다: 떠 있는 동안 코치가 지나친 정차를 빼고
+     * 다시 세운다(UI 감사 #4). 계획을 요청한 적이 없으면 [계획 세우기]를 눌러야 세운다.
      */
     fun planVisibility(visible: Boolean) {
         if (!visible) {
             if (ui.planWanted) {
                 ui.planWanted = false
+                if (ui.planRequested) {
+                    ui.planRequested = false
+                    ui.planResume = true
+                }
                 host.send(UiCommand.ClosePlan)
             }
-        } else if (!ui.planWanted && state().plan != null) {
+        } else if (!ui.planWanted && (state().plan != null || ui.planResume)) {
             makePlan()
         }
     }

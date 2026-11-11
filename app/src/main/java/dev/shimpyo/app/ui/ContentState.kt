@@ -26,6 +26,7 @@ import dev.shimpyo.coach.voice.Hangul
  * @property seenGoToAt 이미 알린 들르기 결과의 시각 (다시 만들어질 때 같은 토스트를 또 띄우지 않게)
  * @property planRequestedGen 계획을 요청한 때의 CoachUiState.planGeneration (이보다 커지면 새 계획이 왔다)
  * @property planWanted 코치에 계획을 요청해 두었다 (MakePlan을 보냈고 아직 ClosePlan을 보내지 않았다). 계획 화면을 떠나면 닫는다
+ * @property planResume 계획의 답을 기다리던 중에 계획 화면이 가려져 요청을 닫았다. 다시 보이면 이어서 요청한다
  */
 @Stable
 class ContentState(
@@ -41,6 +42,7 @@ class ContentState(
     seenGoToAt: Long = 0L,
     planRequestedGen: Long = 0L,
     planWanted: Boolean = false,
+    planResume: Boolean = false,
 ) {
     var screen by mutableStateOf(screen)
     var demoReturn by mutableStateOf(demoReturn)
@@ -54,6 +56,7 @@ class ContentState(
     var seenGoToAt by mutableStateOf(seenGoToAt)
     var planRequestedGen by mutableStateOf(planRequestedGen)
     var planWanted by mutableStateOf(planWanted)
+    var planResume by mutableStateOf(planResume)
 
     companion object {
         /**
@@ -66,7 +69,7 @@ class ContentState(
                 listOf(
                     it.screen.name, it.demoReturn.name, it.planRequested,
                     box(it.urgentRequested), it.dismissedUrgent.toLongArray(), box(it.urgentResultsFor), box(it.ackExpiredFor),
-                    it.pickingId.orEmpty(), it.goToSentId.orEmpty(), it.seenGoToAt, it.planRequestedGen, it.planWanted,
+                    it.pickingId.orEmpty(), it.goToSentId.orEmpty(), it.seenGoToAt, it.planRequestedGen, it.planWanted, it.planResume,
                 )
             },
             restore = { v ->
@@ -83,6 +86,7 @@ class ContentState(
                     seenGoToAt = v[9] as Long,
                     planRequestedGen = v[10] as Long,
                     planWanted = v[11] as Boolean,
+                    planResume = v[12] as Boolean,
                 )
             },
         )
