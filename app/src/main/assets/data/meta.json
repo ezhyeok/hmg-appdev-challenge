@@ -1,12 +1,13 @@
 {
- "schema": 1,
- "built": "2026-11-11T14:53:47Z",
+ "schema": 2,
+ "built": "2026-11-11T15:09:42Z",
  "downloaded": "2026-11-11",
  "counts": {
   "rest_areas.json": 244,
   "drowsy_shelters.json": 288,
   "restrooms.json": 41667,
   "parkables.json": 29610,
+  "motorways.json": 20329,
   "restrooms_nocoord.json": 13578
  },
  "attribution": [

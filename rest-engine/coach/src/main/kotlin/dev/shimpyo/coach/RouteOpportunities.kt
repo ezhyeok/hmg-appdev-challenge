@@ -40,25 +40,9 @@ object RouteOpportunities {
     /** 다음 회전까지 거리 (첫 항목) */
     fun nextManeuverDistance(tbt: List<TbtItem>): Double? = tbt.firstOrNull()?.distanceM
 
-    private fun isRestStop(name: String, kind: StopKind): Boolean = when (kind) {
-        StopKind.HIGHWAY_REST_AREA -> name.contains("휴게소") || name.contains("쉼터")
-        StopKind.DROWSY_SHELTER -> name.contains("쉼터") || name.contains("휴게")
-        else -> false
-    }
+    // 이름 규칙은 StopNames.kt (DATA 담당). 부르는 쪽이 그대로 컴파일되도록 위임만 남긴다
+    private fun isRestStop(name: String, kind: StopKind): Boolean = StopNames.isRestStop(name, kind)
 
-    /**
-     * 이름 비교용 정규화: 공백·괄호 속 방향·"휴게소/졸음쉼터" 접미어를 지운다.
-     * 예) "안성휴게소(부산방향)" → "안성", "오산 졸음쉼터" → "오산"
-     */
-    fun normalizeName(name: String): String = name
-        .replace(BRACKETS, "")
-        .replace(" ", "")
-        .replace(FACILITY_SUFFIX, "")
-        .replace(DIRECTION_SUFFIX, "")
-        .trim()
-
-    // 정규식은 한 번만 컴파일한다 (예전에는 부를 때마다 3개를 새로 컴파일했다. 이름 맞추기는 후보마다 부른다)
-    private val BRACKETS = Regex("\\(.*?\\)|\\[.*?]")
-    private val FACILITY_SUFFIX = Regex("(졸음쉼터|휴게소|쉼터|휴게시설)$")
-    private val DIRECTION_SUFFIX = Regex("(상행|하행|[가-힣]+방향|[가-힣]+방면)$")
+    /** 이름 비교용 정규화 (StopNames.normalizeName). 예) "안성휴게소 부산방향" → "안성" */
+    fun normalizeName(name: String): String = StopNames.normalizeName(name)
 }

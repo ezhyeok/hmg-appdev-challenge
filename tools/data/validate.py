@@ -82,6 +82,32 @@ def lane_heading_problems(rows):
     return out
 
 
+def motorway_problems(d, roadside_rows):
+    """motorways.json: simplified carriageways the app map-matches against. Every rest area / shelter road
+    (`hw`) must have geometry, or the app could never tell that the car is on that road."""
+    p = os.path.join(d, "motorways.json")
+    with open(p, encoding="utf-8") as f:
+        lines = json.load(f)
+    errs = []
+    for i, x in enumerate(lines):
+        pts = x.get("p")
+        if not isinstance(x.get("r"), str) or not x["r"] or x.get("ow") not in (0, 1):
+            errs.append(f"line {i}: r={x.get('r')!r} ow={x.get('ow')!r}")
+        if not isinstance(pts, list) or len(pts) < 4 or len(pts) % 2:
+            errs.append(f"line {i}: {len(pts) if isinstance(pts, list) else pts!r} coordinates")
+            continue
+        for k in range(0, len(pts), 2):
+            if not common.in_korea(pts[k], pts[k + 1]):
+                errs.append(f"line {i}: point {k // 2} outside Korea")
+                break
+    roads = {x.get("r") for x in lines}
+    for r in sorted({r["hw"] for r in roadside_rows if r.get("hw")} - roads):
+        errs.append(f"road {r} has rest areas/shelters but no motorway geometry")
+    n = sum(len(x.get("p") or []) // 2 for x in lines)
+    print(f"motorways.json: {len(lines)} lines, {n} points, {os.path.getsize(p)/1e6:.2f} MB, {len(errs)} problems")
+    return errs
+
+
 def hours_problems(fn, i, r):
     out = []
     for k in ("oh", "ohs", "ohh"):
@@ -135,6 +161,10 @@ def main():
         print(f"{fn}: {len(rows)} rows, {size/1e6:.2f} MB, {len(errs)} problems")
         for e in errs[:10]:
             print("   ", e)
+    errs = motorway_problems(d, roadside_rows)
+    bad += len(errs)
+    for e in errs[:10]:
+        print("   ", e)
     lane = lane_heading_problems(roadside_rows)
     bad += len(lane)
     print(f"lane headings (rest areas + shelters): {len(lane)} problems")

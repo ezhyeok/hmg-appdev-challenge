@@ -214,6 +214,50 @@ class Motorways:
         return self.ways.get(wid, {})
 
 
+def simplify(pts, tol_m):
+    """Douglas-Peucker on [(lat, lon)] with a tolerance in metres (local equirectangular projection)."""
+    if len(pts) < 3:
+        return list(pts)
+    kx = 111320.0 * math.cos(math.radians(pts[0][0]))
+    ky = 110540.0
+    xy = [(p[1] * kx, p[0] * ky) for p in pts]
+    keep = [False] * len(pts)
+    keep[0] = keep[-1] = True
+    stack = [(0, len(pts) - 1)]
+    while stack:
+        a, b = stack.pop()
+        (ax, ay), (bx, by) = xy[a], xy[b]
+        dx, dy = bx - ax, by - ay
+        L = math.hypot(dx, dy)
+        best, bi = -1.0, -1
+        for i in range(a + 1, b):
+            px, py = xy[i]
+            d = abs(dx * (ay - py) - dy * (ax - px)) / L if L > 0 else math.hypot(px - ax, py - ay)
+            if d > best:
+                best, bi = d, i
+        if best > tol_m:
+            keep[bi] = True
+            stack += [(a, bi), (bi, b)]
+    return [p for p, k in zip(pts, keep) if k]
+
+
+def export_lines(mw, tol_m=10):
+    """Simplified carriageways for the app's map matching (which expressway the car is on, without navi):
+    [{'r': name, 'ow': 1 one-way in point order / 0 two-way, 'p': [lat, lon, lat, lon, ...]}], unnamed ways left out.
+    Douglas-Peucker at 10 m keeps ~54k of 122k points (2026-11-11 snapshot)."""
+    out = []
+    for wid in sorted(mw.geom):
+        info = mw.ways[wid]
+        if not info["name"]:
+            continue
+        pts = simplify(mw.geom[wid], tol_m)
+        flat = []
+        for la, lo in pts:
+            flat += [round(la, 5), round(lo, 5)]
+        out.append({"r": info["name"], "ow": 0 if info["oneway"] == 0 else 1, "p": flat})
+    return out
+
+
 def angle_diff(a, b):
     d = abs((a - b) % 360.0)
     return min(d, 360.0 - d)

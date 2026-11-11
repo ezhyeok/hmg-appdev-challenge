@@ -43,6 +43,18 @@ class StopTableTest {
         }
         // 예전 앱이 읽던 수 (기획서·README의 60,084곳)
         assertEquals(60_084, table.size)
+        // 고속도로 선형 (motorways.json)
+        val lines = loadLines(dataDir)
+        assertEquals(lines.size, table.lineCount)
+        for ((k, l) in lines.withIndex()) {
+            assertEquals(l.road, table.roadName(table.lineRoadId(k)), "선 $k")
+            assertEquals(l.twoWay, table.lineTwoWay(k))
+            assertEquals(l.points.size / 2, table.lineEnd(k) - table.lineStart(k))
+            for (p in 0 until l.points.size / 2) {
+                assertEquals(l.points[2 * p], table.pointLat(table.lineStart(k) + p), 1e-5)
+                assertEquals(l.points[2 * p + 1], table.pointLon(table.lineStart(k) + p), 1e-5)
+            }
+        }
         val highway = (0 until table.size).filter { table.kind(it) == StopKind.HIGHWAY_REST_AREA || table.kind(it) == StopKind.DROWSY_SHELTER }
         assertEquals(532, highway.size)
         // 휴게소·졸음쉼터는 모두 고속도로 이름이 있고, 나머지는 없다 (같은 길 순위가 이것에 기댄다)
@@ -78,7 +90,7 @@ class StopTableTest {
     @Test
     fun flatJsonReadsValuesLikeTheOldAndroidReader() {
         val rows = ArrayList<Map<String, Any?>>()
-        FlatJson.forEachObject(StringReader("""[{"id":"x","n":"옥산\"휴게소A","lat":36.657743,"h24":1,"t":true,"z":null,"arr":[1,{"a":2}],"e":-1.5e2}, {}]""")) { rows += HashMap(it) }
+        FlatJson.forEachObject(StringReader("""[{"id":"x","n":"옥산\"휴게소A","lat":36.657743,"h24":1,"t":true,"z":null,"arr":[1,{"a":2}],"e":-1.5e2,"p":[37.5, -127.25,1e1],"q":[]}, {}]""")) { rows += HashMap(it) }
         assertEquals(2, rows.size)
         val r = rows[0]
         assertEquals("옥산\"휴게소A", r["n"])
@@ -88,6 +100,8 @@ class StopTableTest {
         assertTrue(r.containsKey("z") && r["z"] == null)
         assertNull(r["arr"], "배열·객체는 null")
         assertEquals(-150.0, r["e"])
+        assertEquals(listOf(37.5, -127.25, 10.0), (r["p"] as DoubleArray).toList(), "숫자 배열 (motorways.json 좌표)")
+        assertEquals(0, (r["q"] as DoubleArray).size)
         assertTrue(rows[1].isEmpty())
     }
 

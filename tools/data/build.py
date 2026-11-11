@@ -23,7 +23,7 @@ import parkables  # noqa: E402
 import restrooms  # noqa: E402
 import roadside  # noqa: E402
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2   # 2: motorways.json (simplified OSM carriageways)
 CROSSCHECK = ["안성휴게소", "기흥휴게소", "망향휴게소", "서울만남휴게소", "죽전휴게소", "덕평휴게소", "함안휴게소",
               "밀양영남루휴게소", "건천휴게소", "평사휴게소"]
 
@@ -193,6 +193,10 @@ def main():
     shelters = roadside.build_drowsy(raw, mw, rest, rep)
     print(f"[{time.time()-t0:5.0f}s] rest areas {len(rest)}, shelters {len(shelters)}", flush=True)
 
+    lines = motorway.export_lines(mw)
+    rep["motorway_lines"] = len(lines)
+    rep["motorway_line_points"] = sum(len(x["p"]) // 2 for x in lines)
+
     parkables.link_restrooms(pk_all, rr_all, rest, shelters, rep)
     crosscheck(rest, rr_geo, raw, rep)
 
@@ -209,12 +213,13 @@ def main():
         "drowsy_shelters.json": write_json(os.path.join(out, "drowsy_shelters.json"), shelters),
         "restrooms.json": write_json(os.path.join(out, "restrooms.json"), [export_restroom(x) for x in rr_all]),
         "parkables.json": write_json(os.path.join(out, "parkables.json"), [export_parkable(x) for x in pk_all]),
+        "motorways.json": write_json(os.path.join(out, "motorways.json"), lines),
     }
     if not a.no_nocoord:
         sizes["restrooms_nocoord.json"] = write_json(os.path.join(out, "restrooms_nocoord.json"),
                                                      [export_restroom(x, False) for x in rr_nocoord])
     counts = {"rest_areas.json": len(rest), "drowsy_shelters.json": len(shelters), "restrooms.json": len(rr_all),
-              "parkables.json": len(pk_all)}
+              "parkables.json": len(pk_all), "motorways.json": len(lines)}
     if not a.no_nocoord:
         counts["restrooms_nocoord.json"] = len(rr_nocoord)
     meta = {"schema": SCHEMA_VERSION, "built": rep["built"], "downloaded": common.DOWNLOAD_DATE,

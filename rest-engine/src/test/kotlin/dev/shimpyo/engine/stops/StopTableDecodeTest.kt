@@ -25,7 +25,11 @@ class StopTableDecodeTest {
         StopRecord(StopCandidate("p1", "주차장", StopKind.PUBLIC_PARKING, 35.1, 129.0, Facilities(restroom = true), parkable = true),
             laneHeading = null, hours = null),
     )
-    private val good = StopTable.encode(rows)
+    private val lines = listOf(
+        MotorwayLine("경부고속도로", false, doubleArrayOf(37.0, 127.1, 36.99, 127.11, 36.98, 127.12)),
+        MotorwayLine("중부고속도로", true, doubleArrayOf(37.2, 127.3, 37.21, 127.31)),
+    )
+    private val good = StopTable.encode(rows, lines)
 
     private fun ByteArray.le() = ByteBuffer.wrap(this).order(ByteOrder.LITTLE_ENDIAN)
 
@@ -34,6 +38,13 @@ class StopTableDecodeTest {
         val t = StopTable.decode(good)
         assertEquals(3, t.size)
         assertEquals(rows.map { it.candidate }, (0 until 3).map(t::candidate))
+        assertEquals(2, t.lineCount)
+        assertEquals(listOf("경부고속도로", "중부고속도로"), (0 until 2).map { t.roadName(t.lineRoadId(it)) })
+        assertEquals(listOf(false, true), (0 until 2).map(t::lineTwoWay))
+        assertEquals(listOf(0, 3, 5), listOf(t.lineStart(0), t.lineStart(1), t.lineEnd(1)))
+        assertEquals(36.99, t.pointLat(1), 1e-5)
+        assertEquals(127.31, t.pointLon(4), 1e-5)
+        assertEquals("경부고속도로", t.road(0), "시설 행과 선이 같은 도로 색인을 쓴다")
     }
 
     @Test
@@ -54,11 +65,22 @@ class StopTableDecodeTest {
         }
         assertFailsWith<StopTableFormatException> { StopTable.decode(good.copyOf().also { it.le().putInt(12, 70_000) }) }
         assertFailsWith<StopTableFormatException> { StopTable.decode(good.copyOf().also { it.le().putInt(16, -3) }) }
+        assertFailsWith<StopTableFormatException> { StopTable.decode(good.copyOf().also { it.le().putInt(20, Int.MAX_VALUE) }) }
+        assertFailsWith<StopTableFormatException> { StopTable.decode(good.copyOf().also { it.le().putInt(24, 9_000_000) }) }
+    }
+
+    @Test
+    fun lineSectionIsValidatedToo() {
+        // 마지막 점들(float)의 끝: 경도 배열의 마지막 값을 범위 밖으로
+        val bytes = good.copyOf().also { it.le().putFloat(it.size - 4, 999f) }
+        assertFailsWith<StopTableFormatException> { StopTable.decode(bytes) }
+        val nan = good.copyOf().also { it.le().putFloat(it.size - 4, Float.NaN) }
+        assertFailsWith<StopTableFormatException> { StopTable.decode(nan) }
     }
 
     @Test
     fun badKindByteFailsAtDecodeNotDuringQueries() {
-        val bytes = good.copyOf().also { it[20] = 99 }   // 첫 행의 종류 (머리말 20바이트 뒤)
+        val bytes = good.copyOf().also { it[28] = 99 }   // 첫 행의 종류 (머리말 28바이트 뒤)
         assertFailsWith<StopTableFormatException> { StopTable.decode(bytes) }
     }
 
@@ -87,6 +109,11 @@ class StopTableDecodeTest {
                     t.openNow(i, 1_762_000_000_000L)
                     assertTrue(t.lat(i).isFinite() && t.lon(i).isFinite())
                 }
+                for (k in 0 until t.lineCount) {
+                    t.roadName(t.lineRoadId(k)); t.lineTwoWay(k)
+                    for (p in t.lineStart(k) until t.lineEnd(k)) assertTrue(t.pointLat(p).isFinite() && t.pointLon(p).isFinite())
+                }
+                MotorwayIndex(t).roadAt(37.0, 127.1, 150.0)
             }
         }
         assertTrue(rejected > 0)

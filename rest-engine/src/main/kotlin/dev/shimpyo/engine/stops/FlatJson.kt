@@ -5,7 +5,7 @@ import java.io.Reader
 /**
  * tools/data가 만드는 JSON(평평한 객체의 배열)만 읽는 작은 스트리밍 파서. stops.bin을 만드는 도구와 테스트에서 쓴다.
  * 값은 앱이 예전에 android.util.JsonReader로 읽던 것과 같게 만든다: 문자열 → String, 숫자 → Double,
- * 불리언 → Boolean, null → null, 배열·객체(이 데이터에는 없다) → null.
+ * 불리언 → Boolean, null → null. 숫자만 든 배열(motorways.json의 좌표) → DoubleArray, 그 밖의 배열·객체 → null.
  */
 internal object FlatJson {
 
@@ -92,7 +92,8 @@ internal object FlatJson {
             't' -> { literal("true"); true }
             'f' -> { literal("false"); false }
             'n' -> { literal("null"); null }
-            '[', '{' -> { skipNested(); null }
+            '[' -> numberArray()
+            '{' -> { skipNested(); null }
             else -> if (c == '-' || c.isDigit()) number() else fail("value")
         }
 
@@ -105,6 +106,38 @@ internal object FlatJson {
                 if (c.isDigit() || c == '-' || c == '+' || c == '.' || c == 'e' || c == 'E') sb.append(c) else { unread(c); break }
             }
             return sb.toString().toDoubleOrNull()
+        }
+
+        /** 숫자 배열이면 DoubleArray. 숫자가 아닌 원소가 나오면 나머지를 건너뛰고 null */
+        private fun numberArray(): DoubleArray? {
+            expect('[')
+            var out = DoubleArray(16)
+            var n = 0
+            if (peekNonWs() == ']') { next(); return DoubleArray(0) }
+            while (true) {
+                val c = peekNonWs()
+                if (!(c == '-' || c.isDigit())) { skipRest(); return null }
+                val v = number() ?: fail("number")
+                if (n == out.size) out = out.copyOf(n * 2)
+                out[n++] = v
+                when (nextNonWs()) {
+                    ',' -> continue
+                    ']' -> return out.copyOf(n)
+                    else -> fail("',' or ']'")
+                }
+            }
+        }
+
+        /** 이미 '['를 읽은 배열의 나머지를 건너뛴다 */
+        private fun skipRest() {
+            var depth = 1
+            while (depth > 0) {
+                when (nextNonWs()) {
+                    '"' -> { unread('"'); string() }
+                    '[', '{' -> depth++
+                    ']', '}' -> depth--
+                }
+            }
         }
 
         private fun skipNested() {
