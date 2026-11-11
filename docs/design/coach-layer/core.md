@@ -175,6 +175,7 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 | 서비스 P13 | TTS/STT 이벤트에 요청 번호 없음 | `VoiceAgent`가 stop 뒤 0.4초 늦게 다음 말을 시작 (완화) |
 | prompt.md 2.5 | 시연 질문이 실제 6초 만에 사라짐 | `EngineFactory`가 세계의 `engineConfig`를 받음 |
 | 정리 | 중복 코드 | TBT 종류 규칙은 `StopNames.kindFor` 하나. `CongestionMath`, `DemoDirector`, 옛 `RouteOracle.refine` 삭제 |
+| UI 계약 | `planGeneration`, 결과마다 다른 `goToResult.at`, 오래된 결과 | 요청한 계획만 번호를 올림, at을 늘 키움, 10분 뒤 거둠, 시작·종료 때 진행 중 상태 지움 (`thePlanGenerationRisesOnlyWhenAPlanIsRequested`, `goToResultsHaveDistinctTimestampsAndExpire`) |
 
 ## 12. 에뮬레이터 확인 (2026-11-12, Pleos Connect Emulator 2.1.0, debug, Virtual Console)
 
@@ -188,6 +189,7 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 | 실제 길안내 | `navi mode: UNKNOWN -> ROUTE_GUIDING`, `navi epoch 1: guidance started`, TBT 후보 `candidates READY ROUTE n=10 until=144490`. 급해 결과 수락 → `goTo result: WAYPOINT_ADDED SK네트웍스(주)스타팅광동주유소`, 화면 '경유지로 넣었어요' + 다음 추천이 그 주유소(엔진이 수락을 앎). 경유지 변경 이벤트 → epoch, `navi tbt dropped: route changed while asking` |
 | 마이크 토글 | 급해 질문을 말하는 중 마이크를 누르면 멈춘다 ('말하는 중' → 마이크) |
 | 급해 결과 세 번 연타 | `goTo` 1번, `addWaypoint` 1번 |
+| 성능 (release, 이전 main과 번갈아) | 시연 CPU 4.1% (이전 4.7%), PSS 72~75MB (같음), 내비 요청 약 70초에 15번 (이전 20~21). 실제 주행 CPU 1.4% (이전 1.1~1.2%), 내비 요청 14번 (이전 21). `docs/perf/2026-11-12-coach-layer.md` |
 
 기기에서 찾아 고친 것 (모두 테스트 먼저):
 - 길안내 중 목적지 응답 하나가 남은 거리 0을 주면 재탐색이 두 번 잡혔다 → 0은 못 읽은 것 (`NaviTrackerTest.aZeroRemainingDistanceWhileStillGuidingIsAGlitchNotTwoReroutes`)
@@ -200,3 +202,6 @@ NO_LOCATION(+ "현재 위치를 아직 모르겠어요"), 그 뒤라도 위치�
 - 급해 목록에서 엔진 질문과 다른 곳을 고르면 엔진은 그 선택을 모른다(질문 수락으로만 알린다). 고른 곳 고정도 엔진이 추천하는 동안만 유지된다.
 - 들르기 결과가 감시(140초)보다 늦게 오면 결과는 버려지지만 내비에는 들어갔을 수 있다 (prompt.md의 남은 위험과 같다).
 - LLM 해석은 에뮬레이터에서 응답하지 않는다(첫 호출 40초 뒤 스스로 꺼짐). 그동안 마이크 표시가 THINKING이다.
+- 실제 주행에서 앱 CPU가 이전보다 0.25%p 높다(매초 후보 투영, 1분 맥박 저장, 1초 후보 입력 확인). 내비 요청은 3분의 1 줄었다.
+- 정체 시간을 지나는 시간으로 바꾸면서 30~100m 정체는 1분 미만이 된다. 화면의 정체 라벨(`RouteModel.congestionLabel`, UI 담당)이 분을
+  반올림해 '정체 0분'으로 보일 수 있다 (`Labels.minutesOf`처럼 1분 미만은 1분으로 쓰거나 짧은 정체를 숨길 것).
