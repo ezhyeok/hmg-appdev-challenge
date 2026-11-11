@@ -35,6 +35,13 @@
         android:allowBackup="false"
         android:label="쉼표"
         android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        <!-- CCP(로터리) 미지원 선언 (CCP 개발 가이드 'CCP 미지원 선언 방법'). 사용자 설치 앱은 CCP 지원이 선택이고, 미지원이면
+             필수 조작을 터치만으로 끝낼 수 있어야 한다(쉼표는 모든 조작이 터치로 된다). 기본 포커스·포커스 순서·팝업 포커스 가두기는
+             넣었지만 CCP UX 가이드 심사 항목 전체를 실제 CCP로 확인하지 못했으므로 지원한다고 선언하지 않는다.
+             CCP Back(뒤로)에서 최상위 화면이면 moveTaskToBack(true)로 숨기는 필수 정책은 지킨다(ShimpyoContent) -->
+        <meta-data
+            android:name="com.hmg.rotary.ROTARY_SUPPORTED"
+            android:value="false" />
         <activity
             android:name=".MainActivity"
             android:exported="true">
@@ -42,7 +49,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- 주행 중에도 화면을 유지한다. 주행 중 조작 제한은 CarState.drivingRestricted로 앱이 직접 지킨다 -->
+            <!-- 주행 중에도 화면을 유지한다. 주행 중 조작 제한은 화면이 CarUxRestrictions를 직접 구독해 지킨다(UiRestrictions, 모르면 제한) -->
             <meta-data android:name="distractionOptimized" android:value="true" />
         </activity>
         <service

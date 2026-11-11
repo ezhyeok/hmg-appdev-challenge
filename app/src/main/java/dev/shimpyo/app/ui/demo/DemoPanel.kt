@@ -142,7 +142,7 @@ private fun ScenarioButton(s: DemoScenario, selected: Boolean, onClick: () -> Un
 
 private fun statusLines(s: CoachUiState): List<Pair<String, String>> = listOf(
     "시연 모드" to (demoTitle(s.demo) ?: "꺼짐"),
-    "주행 제한 (CarUxRestrictions)" to if (s.drivingRestricted) "켜짐" else "꺼짐",
+    "주행 제한 (서비스가 읽은 값)" to if (s.drivingRestricted) "켜짐" else "꺼짐",
     "기어" to if (s.parked) "P (정차)" else "주행",
     "차속" to (s.speedKph?.let { "${it.toInt()} km/h" } ?: "--"),
     "길안내" to if (s.guiding) listOfNotNull("안내 중", s.destinationName, s.remainDistanceM?.let { Labels.distance(it) }).joinToString(" · ") else "없음",

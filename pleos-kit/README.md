@@ -21,6 +21,7 @@ Pleos Connect SDK(Vehicle, NaviHelper, TTS, STT, FusedLocation)와 AAOS Car API�
 |---|---|
 | `VehicleKit` | Vehicle SDK. 자주 쓰는 신호를 `ReadSignal`/`ReadWriteSignal`로 제공. 그 밖의 API는 `call`, `call2`, `observe`로 감싼다 |
 | `CarState` | AAOS Car API. 기어, 차속, 주행 중 UX 제한을 `StateFlow`로 제공 |
+| `UxRestrictions`, `UxRestrictionWatcher` | 주행 중 UX 제한(`CarUxRestrictions`). 모르는 상태를 `Unknown`으로 따로 두고 `restricted`는 모르면 true(fail closed). 기능별 비트(`UxRestrictionFlags`)와 최대 글자 수·항목 수. `UxRestrictionWatcher`는 권한 없이 제한만 구독한다(화면이 서비스 없이 쓸 때) |
 | `NaviKit` | NaviHelper. 조회(`routeState`, `tbt`, `waypoints`, `tripEstimate` 등)와 경로 변경(`startRoute`, `addWaypoint`, `cancelRoute`) |
 | `TtsKit`, `SttKit` | 음성 합성·인식(ON_DEVICE 기본). `speak()`는 재생이 끝날 때까지 기다린다 |
 | `LocationKit` | FusedLocation. 마지막 위치, 위치 갱신 Flow, 근접 알림 Flow |
@@ -52,6 +53,7 @@ class DriveService : PleosForegroundService() {
             val applied: Boolean = recirculation.setAndConfirm(false)
 
             // 주행 상태
+            // 연결 전·구독 실패면 true다(모르면 제한). 기능별 비트는 car.uxRestrictions(Known.has(UxRestrictionFlags.LIMIT_CONTENT) 등)
             launch { car.drivingRestricted.collect { restricted -> /* 주행 중이면 화면 조작을 줄인다 */ } }
 
             // 내비: 길안내 없이 거리·시간·도착 시 배터리만 조회

@@ -1,7 +1,11 @@
 package dev.shimpyo.app.ui.preview
 
+import dev.shimpyo.coach.CandidatesState
 import dev.shimpyo.coach.CoachUiState
+import dev.shimpyo.coach.GoToOutcome
+import dev.shimpyo.coach.GoToResult
 import dev.shimpyo.coach.StopLog
+import dev.shimpyo.coach.UrgentState
 import dev.shimpyo.coach.VoiceState
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.Facilities
@@ -88,6 +92,11 @@ object Samples {
         remainTimeS = 4 * 3600.0 + 40 * 60,
         congestion = congestion,
         ahead = holidayAhead,
+        candidatesState = CandidatesState.READY,
+        promptReasons = listOf(Reason("LAST_CHANCE_CONGESTION", "이곳을 지나면 1시간 정체 구간에 화장실이 없어요")),
+        cabinSupported = true,
+        ttsAvailable = true,
+        sttAvailable = true,
         occupants = listOf(driver, kid),
         voice = VoiceState.LISTENING,
         demo = "holiday",
@@ -100,6 +109,7 @@ object Samples {
         fatigue = Gauge(31, Level.WATCH, listOf(Reason("FATIGUE_DRIVING", "1시간 29분째 쉬지 않고 운전 중이에요"))),
         next = Recommendation(manghyang.shift(-33.0), setOf(Purpose.RESTROOM), listOf(Reason("NEXT_NEAREST_RESTROOM", "가장 빨리 갈 수 있는 화장실이에요"))),
         prompt = null,
+        promptReasons = emptyList(),
         congestion = emptyList(),
         ahead = listOf(manghyang, shelter, oksan, jukam).map { it.shift(-33.0) },
         occupants = listOf(driver),
@@ -120,6 +130,7 @@ object Samples {
         ),
         next = Recommendation(manghyang.copy(routeDistanceM = 8_100.0, etaS = 330.0), setOf(Purpose.REST, Purpose.RESTROOM), listOf(Reason("NEXT_REST", "쉬어 가기 좋은 가장 가까운 곳이에요"))),
         prompt = Prompt("rest-1", PromptKind.REST_SUGGESTION, "1시간 46분째 쉬지 않으셨어요. 8.1km 앞 망향휴게소에서 쉬어 갈까요?", manghyang.copy(routeDistanceM = 8_100.0, etaS = 330.0), now + 45_000),
+        promptReasons = listOf(Reason("NEXT_REST", "쉬어 가기 좋은 가장 가까운 곳이에요")),
         voice = VoiceState.SPEAKING,
         demo = "fatigue",
     )
@@ -156,6 +167,10 @@ object Samples {
         restroom = Gauge(8, Level.NOW, listOf(Reason("RESTROOM_VOICED", "아기가 화장실이 필요하다고 했어요")), drivenBy = "baby"),
         fatigue = Gauge(88, Level.OK, listOf(Reason("FATIGUE_DRIVING", "32분째 쉬지 않고 운전 중이에요"))),
         urgent = urgentResults,
+        urgentState = UrgentState.READY,
+        urgentRequestId = 1L,
+        ttsAvailable = true,
+        sttAvailable = true,
         prompt = Prompt("urgent-1", PromptKind.URGENT_RESULT, "가장 빠른 곳은 역삼 공영주차장 화장실, 약 3분이에요. 안내할까요?", urgentResults[0].stop, now + 90_000),
         parked = false,
         drivingRestricted = true,
@@ -184,6 +199,7 @@ object Samples {
         restroom = Gauge(95, Level.OK, listOf(Reason("RESTROOM_ELAPSED", "7살 아이 기준, 마지막 화장실 후 10분 지났어요")), drivenBy = "kid"),
         fatigue = Gauge(120, Level.OK, emptyList()),
         prompt = null,
+        promptReasons = emptyList(),
         next = Recommendation(departAhead[0], setOf(Purpose.RESTROOM), listOf(Reason("NEXT_NEAREST_RESTROOM", "가장 빨리 갈 수 있는 화장실이에요"))),
         plan = PitStopPlan(
             stops = listOf(
@@ -215,6 +231,9 @@ object Samples {
 
     /** 처음 실행: 서비스가 아직 계산 전 */
     val starting = CoachUiState(serviceRunning = false, occupants = listOf(driver))
+
+    /** 경유지 넣기 실패: 주행 화면이 [다시 시도] 카드를 보인다 */
+    val goToFailed = cruising.copy(goToResult = GoToResult(manghyang.shift(-33.0), GoToOutcome.FAILED, now))
 
     /** 탑승자를 처음 고르는 화면 (운전자만) */
     val onlyDriver = parkedPlan.copy(occupants = listOf(driver), restroom = Gauge(140, Level.OK, emptyList(), drivenBy = "driver"))

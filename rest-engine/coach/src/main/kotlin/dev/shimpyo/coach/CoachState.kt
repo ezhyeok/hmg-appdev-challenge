@@ -6,8 +6,8 @@ import dev.shimpyo.engine.Gauge
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.PitStopPlan
 import dev.shimpyo.engine.Prompt
-import dev.shimpyo.engine.Reason
 import dev.shimpyo.engine.RankedStop
+import dev.shimpyo.engine.Reason
 import dev.shimpyo.engine.Recommendation
 import dev.shimpyo.engine.StopCandidate
 
@@ -50,6 +50,12 @@ data class CoachUiState(
     val urgentState: UrgentState = UrgentState.IDLE,
     val urgentRequestId: Long = 0,
     val plan: PitStopPlan? = null,
+    /**
+     * 계획을 새로 세울 때마다 1씩 오르는 번호 (MakePlan에 답해 새로 세웠는지 화면이 안다). 지나친 정차를 빼거나 거리를 고쳐
+     * 같은 계획을 다시 낼 때는 올리지 않는다(그때마다 '계획을 세우는 중'이 풀리면 안 된다). 0이면 이 번호를 쓰지 않는 코치다.
+     * (2026-11-12 UI 계약 추가)
+     */
+    val planGeneration: Long = 0,
     val parked: Boolean = true,
     /**
      * 주행 중 UX 제한. 모르면 제한으로 본다(서비스 시작 전·권한 창·Car 서비스 오류에도 주차 중 화면이 열리지 않게).

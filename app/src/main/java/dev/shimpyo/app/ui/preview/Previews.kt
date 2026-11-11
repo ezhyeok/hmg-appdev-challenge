@@ -20,7 +20,7 @@ fun SampleFrame(
     state: CoachUiState,
     screen: Screen = Screen.DRIVE,
     dark: Boolean = false,
-    urgentPending: Boolean = false,
+    urgentRequest: Long? = null,
     healthConsent: Boolean = false,
 ) {
     ShimpyoTheme(darkTheme = dark) {
@@ -28,7 +28,7 @@ fun SampleFrame(
             state = state,
             host = PreviewHost(MemoryPrefs(healthConsent = healthConsent)),
             initialScreen = screen,
-            initialUrgentPending = urgentPending,
+            initialUrgentRequest = urgentRequest,
         )
     }
 }
@@ -67,11 +67,23 @@ private fun DriveParkedPreview() = SampleFrame(Samples.parkedPlan)
 @Composable
 private fun DriveStartingPreview() = SampleFrame(Samples.starting)
 
+@Preview(name = "주행 · 경유지 실패", widthDp = 840, heightDp = 1184)
+@Composable
+private fun DriveGoToFailedPreview() = SampleFrame(Samples.goToFailed)
+
+@Preview(name = "주행 · 위치 확인 중 (후보 없음)", widthDp = 840, heightDp = 1184)
+@Composable
+private fun DriveNoLocationPreview() = SampleFrame(Samples.cruising.copy(next = null, ahead = emptyList(), candidatesState = dev.shimpyo.coach.CandidatesState.NO_LOCATION))
+
 // ------------------------------------------------------------ 3. 급해 결과
 
 @Preview(name = "급해 · 주행 중 (2곳)", widthDp = 840, heightDp = 1184)
 @Composable
 private fun UrgentDrivingPreview() = SampleFrame(Samples.urgentDriving)
+
+@Preview(name = "급해 · 주행 중 compact 628×855", widthDp = 628, heightDp = 855)
+@Composable
+private fun UrgentDrivingCompactPreview() = SampleFrame(Samples.urgentDriving)
 
 @Preview(name = "급해 · 주행 중 가로", widthDp = 1700, heightDp = 1184)
 @Composable
@@ -83,7 +95,7 @@ private fun UrgentParkedPreview() = SampleFrame(Samples.urgentDriving.copy(drivi
 
 @Preview(name = "급해 · 찾는 중", widthDp = 840, heightDp = 1184)
 @Composable
-private fun UrgentLoadingPreview() = SampleFrame(Samples.cruising, urgentPending = true)
+private fun UrgentLoadingPreview() = SampleFrame(Samples.cruising, urgentRequest = 1L)
 
 // ------------------------------------------------------------ 2. 계획
 

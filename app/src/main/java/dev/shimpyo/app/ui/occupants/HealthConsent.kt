@@ -1,6 +1,7 @@
 package dev.shimpyo.app.ui.occupants
 
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.rememberUpdatedState
 import dev.shimpyo.app.ui.Labels.isHealth
 import dev.shimpyo.app.ui.PrefsState
 import dev.shimpyo.app.ui.components.LocalOverlays
@@ -23,10 +24,13 @@ const val HEALTH_CONSENT_TEXT = "$HEALTH_CONSENT_TITLE — $HEALTH_CONSENT_DETAI
 /**
  * 동의 스위치 행. 켤 때는 확인 팝업으로 명시적으로 동의를 받고,
  * 끌 때 건강 관련 탑승자가 있으면 지운다는 확인을 받는다.
+ * 철회 확인은 누르는 순간의 탑승자 목록으로 지운다: 팝업이 떠 있는 동안 음성으로 탑승자가 바뀌어도 그 변경을 되돌리지 않게
+ * (UI 감사 #23: 팝업을 연 때의 목록으로 덮어썼다).
  */
 @Composable
 fun HealthConsentRow(prefs: PrefsState, occupants: List<Occupant>, onSetOccupants: (List<Occupant>) -> Unit) {
     val overlays = LocalOverlays.current
+    val latest = rememberUpdatedState(occupants)
     SettingRow(
         title = HEALTH_CONSENT_TITLE,
         subtitle = HEALTH_CONSENT_DETAIL,
@@ -49,7 +53,7 @@ fun HealthConsentRow(prefs: PrefsState, occupants: List<Occupant>, onSetOccupant
                         confirmText = "철회하고 지우기",
                         onConfirm = {
                             prefs.updateHealthConsent(false)
-                            onSetOccupants(occupants.filterNot { it.type.isHealth })
+                            onSetOccupants(withoutHealth(latest.value))
                         },
                     ),
                 )
@@ -60,3 +64,6 @@ fun HealthConsentRow(prefs: PrefsState, occupants: List<Occupant>, onSetOccupant
         trailing = { PleosSwitch(prefs.healthConsent) },
     )
 }
+
+/** 동의 철회 때 남길 탑승자 */
+fun withoutHealth(occupants: List<Occupant>): List<Occupant> = occupants.filterNot { it.type.isHealth }

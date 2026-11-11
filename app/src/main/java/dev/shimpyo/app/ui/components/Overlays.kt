@@ -2,8 +2,8 @@ package dev.shimpyo.app.ui.components
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -28,14 +28,20 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.ui.Alignment
+import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.dialog
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.shimpyo.app.ui.RequestFocusOnce
 import dev.shimpyo.app.ui.theme.Dimens
 import dev.shimpyo.app.ui.theme.PleosType
 import dev.shimpyo.app.ui.theme.ShimpyoTheme
@@ -85,17 +91,21 @@ val LocalOverlays = staticCompositionLocalOf { OverlayState() }
 /**
  * System popup: 폭 808(세로 윈도에서는 윈도 폭 - 32), 반경 48, 안쪽 여백 48, 버튼 100 간격 24,
  * 바탕 background_popup, 뒤 overlay_default. 뒤를 누르면 닫힌다.
+ *
+ * CCP·키 포커스는 팝업 안에 가둔다: 열리면 [취소]에 포커스를 주고(파괴적 동작의 안전한 기본값), 회전해도 팝업 밖
+ * (아래 화면의 버튼)으로 나가지 않는다. 뒤 덮개는 탭만 받고 포커스는 받지 않는다 (UI 감사 #13).
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun PopupLayer(state: OverlayState) {
     val spec = state.popup ?: return
     val c = ShimpyoTheme.colors
-    val scrimInteraction = remember { MutableInteractionSource() }
+    val cancelFocus = remember { FocusRequester() }
     BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(c.overlayDefault)
-            .clickable(interactionSource = scrimInteraction, indication = null) { state.dismissPopup() },
+            .pointerInput(state) { detectTapGestures { state.dismissPopup() } },
         contentAlignment = Alignment.Center,
     ) {
         val width = minOf(Dimens.Component.popupWidthMedium, maxWidth - 32.dp)
@@ -106,10 +116,13 @@ fun PopupLayer(state: OverlayState) {
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
                 .semantics { dialog() }
+                .focusProperties { exit = { FocusRequester.Cancel } }
+                .focusGroup()
                 .shadow(Dimens.Elevation.level3, shape)
                 .clip(shape)
                 .background(c.backgroundPopup)
-                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { }
+                // 팝업 안을 누르면 닫히지 않게 탭을 여기서 먹는다 (포커스는 받지 않는다)
+                .pointerInput(Unit) { detectTapGestures { } }
                 .padding(Dimens.Component.popupPadding),
         ) {
             Text(spec.title, style = PleosType.TitleMedium, color = c.textPrimary)
@@ -128,10 +141,11 @@ fun PopupLayer(state: OverlayState) {
                     filled = true,
                     modifier = Modifier.weight(1f),
                 )
-                PleosButton(spec.cancelText, onClick = { state.dismissPopup() }, modifier = Modifier.weight(1f))
+                PleosButton(spec.cancelText, onClick = { state.dismissPopup() }, modifier = Modifier.weight(1f).focusRequester(cancelFocus))
             }
         }
     }
+    RequestFocusOnce(cancelFocus, spec)
 }
 
 /**

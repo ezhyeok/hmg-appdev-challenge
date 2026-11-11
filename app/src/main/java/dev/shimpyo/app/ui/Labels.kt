@@ -2,6 +2,7 @@ package dev.shimpyo.app.ui
 
 import androidx.compose.ui.graphics.vector.ImageVector
 import dev.shimpyo.app.ui.components.ShimpyoIcons
+import dev.shimpyo.app.ui.theme.DriveLimits
 import dev.shimpyo.engine.CoachConfig
 import dev.shimpyo.engine.CoachTexts
 import dev.shimpyo.engine.Level
@@ -75,15 +76,18 @@ object Labels {
         Level.NOW -> "지금"
     }
 
-    /** 탑승자 유형별 기본 화장실 간격(분). 엔진 CoachConfig의 사전값 (SPEC 4.1) */
-    fun baselineMin(o: Occupant?): Int = when (o?.type) {
+    /**
+     * 그 탑승자의 화장실 기준 간격(분): 개인 간격(Occupant.intervalOverrideMin)이 있으면 그것, 없으면 유형별 사전값
+     * (엔진 CoachConfig, SPEC 4.1). 게이지 막대의 분모와 탑승자 화면의 "N분마다"가 같은 값을 쓴다
+     */
+    fun baselineMin(o: Occupant?): Int = o?.intervalOverrideMin?.takeIf { it > 0.0 }?.roundToInt() ?: when (o?.type) {
         null, OccupantType.ADULT -> config.priorAdultMin
         OccupantType.ELDERLY -> config.priorElderlyMin
         OccupantType.OAB -> config.priorOabMin
         OccupantType.IBS -> config.priorIbsMin
         OccupantType.PREGNANT -> config.priorPregnantMin
         OccupantType.CHILD -> {
-            val age = o?.ageYears
+            val age = o.ageYears
             when {
                 age == null || age <= 6 -> config.priorChildYoungMin
                 age <= 12 -> config.priorChildOlderMin
@@ -205,25 +209,37 @@ object Labels {
 
     /**
      * 칩·게이지 한 줄에 쓰는 짧은 문구. [who]는 화장실 게이지를 정한 탑승자의 공개 이름이다.
-     * 모르는 코드는 원문이 짧을 때만 그대로 쓴다.
+     * 결과는 늘 [DriveLimits.MAX_CHIP_CHARS]자 이하다(넘치면 짧은 대체 문구, 그래도 넘치면 null).
+     * 모르는 코드는 null이다: 원문을 그대로 내보내면 새 코드의 문장이 질환 이름을 흘릴 수 있다(UI 감사 #17).
+     * 엔진이 내는 코드는 모두 여기나 [NOT_CHIP_CODES]에 있어야 한다(ReasonCoverageTest가 엔진 소스로 지킨다).
      */
     fun shortReason(r: Reason, who: String? = null): String? = when (r.code) {
-        "RESTROOM_ELAPSED" -> "${who ?: "탑승자"} 기준"
-        "RESTROOM_VOICED" -> "${who ?: "탑승자"} 요청"
+        "RESTROOM_ELAPSED" -> fitChip("${who ?: "탑승자"} 기준", "탑승자 기준")
+        "RESTROOM_VOICED" -> fitChip("${who ?: "탑승자"} 요청", "탑승자 요청")
         "RESTROOM_PERSONAL" -> firstNumber(r.text, "번")?.let { "기록 ${it}번 반영" } ?: "내 기록 반영"
         "RESTROOM_NONE" -> "탑승자 설정 필요"
+        // 정차 간 상한(카시트·걷기). 원문에 탑승자 이름(질환 이름일 수 있다)이 있으므로 시간만 쓴다
+        "RESTROOM_CAP" -> durationIn(r.text)?.let { d ->
+            if (r.text.contains("카시트")) chipWithDuration("카시트 ", d, " 상한") else chipWithDuration("", d, "마다 걷기")
+        } ?: "정차 간격 상한"
         "FATIGUE_VOICED" -> "졸리다고 하심"
+        "FATIGUE_STRONG" -> "커피·낮잠 권장"
         "FATIGUE_DRIVING" -> durationIn(r.text)?.let { "연속 ${if (it >= 60) hhmm(it) else "${it}분"}" } ?: "연속 운전"
         "FATIGUE_NIGHT" -> "새벽 2~6시"
         "FATIGUE_AFTERNOON" -> "오후 2~4시"
+        "FATIGUE_BODY_CLOCK" -> "졸음 오는 시간대"
+        "FATIGUE_AWAKE_LONG" -> firstNumber(r.text, "시간")?.let { fitChip("깬 지 ${it}시간+", "오래 깨어 있음") } ?: "오래 깨어 있음"
         "FATIGUE_SHORT_SLEEP" -> "수면 부족"
+        "FATIGUE_MONOTONY" -> "단조로운 주행"
         "FATIGUE_STYLE", "STYLE_STEERING_REVERSAL", "STYLE_STEERING_MICRO", "STYLE_SPEED", "STYLE_BRAKE" -> "운전 패턴 변화"
         "STYLE_BASELINE" -> "운전 패턴 익히는 중"
-        "FATIGUE_RECIRC" -> "환기 권장"
-        "NEXT_ACCEPTED" -> "경유지로 넣음"
+        "FATIGUE_RECIRC", "CABIN_RECIRC" -> "환기 권장"
+        "CABIN_COOL_DOWN" -> "온도 낮추기 권장"
+        "NEXT_ACCEPTED" -> "들르기로 함"
         "NEXT_NEAREST_RESTROOM" -> "가장 빨리 가는 곳"
-        "LAST_CHANCE_CONGESTION" -> durationIn(r.text)?.let { "정체 ${duration(it)} 전 마지막" } ?: "정체 전 마지막"
-        "LAST_CHANCE_GAP" -> durationIn(r.text)?.let { "이후 ${duration(it)} 공백" } ?: "공백 전 마지막"
+        // 맥락 줄이 이미 "정체 전 마지막 화장실"·"화장실 공백 전 마지막 기회"라서 칩은 길이만 보인다
+        "LAST_CHANCE_CONGESTION" -> durationIn(r.text)?.let { chipWithDuration("정체 ", it, "") } ?: "정체 전 마지막"
+        "LAST_CHANCE_GAP" -> durationIn(r.text)?.let { chipWithDuration("공백 ", it, "") } ?: "공백 전 마지막"
         "LAST_CHANCE_PREFERENCE" -> "기준보다 긴 공백"
         "NEXT_REST" -> "휴식 권유"
         "NEXT_MEAL" -> "식사 가능"
@@ -238,7 +254,22 @@ object Labels {
             else -> "CCTV"
         }
         "URGENT_DIAPER" -> "교환대"
-        else -> r.text.takeIf { it.length <= 12 }
+        else -> null
+    }?.takeIf { it.length <= DriveLimits.MAX_CHIP_CHARS }
+
+    /** 칩으로 쓰지 않는 엔진 코드 (계획 메모는 정차 화면에 문장으로, 급해 소요 시간은 결과 카드의 구성 줄로 보인다) */
+    val NOT_CHIP_CODES: Set<String> = setOf(
+        "PLAN_NO_CANDIDATES", "PLAN_NOW", "PLAN_GAP", "PLAN_FUEL_SHORT", "PLAN_NONE_NEEDED", "PLAN_MEAL", "PLAN_FUEL",
+        "PLAN_SLEEPY_TIME", "PLAN_NO_DESTINATION", "PLAN_PARTIAL", "URGENT_TIME",
+    )
+
+    /** [text]가 칩 길이를 넘으면 [fallback] */
+    private fun fitChip(text: String, fallback: String): String = if (text.length <= DriveLimits.MAX_CHIP_CHARS) text else fallback
+
+    /** "정체 1시간 30분"처럼 우리말 시간이 들어가면 그대로, 넘치면 "정체 1:30"처럼 줄인다 */
+    private fun chipWithDuration(prefix: String, min: Int, suffix: String): String {
+        val full = "$prefix${duration(min)}$suffix"
+        return if (full.length <= DriveLimits.MAX_CHIP_CHARS || min < 60) full else "$prefix${hhmm(min)}$suffix"
     }
 
     /** "1시간 48분째" → 108, "40분 정체" → 40. 없으면 null */
