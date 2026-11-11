@@ -106,6 +106,29 @@ class CongestionDisplayTest {
     }
 
     @Test
+    fun aRestroomBetweenTwoItemsKeepsThemApartLikeTheEngine() {
+        // 엔진은 두 항목 사이에 화장실 기회가 있으면 1km 안이어도 따로 본다: 그 휴게소가 뒤 정체 전 마지막 화장실이다.
+        // 화면이 묶으면 "정체 전 마지막 화장실"이라고 묻는 곳이 1시간 정체 한가운데로 그려진다
+        val a = jam(10_000.0, 4_000.0, 1_800.0)
+        val b = jam(14_600.0, 5_400.0, 1_800.0)
+        assertEquals(1, displayJams(listOf(a, b)).size)
+        assertEquals(listOf(10_000.0, 14_600.0), displayJams(listOf(a, b), opportunitiesM = listOf(14_300.0)).map { it.startDistanceM })
+        // 항목 안쪽이나 멀리 있는 기회는 가르지 않는다
+        assertEquals(1, displayJams(listOf(a, b), opportunitiesM = listOf(12_000.0, 30_000.0)).size)
+
+        val state = CoachUiState(
+            guiding = true, remainDistanceM = 200_000.0, remainTimeS = 9_000.0,
+            ahead = listOf(opp("mid", 14.3), opp("far", 40.0)), congestion = listOf(a, b),
+        )
+        assertEquals(2, stripData(state).spans.count { it.kind == StripSpanKind.CONGESTION })
+        val rows = timeline(state)
+        val jams = rows.withIndex().filter { it.value is TimelineRow.Congestion }.map { it.index }
+        val mid = rows.indexOfFirst { it is TimelineRow.Stop && it.stop.id == "mid" }
+        assertEquals(2, jams.size)
+        assertTrue("정체 30분 → 휴게소 → 정체 30분 순서: $rows", jams[0] < mid && mid < jams[1])
+    }
+
+    @Test
     fun onlyJamsThatTakeFiveMinutesOrMoreAreShown() {
         assertTrue(displayJams(listOf(jam(3_000.0, 2_000.0, 299.0))).isEmpty())
         assertEquals(1, displayJams(listOf(jam(3_000.0, 2_000.0, 300.0))).size)

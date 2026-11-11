@@ -421,7 +421,7 @@ private fun nearestCard(a: StopCandidate, state: CoachUiState): StopCardModel {
  */
 private fun jamChip(a: StopCandidate, state: CoachUiState): String? {
     val d = a.routeDistanceM ?: return null
-    val jams = displayJams(state.congestion).filter { it.startDistanceM < d }
+    val jams = displayJams(state).filter { it.startDistanceM < d }
     if (jams.isEmpty()) return null
     return if (jams.any { it.startDistanceM + it.lengthM > d }) "정체 구간 안" else "정체 뒤"
 }

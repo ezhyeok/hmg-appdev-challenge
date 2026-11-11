@@ -129,7 +129,7 @@ fun timeline(state: CoachUiState): List<TimelineRow> {
         }
     }
     restroomGaps(state).forEach { rows += TimelineRow.Gap(it) }
-    displayJams(state.congestion).forEach { rows += TimelineRow.Congestion(it) }
+    displayJams(state).forEach { rows += TimelineRow.Congestion(it) }
     state.remainDistanceM?.let { d -> rows += TimelineRow.Destination(state.destinationName, d, state.remainTimeS ?: d / speed) }
     return rows.sortedWith(compareBy<TimelineRow> { it.distanceM }.thenBy { order(it) })
 }

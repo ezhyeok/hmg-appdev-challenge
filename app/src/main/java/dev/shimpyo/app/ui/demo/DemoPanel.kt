@@ -148,7 +148,7 @@ private fun statusLines(s: CoachUiState): List<Pair<String, String>> = listOf(
     "차속" to (s.speedKph?.let { "${it.toInt()} km/h" } ?: "--"),
     "길안내" to if (s.guiding) listOfNotNull("안내 중", s.destinationName, s.remainDistanceM?.let { Labels.distance(it) }).joinToString(" · ") else "없음",
     // 화면에 그리는 정체(displayJams)와 내비가 준 항목 수를 함께 보인다: 짧은 느린 구간은 항목이지만 정체로 그리지 않는다
-    "경로 앞" to "화장실 ${s.ahead.size}곳 · 정체 ${displayJams(s.congestion).size}구간 (내비 항목 ${s.congestion.size})",
+    "경로 앞" to "화장실 ${s.ahead.size}곳 · 정체 ${displayJams(s).size}구간 (내비 항목 ${s.congestion.size})",
     "음성" to (s.lastHeard?.let { "\"$it\"" } ?: s.voice.name),
     "코치 서비스" to if (s.serviceRunning) "실행 중" else "꺼짐",
     "상태" to (s.status ?: "--"),
