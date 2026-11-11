@@ -22,14 +22,21 @@ object RouteOpportunities {
     fun extract(tbt: List<TbtItem>): List<RouteOpportunity> {
         var cumulative = 0.0
         val out = ArrayList<RouteOpportunity>()
-        for (item in tbt) {
-            cumulative += item.distanceM.coerceAtLeast(0.0)
-            val kind = when (item.type) {
-                TbtType.SERVICE_AREA -> StopKind.HIGHWAY_REST_AREA
-                TbtType.REST_AREA -> StopKind.DROWSY_SHELTER
-                else -> null
-            } ?: continue
+        // 거리가 깨진 항목(NaN·음수)부터는 누적 거리를 믿을 수 없어 읽지 않는다 (TbtDigest, 데이터 감사 #7)
+        for (item in TbtDigest.readable(tbt)) {
+            cumulative += item.distanceM
+            if (item.type != TbtType.SERVICE_AREA && item.type != TbtType.REST_AREA) continue
             val name = item.description.trim()
+            // 종류는 이름이 분명하면 이름을 따른다. SERVICEAREA로 온 '옥산졸음쉼터(서울방향)'를 휴게소로 보면 같은 이름의
+            // 옥산휴게소(부산방향, 0.3km)와 짝이 되어 반대 차로 시설을 준다 (데이터 감사 #5). 둘 다거나 둘 다 아니면 TBT 종류를 따른다
+            val saysRestArea = name.contains("휴게소")
+            val saysShelter = name.contains("쉼터")
+            val kind = when {
+                saysShelter && !saysRestArea -> StopKind.DROWSY_SHELTER
+                saysRestArea && !saysShelter -> StopKind.HIGHWAY_REST_AREA
+                item.type == TbtType.SERVICE_AREA -> StopKind.HIGHWAY_REST_AREA
+                else -> StopKind.DROWSY_SHELTER
+            }
             // 하이패스센터처럼 화장실이 없는 '서비스 시설'도 SERVICEAREA로 온다. 이름으로 거른다
             if (!isRestStop(name, kind)) continue
             out += RouteOpportunity(name = name, kind = kind, routeDistanceM = cumulative)
@@ -37,8 +44,8 @@ object RouteOpportunities {
         return out
     }
 
-    /** 다음 회전까지 거리 (첫 항목) */
-    fun nextManeuverDistance(tbt: List<TbtItem>): Double? = tbt.firstOrNull()?.distanceM
+    /** 다음 회전까지 거리 (첫 항목). 첫 거리가 깨졌으면 null */
+    fun nextManeuverDistance(tbt: List<TbtItem>): Double? = TbtDigest.readable(tbt).firstOrNull()?.distanceM
 
     private fun isRestStop(name: String, kind: StopKind): Boolean = when (kind) {
         StopKind.HIGHWAY_REST_AREA -> name.contains("휴게소") || name.contains("쉼터")
