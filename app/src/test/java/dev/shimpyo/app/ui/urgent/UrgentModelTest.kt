@@ -1,8 +1,11 @@
 package dev.shimpyo.app.ui.urgent
 
+import dev.shimpyo.app.ui.GoToBusy
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.UrgentState
 import dev.shimpyo.engine.Facilities
+import dev.shimpyo.engine.Prompt
+import dev.shimpyo.engine.PromptKind
 import dev.shimpyo.engine.RankedStop
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
@@ -136,6 +139,40 @@ class UrgentModelTest {
         // 옛 코치(번호 0)는 바꾸지 않는다
         val legacy = urgentView(7, emptySet(), on.copy(urgent = listOf(r1)), false, null)!!
         assertEquals(7L, adoptUrgentRequest(7, legacy, on.copy(urgent = listOf(r1))))
+    }
+
+    @Test
+    fun coreOpenedNegativeIdsAreFollowedAndStayClosedOnceDismissed() {
+        // 코어가 음성 "화장실 급해"로 여는 번호는 음수이고 코어마다 겹치지 않는다 (닫힘 검증 UI-N4)
+        val first = -1_731_000_001L
+        val v = urgentView(null, emptySet(), coach(first, UrgentState.READY, listOf(r1)), false, null)!!
+        assertEquals(first, v.requestId)
+        assertEquals(first, adoptUrgentRequest(7, v, coach(first, UrgentState.READY, listOf(r1))))
+        assertNull(urgentView(null, setOf(first), coach(first, UrgentState.READY, listOf(r1)), false, null))
+        // 다시 뜬 코어의 다른 음수 번호는 닫은 번호가 아니다: 화면이 열린다
+        val next = urgentView(null, setOf(first), coach(-1_731_000_777L, UrgentState.READY, listOf(r1)), false, null)!!
+        assertEquals(UrgentStatus.READY, next.status)
+    }
+
+    @Test
+    fun anotherQuestionIsShownOnTheUrgentScreenButNotItsOwn() {
+        // UI 감사 #27: 급해 화면이 떠 있는 동안 온 다른 질문(마지막 기회 등)은 화면 위에 알린다. 급해 질문 자체는 결과 카드가 답이다
+        val own = Prompt("u#1", PromptKind.URGENT_RESULT, "안내할까요?", r1.stop, Long.MAX_VALUE)
+        val other = Prompt("lc#1", PromptKind.LAST_CHANCE, "들를까요?", r1.stop, Long.MAX_VALUE)
+        assertNull(urgentQuestion(on.copy(prompt = own)))
+        assertEquals(other, urgentQuestion(on.copy(prompt = other)))
+        // 멈춘 코치의 남은 질문에는 받을 사람이 없다
+        assertNull(urgentQuestion(on.copy(serviceRunning = false, prompt = other)))
+        assertNull(urgentQuestion(on))
+    }
+
+    @Test
+    fun aGoToForAStopThatIsNotOnTheListIsExplainedAboveIt() {
+        // 닫힘 검증 UI-N2: 내비에 넣는 동안 결과 카드는 모두 꺼진다. 보이는 카드가 아닌 곳(질문에 '응'한 곳)을 넣는 중이면 이유를 한 줄로 보인다
+        assertEquals("옥산휴게소를 내비에 넣는 중…", busyElsewhere(GoToBusy("oksan", "옥산휴게소(부산방향)"), listOf(r1)))
+        // 보이는 카드를 넣는 중이면 그 카드가 '넣는 중…'을 보인다
+        assertNull(busyElsewhere(GoToBusy("u1", r1.stop.name), listOf(r1)))
+        assertNull(busyElsewhere(null, listOf(r1)))
     }
 
     @Test

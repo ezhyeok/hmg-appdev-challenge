@@ -5,11 +5,12 @@ import dev.shimpyo.coach.CandidateProvider
 import dev.shimpyo.coach.CoachClock
 import dev.shimpyo.coach.CoachCore
 import dev.shimpyo.coach.CoachDeps
-import dev.shimpyo.coach.CoachGates
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.ElapsedClock
+import dev.shimpyo.coach.EngineAccepted
 import dev.shimpyo.coach.Fix
 import dev.shimpyo.coach.IntentInterpreter
+import dev.shimpyo.coach.LoopInputs
 import dev.shimpyo.coach.MemoryPort
 import dev.shimpyo.coach.NaviPort
 import dev.shimpyo.coach.NaviTracker
@@ -25,7 +26,9 @@ import dev.shimpyo.coach.UiSink
 import dev.shimpyo.coach.VoicePort
 import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.Occupant
+import dev.shimpyo.engine.CoachEngine
 import dev.shimpyo.engine.PersonalMemory
+import dev.shimpyo.engine.Purpose
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
 import dev.shimpyo.engine.VoiceIntent
@@ -166,6 +169,18 @@ class FakeInterpreter(var intent: VoiceIntent? = null, var people: List<Occupant
     override suspend fun occupants(text: String): List<Occupant>? = people
 }
 
+/** 엔진에 알린 '들르기로 한 곳'을 적어 두고 엔진에 그대로 넘긴다 (앱과 같은 길: EngineAccepted.ENGINE) */
+class RecordingAccepted : EngineAccepted {
+    data class Note(val stopId: String, val purposes: Set<Purpose>, val now: Long, val engine: CoachEngine)
+
+    val notes = mutableListOf<Note>()
+
+    override fun note(engine: CoachEngine, stop: StopCandidate, purposes: Set<Purpose>, now: Long) {
+        notes += Note(stop.id, purposes, now, engine)
+        EngineAccepted.ENGINE.note(engine, stop, purposes, now)
+    }
+}
+
 /** 경부선 남행 부산방향 시설 (앱 데이터와 같은 좌표, DemoRun의 시연 경로가 이 점들을 잇는다) */
 object Gyeongbu {
     private fun s(id: String, name: String, lat: Double, lon: Double, kind: StopKind = StopKind.HIGHWAY_REST_AREA) =
@@ -199,15 +214,16 @@ class CoreRig(
     val interpreter: IntentInterpreter? = null,
     wallBase: Long = 1_762_909_200_000L,
 ) {
+    val accepted = RecordingAccepted()
     val clock = RigClock(test.testScheduler, wallBase)
     val log = RecordingLog()
     val hub = SignalHub()
     val odometer = Odometer(clock)
     val positions = PositionTracker(clock) { PositionTracker.isMoving(hub.speedKph, hub.gear == Gear.PARK) }
-    val gates = CoachGates()
+    val loopInputs = LoopInputs()
     val fakeNavi = FakeNaviPort(clock)
     val navi = CommandNavi(fakeNavi)
-    val tracker = NaviTracker(navi, odometer, { hub.speedKph != null }, clock, log, positions.naviFallback { gates.naviFallback })
+    val tracker = NaviTracker(navi, odometer, { hub.speedKph != null }, clock, log, positions.naviFallback { loopInputs.naviFallback })
     val oracle = RouteOracle(navi, clock, log)
     val stops: StopIndex = PromptFakes.Stops(stopRows)
     val candidates = CandidateProvider(stops, oracle, odometer, clock, log)
@@ -218,8 +234,8 @@ class CoreRig(
         CoachDeps(
             wall = clock, elapsed = clock, hub = hub, odometer = odometer, positions = positions, navi = navi, tracker = tracker,
             candidates = candidates, oracle = oracle, stops = stops, voice = voice, interpreter = interpreter, cabin = cabin,
-            history = history, memory = timedMemory, settings = settings, trips = trips, engines = seededEngines(), ui = ui, gates = gates,
-            io = StandardTestDispatcher(test.testScheduler), log = log,
+            history = history, memory = timedMemory, settings = settings, trips = trips, engines = seededEngines(), ui = ui, loopInputs = loopInputs,
+            io = StandardTestDispatcher(test.testScheduler), log = log, accepted = accepted,
         ),
     )
 
@@ -228,7 +244,7 @@ class CoreRig(
     fun start() {
         test.backgroundScope.launch { core.run() }
         test.backgroundScope.launch { tracker.run() }
-        test.backgroundScope.launch { candidates.run { gates.request } }
+        test.backgroundScope.launch { candidates.run { loopInputs.request } }
         test.runCurrent()
     }
 
@@ -273,5 +289,12 @@ class CoreRig(
 
     fun memoryOf(): PersonalMemory = memory.stored
     fun appended(): List<StopLog> = history.appended
-    fun fix(lat: Double, lon: Double, heading: Float? = 180f) = positions.onFused(Fix(lat, lon, heading))
+    /**
+     * 차의 위치. 위치 SDK와 내비가 같은 곳을 본다: 테스트는 위치를 한 번만 넣고 달리므로(차속만 있다) 15초 뒤 코치가 내비 위치로
+     * 보충하는데(PositionTracker), 가짜 내비의 기본 위치(판교)가 다르면 차가 12km 옮겨 간 것처럼 된다
+     */
+    fun fix(lat: Double, lon: Double, heading: Float? = 180f) {
+        fakeNavi.location = { Fix(lat, lon, heading) }
+        positions.onFused(Fix(lat, lon, heading))
+    }
 }

@@ -4,6 +4,7 @@ import androidx.compose.runtime.Immutable
 import dev.hmg.pleoskit.UxRestrictionFlags
 import dev.hmg.pleoskit.UxRestrictions
 import dev.shimpyo.app.ui.theme.DriveLimits
+import dev.shimpyo.coach.CoachUiState
 
 /**
  * 화면이 지키는 주행 제한. 화면은 [UxRestrictions]를 서비스 없이 스스로 구독한다(Platform.kt의 프로세스 단위 구독).
@@ -57,6 +58,23 @@ fun driveRestriction(ux: UxRestrictions): DriveRestriction = when (ux) {
     }
     is UxRestrictions.Unknown -> DriveRestriction.UNKNOWN
 }
+
+/**
+ * 코치가 말 대신 화면에 잠깐 보이라고 올린 알림(CoachUiState.notice)의 화면 문구. 음성 안내를 껐을 때 "얼마나 남았어"의 대답이
+ * 말로도 화면으로도 나오지 않던 것을 화면으로 알린다 (리뷰 R-F4). 띄우고 내리는 때는 코치가 정한다(몇 초 뒤 지운다).
+ * 주행 중(모를 때 포함)에는 다른 주행 화면 문구처럼 글자 수 제한(LIMIT_STRING_LENGTH)을 지킨다. 없거나 비었으면 null
+ */
+fun noticeText(notice: String?, restriction: DriveRestriction): String? {
+    val text = notice?.trim()?.takeIf { it.isNotEmpty() } ?: return null
+    return if (restriction.driving) limitChars(text, restriction.maxChars) else text
+}
+
+/**
+ * 지금 화면에 띄울 코치 알림. 멈춘 코치에 남은 알림은 띄우지 않는다: 알림을 지우는 것은 코치라서, 코치가 알림을 올린 채 멈추면
+ * 화면에 끝없이 떠 있게 된다
+ */
+fun coachNotice(state: CoachUiState, restriction: DriveRestriction): String? =
+    noticeText(state.notice.takeIf { state.serviceRunning }, restriction)
 
 /** 주행 중 문구 길이 제한. 넘치면 말줄임표로 자른다 */
 fun limitChars(text: String, max: Int): String = if (text.length <= max || max < 2) text else text.take(max - 1) + "…"

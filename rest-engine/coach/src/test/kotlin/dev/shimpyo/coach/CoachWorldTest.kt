@@ -155,4 +155,46 @@ class CoachWorldTest {
             primedOut.fatigue.minutes!! > plainOut.fatigue.minutes!! + 60)
         assertTrue(primedOut.parked)
     }
+
+    @Test
+    fun anEngineToldTheParkEndedCountsItOnlyUntilThen() {
+        // 12분 전에 P(문 열림), 마지막 맥박은 그 2분 뒤, 지금은 달리고 있다. 엔진은 정차 시작의 P 입력으로 미리 채워져 있어서
+        // 그대로 두면 다음 update에서 12분 정차로 세어 화장실 시계를 돌린다 (서비스 닫힘 검증 N3). 끝난 때를 알려 주면 2분 정차다
+        val now = clock.now()
+        val anchor = TripAnchor(now - 3 * hour, emptyMap(), now - 2 * hour, continuousDrivingMin = 100.0)
+        val park = ParkState(since = now - 12 * min, doorSeen = true)
+        val one = FakeSettings(occupants = listOf(DRIVER))
+        val driving = CoachInput(now = now, gear = Gear.DRIVE, speedKph = 60f)
+
+        val untold = real.newEngine(seededEngines(), one, PersonalMemory(), anchor, park)
+        val told = real.newEngine(seededEngines(), one, PersonalMemory(), anchor, park)
+        real.endPark(told, endedAt = now - 10 * min)
+        val plain = real.newEngine(seededEngines(), one, PersonalMemory(), anchor)
+        val a = untold.update(driving)
+        val b = told.update(driving)
+        val c = plain.update(driving)
+        assertTrue("전제: 알려 주지 않으면 12분 화장실 정차로 센다 (${a.restroom.minutes} vs ${c.restroom.minutes})", a.restroom.minutes!! > c.restroom.minutes!! + 60)
+        assertEquals("2분 정차는 화장실 정차가 아니다", c.restroom.minutes, b.restroom.minutes)
+        assertEquals("휴식도 아니다", c.fatigue.minutes!!.toDouble(), b.fatigue.minutes!!.toDouble(), 3.0)
+        assertFalse(b.parked)
+
+        // 마지막 맥박 때 이미 문 열림 + 5분이었으면 화장실 정차다 (기록과 같다)
+        val longer = real.newEngine(seededEngines(), one, PersonalMemory(), anchor, park)
+        real.endPark(longer, endedAt = now - 7 * min)
+        assertTrue(longer.update(driving).restroom.minutes!! > c.restroom.minutes!! + 60)
+    }
+
+    @Test
+    fun tellingTheEngineTheParkEndedDoesNotSpendAQuestionNobodySaw() {
+        // 끝난 때를 알리는 입력은 '달리는 중'이라 엔진이 질문을 낼 수 있다(피로 NOW면 휴식 권유). 그 질문은 아무도 보지 못한 채
+        // 수명이 지나 '무시'로 세고 20분 쉼이 걸린다. 제동 표본을 실어 그 입력으로는 묻지 않게 한다
+        val now = clock.now()
+        val anchor = TripAnchor(now - 3 * hour, emptyMap(), now - 30 * min, continuousDrivingMin = 150.0)
+        val one = FakeSettings(occupants = listOf(DRIVER))
+        val engine = real.newEngine(seededEngines(), one, PersonalMemory(), anchor, ParkState(since = now - 12 * min, doorSeen = false))
+        real.endPark(engine, endedAt = now - 10 * min)
+        val out = engine.update(CoachInput(now = now, gear = Gear.DRIVE, speedKph = 90f))
+        val p = checkNotNull(out.prompt) { "연속 150분: 지금 쉬라고 권해야 한다 (피로 ${out.fatigue.level})" }
+        assertTrue("지금 낸 질문이다 (10분 전에 내고 버린 질문이 아니다): 만료 ${p.expiresAt - now}ms 뒤", p.expiresAt > now)
+    }
 }

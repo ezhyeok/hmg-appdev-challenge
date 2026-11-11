@@ -20,6 +20,9 @@ data class ParkedStop(val start: Long, val end: Long, val doorOpened: Boolean)
  * - 선 시간은 틱 사이 시간을 더해 잰다(다시 대기의 빈틈 포함, 엔진과 같다). 시계가 거꾸로 간 걸음은 0으로 센다(엔진 EngineClock과 같다).
  *   그래서 정차 중 시각이 뒤로 맞춰져도(NTP) 정차를 잃지 않는다. 기록의 끝은 그때 시계, 시작은 끝 - 선 시간이다
  * - 세계가 바뀌면(시연 켜기·끄기) [restore]로 그 세계의 정차를 끼운다. 두 시계의 시각을 빼서 4시간 정차를 만들지 않는다
+ * - 되돌린 정차는 "마지막으로 본 때 끝났다, 차가 지금도 P가 아니라면"이다. 그 판정은 기어를 알 때까지 미룬다([restorePending]):
+ *   서비스가 켜진 직후 첫 틱은 Car 연결보다 먼저 올 수 있어서, 첫 틱의 UNKNOWN을 '아직 서 있다'로 읽으면 같은 상황이 신호 도착
+ *   순서에 따라 10분 정차 / 40분 정차로 갈렸다 (서비스 닫힘 검증 N2). 판정 결과는 여정·엔진도 함께 쓴다 ([takeRestoredEnd], N3)
  */
 class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinParkedMin * 60_000L) {
     /** 지금 P인 정차 */
@@ -38,8 +41,18 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
     /** 마지막 틱 시각 */
     private var lastT = 0L
     private var ticked = false
-    /** restore 뒤 첫 틱에 이미 출발해 있으면 이때를 정차 끝으로 쓴다 */
+    /** 되돌린 정차를 마지막으로 본 때. 판정 전에만 있다: 차가 떠나 있으면 이때가 정차 끝이다 */
     private var restoredLastSeen: Long? = null
+    /** 되돌린 때 (판정을 기다리는 시간을 여기서부터 잰다) */
+    private var restoredAt = 0L
+    /** 되돌린 정차가 끝난 것으로 판정된 때 ([takeRestoredEnd]가 한 번 가져간다) */
+    private var restoredEnd: Long? = null
+
+    /** 되돌린 정차가 아직 서 있는지 떠났는지 정하지 못했다 (기어 신호를 기다린다). 그동안 여정과 엔진은 이 정차를 건드리지 않는다 */
+    val restorePending: Boolean get() = restoredLastSeen != null
+
+    /** 되돌린 정차가 "떠났다"로 판정됐으면 그 끝 시각을 한 번 돌려준다 (엔진을 같은 시각에 떠난 것으로 맞추는 데 쓴다) */
+    fun takeRestoredEnd(): Long? = restoredEnd.also { restoredEnd = null }
 
     /** 지금 P인지 */
     val parked: Boolean get() = since != null
@@ -49,6 +62,29 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
 
     /** [doorOpened]: 지난 틱 이후 문이 열린 적이 있는지 */
     fun onTick(t: Long, gear: Gear, speedKph: Float?, doorOpened: Boolean): ParkedStop? {
+        restoredLastSeen?.let { lastSeen ->
+            val moving = speedKph != null && speedKph > MOVING_KPH
+            if (gear == Gear.UNKNOWN && !moving && t - restoredAt < RESTORE_WAIT_MS) {
+                // 기어를 아직 모른다: 서 있는지 떠났는지 정하지 않는다 (선 시간도 더하지 않는다). 문 열림은 이 정차의 것으로 적어 둔다
+                if (doorOpened && doorAt == null) doorAt = t
+                return null
+            }
+            restoredLastSeen = null
+            if (gear != Gear.PARK) {
+                // 이미 떠나 있다 (기어 D·R·N, 기어는 모르지만 움직인다, 끝내 기어를 모른다): 앱이 꺼진 사이(또는 시연 중) 떠났다.
+                // 그 사이는 정차로 세지 않고 마지막으로 본 때에 끝낸다
+                if (doorOpened && doorAt == null) doorAt = lastSeen
+                val done = finished(Pending(since!!, doorAt, parkedMs, lastSeen))
+                since = null
+                doorAt = null
+                parkedMs = 0L
+                lastT = t
+                ticked = true
+                restoredEnd = lastSeen
+                return done
+            }
+            // 아직 P다: 못 본 동안에도 서 있었다. 아래에서 마지막으로 본 때(lastT)부터 지금까지를 선 시간에 더한다
+        }
         val dt = if (ticked) maxOf(0L, t - lastT) else 0L
         val wasParked = since != null
         val nowParked = when (gear) {
@@ -56,21 +92,11 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
             Gear.DRIVE, Gear.REVERSE, Gear.NEUTRAL -> false
             Gear.UNKNOWN -> if (speedKph != null && speedKph > MOVING_KPH) false else wasParked
         }
-        val restoredEnd = restoredLastSeen
-        restoredLastSeen = null
         lastT = t
         ticked = true
         var done: ParkedStop? = null
 
         if (wasParked) {
-            if (restoredEnd != null && !nowParked) {
-                // 되돌린 뒤 첫 틱에 이미 출발해 있다: 앱이 꺼진 사이(또는 시연 중) 떠났다. 그 사이는 정차로 세지 않고 마지막으로 본 때에 끝낸다
-                if (doorOpened && doorAt == null) doorAt = restoredEnd
-                done = finished(Pending(since!!, doorAt, parkedMs, restoredEnd))
-                since = null
-                doorAt = null
-                return done
-            }
             parkedMs += dt
             if (doorOpened && doorAt == null) doorAt = t
             if (!nowParked) {
@@ -118,7 +144,8 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
      * - 세계 전환(시연 켜기·끄기): WorldChange.restorePark를 바로. 시연을 켜면 null(시연 시계로 새로 센다: 두 시계를 빼서
      *   4시간 정차를 만들지 않는다), 끄면 실제 여정의 정차. 끌 때 [lastSeenMs] = 시연을 켠 실제 시각
      *
-     * 다음 틱이 P면 그 사이도 서 있던 것으로 센다. P가 아니면 그 사이 떠난 것이라 [lastSeenMs]에 정차가 끝난다(모르면 [now]).
+     * 기어를 아는 다음 틱이 P면 그 사이도 서 있던 것으로 센다. P가 아니면 그 사이 떠난 것이라 [lastSeenMs]에 정차가 끝난다(모르면 [now]).
+     * 기어를 모르는 틱은 판정을 미루고, [RESTORE_WAIT_MS]가 지나도 모르면 떠난 것으로 본다(보지 못한 시간을 선 것으로 세지 않는다).
      * 그래서 시연 중 Virtual Console로 D를 넣고 시연을 꺼도 시연 시간만큼의 가짜 실제 정차가 생기지 않는다.
      * 미래 시각(시연 시각이 저장된 경우 등)은 정차 없음으로 본다. doorSeen이면 문 열림을 세운 때로 본다(문 시각은 저장하지 않는다).
      */
@@ -127,6 +154,8 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
         lastT = now
         ticked = true
         restoredLastSeen = null
+        restoredEnd = null
+        restoredAt = now
         if (state == null || state.since > now) {
             since = null
             doorAt = null
@@ -148,5 +177,10 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
         const val REPARK_MAX_GAP_MS = 3 * 60_000L
         /** 다시 대기로 보는 최고 차속 (km/h, 엔진 StopTracker.REPARK_MAX_KPH와 같다) */
         const val REPARK_MAX_KPH = 30f
+        /**
+         * 되돌린 정차의 판정을 기어 신호 없이 기다리는 시간. Car 연결은 보통 1~2초 안에 온다. 그 동안 코치는 엔진을 돌리지 않으므로
+         * 길게 잡지 않는다: 넘으면 떠난 것으로 본다
+         */
+        const val RESTORE_WAIT_MS = 10_000L
     }
 }

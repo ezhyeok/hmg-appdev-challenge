@@ -572,6 +572,116 @@ class NaviTrackerTest {
         assertTrue(r.log.lines.any { "navi tbt failed" in it && "no answer" in it })
     }
 
+    // ------------------------------------------------------------ 답 없는 내비: 지난 스냅샷을 언제까지 믿나 (서비스 감사 SV-N5)
+
+    private fun silence(r: Rig, fault: Fault) {
+        for (call in listOf("routeStatus", "destination", "tbt")) r.navi.faults[call] = fault
+    }
+
+    @Test
+    fun aNaviSilentForAMinuteIsUnknownAndComesBackAsANewRoute() = runTest {
+        // 예전: 내비가 답하지 않는 동안 마지막 길안내 스냅샷을 끝없이 썼다 (경로·목적지·TBT가 몇 분 전 것인데 엔진은 지금 것으로 안다)
+        val r = Rig(this)
+        r.guide()
+        r.tbtAhead(restAtM = 30_000.0, turnAtM = 40_000.0)
+        r.start()
+        advanceTimeBy(20_000)
+        assertTrue(r.snap.guiding && r.snap.tbtReceived)
+        val epoch = r.snap.epoch
+
+        silence(r, Fault.THROW) // 20초부터 내비가 모든 조회에 실패한다. 다음 경로 조회는 30초
+        advanceTimeBy(69_000) // → 89초: 실패가 59초째
+        assertTrue("1분이 안 됐으면 지난 스냅샷을 그대로 둔다 (잠깐의 실패에 엔진 입력이 깜박이지 않게)", r.snap.guiding)
+        assertEquals(epoch, r.snap.epoch)
+        advanceTimeBy(2_000) // → 91초: 30초에 시작한 실패가 1분을 넘었다
+        assertNull("경로를 모른다 (길안내 아님과 다르다)", r.snap.route)
+        assertEquals(NaviMode.UNKNOWN, r.snap.mode)
+        assertFalse(r.snap.guiding)
+        assertEquals("길안내가 끝난 것처럼 epoch를 올린다: 옛 경로에서 만든 것이 새 경로와 섞이지 않는다", epoch + 1, r.snap.epoch)
+        assertTrue(r.snap.opportunities.isEmpty() && !r.snap.tbtReceived && r.snap.destination == null && !r.snap.odometerTrusted)
+        val published = r.published.size
+
+        advanceTimeBy(120_000) // 계속 답이 없다
+        assertEquals("한 번만 알린다", 1, r.log.lines.count { "navi silent" in it })
+        assertEquals("같은 '모름'을 다시 내보내지 않는다", published, r.published.size)
+        assertTrue("길안내가 아니니 TBT를 묻지 않는다", r.navi.times("tbt").last() < 95_000L)
+        assertTrue("경로 상태는 계속 물어 본다", r.navi.times("routeStatus").last() > 200_000L)
+
+        r.navi.faults.clear() // 내비가 돌아왔다
+        advanceTimeBy(6_000)
+        assertTrue("다음 답에서 곧바로 회복한다", r.snap.guiding)
+        assertEquals("새 경로로 다시 시작한다 (그 사이 무슨 일이 있었는지 모른다)", epoch + 2, r.snap.epoch)
+        assertTrue(r.snap.tbtReceived)
+        assertFalse("출발지 기준 정체는 넣지 않는다 (경로 시작을 못 봤다)", r.tracker.congestion.routeOriginKnown)
+        assertTrue(r.log.lines.any { "navi answering again" in it })
+    }
+
+    @Test
+    fun aHangingNaviBecomesUnknownToo() = runTest {
+        // 무응답(호출마다 20초 시간 초과)도 같다: 실패 수가 아니라 실패가 이어진 시간으로 잰다
+        val r = Rig(this)
+        r.guide()
+        r.start()
+        advanceTimeBy(10_000)
+        r.navi.faults["routeStatus"] = Fault.HANG // 15초의 경로 조회부터 답이 없다 (TBT는 답한다)
+        advanceTimeBy(60_000) // → 70초: 15초에 시작한 실패가 55초째 (조회 15~35, 40~60이 시간 초과)
+        assertTrue(r.snap.guiding)
+        assertEquals(listOf(0L, 15_000L, 40_000L, 65_000L), r.navi.times("routeStatus"))
+        advanceTimeBy(20_000) // → 90초: 65~85 조회가 시간 초과한 85초에 1분을 넘었다
+        assertNull(r.snap.route)
+        assertEquals(1, r.log.lines.count { "navi silent" in it })
+    }
+
+    @Test
+    fun aShortOutageKeepsTheLastSnapshot() = runTest {
+        val r = Rig(this)
+        r.guide()
+        r.start()
+        advanceTimeBy(20_000)
+        val epoch = r.snap.epoch
+        silence(r, Fault.THROW)
+        advanceTimeBy(45_000) // 30초부터 75초까지 실패 (45초)
+        r.navi.faults.clear()
+        advanceTimeBy(60_000)
+        assertTrue(r.snap.guiding)
+        assertEquals("1분 안에 돌아오면 같은 경로다", epoch, r.snap.epoch)
+        assertTrue("모름을 내보낸 적이 없다", r.published.none { it.route == null && it.epoch > 0 })
+        assertEquals(0, r.log.lines.count { "navi silent" in it })
+        // 실패가 이어진 시간은 답을 받으면 처음부터 다시 잰다
+        silence(r, Fault.THROW)
+        advanceTimeBy(45_000)
+        assertTrue(r.snap.guiding)
+    }
+
+    @Test
+    fun whileNotGuidingASilentNaviIsUnknownTooAndComesBackWithoutANewEpoch() = runTest {
+        val r = Rig(this)
+        r.navi.mode = { NaviMode.SAFE_GUIDING }
+        r.start()
+        advanceTimeBy(10_000)
+        assertEquals(RouteState(guiding = false), r.snap.route)
+        silence(r, Fault.THROW)
+        advanceTimeBy(80_000)
+        assertNull("길안내가 시작됐는지도 모른다", r.snap.route)
+        assertEquals("경로가 없었으니 epoch는 그대로", 0, r.snap.epoch)
+        r.navi.faults.clear()
+        advanceTimeBy(6_000)
+        assertEquals(RouteState(guiding = false), r.snap.route)
+        assertEquals(0, r.snap.epoch)
+    }
+
+    @Test
+    fun aNaviThatNeverAnsweredIsReportedOnceAndHasNothingToForget() = runTest {
+        val r = Rig(this)
+        silence(r, Fault.THROW)
+        r.start()
+        advanceTimeBy(200_000)
+        assertNull(r.snap.route)
+        assertEquals(0, r.snap.epoch)
+        assertEquals("처음 상태(모름) 그대로라 내보낼 것이 없다", 1, r.published.size)
+        assertEquals(1, r.log.lines.count { "navi silent" in it })
+    }
+
     @Test
     fun aFailingConnectRetriesWithBackoff() = runTest {
         val r = Rig(this)

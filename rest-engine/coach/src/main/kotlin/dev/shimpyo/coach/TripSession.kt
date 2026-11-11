@@ -38,9 +38,9 @@ data class TripAnchor(
 }
 
 /**
- * 지금 정차(기어 P) 상태. 정차 감지기(prompt 트랙의 StopDetector/StopRecorder)가 만들고, TripSession이 맥박에 담아
+ * 지금 정차(기어 P) 상태. 정차 감지기(StopDetector.parkState)가 만들고, TripSession이 맥박에 담아
  * 재시작 뒤 감지기와 엔진에 되돌린다 (서비스 감사 D12: 정차 중 재시작하면 정차가 사라지고 화장실 시계가 안 돌아갔다).
- * 병합 메모: prompt 트랙의 정차 상태 타입과 합친다. 필요한 것은 [since]·[doorSeen] 둘뿐이다.
+ * 감지기와 여정이 이 타입 하나를 함께 쓴다.
  */
 data class ParkState(
     /** P로 바꾼 시각 (코치 시각) */
@@ -48,6 +48,12 @@ data class ParkState(
     /** 이번 정차 중에 문이 열렸는지 */
     val doorSeen: Boolean,
 )
+
+/**
+ * 운전자가 들르기로 한 곳 (내비 명령이 성공한 정차의 id와 그 시각). 맥박에 담는다: 주행 중 재시작하면 엔진의 '들르기로 한 곳'이
+ * 사라져 방금 답한 정차를 다시 물을 수 있었다 (서비스 닫힘 검증 N7). 좌표는 담지 않는다 (id는 공공데이터 행 id거나 `tbt:이름`이다)
+ */
+data class AcceptedStop(val stopId: String, val at: Long)
 
 /** 1분마다(그리고 정차 사건마다) 저장하는 여정 맥박. 실제 세계만 저장한다. 시각은 실제 시각(epoch ms) */
 data class TripHeartbeat(
@@ -61,6 +67,8 @@ data class TripHeartbeat(
     /** 저장 시점의 정차. 달리는 중이면 null */
     val park: ParkState?,
     val version: Int = VERSION,
+    /** 들르기로 한 곳. 없으면 null (예전 판의 맥박에는 이 값이 없다: 없는 것으로 읽는다) */
+    val accepted: AcceptedStop? = null,
 ) {
     companion object {
         const val VERSION = 1
@@ -99,6 +107,8 @@ data class TripRules(
     val futureToleranceMs: Long = 60_000L,
     /** 이보다 긴 정차 기록은 시계가 섞인 기록으로 보고 버린다 */
     val maxStopMs: Long = 24 * 3_600_000L,
+    /** 들르기로 한 곳을 들고 있는 시간. 엔진이 수락한 곳을 추천에 유지하는 최대 시간(CoachEngine ACCEPT_HOLD_MS, 90분)과 같다 */
+    val acceptedHoldMs: Long = 90 * 60_000L,
 ) {
     private companion object {
         val ENGINE = CoachConfig()
@@ -162,6 +172,8 @@ class TripSession private constructor(
     private val elapsed: ElapsedClock,
     private val store: TripStorePort?,
     private val rules: TripRules,
+    /** 시작할 때 이어받은 '들르기로 한 곳'. 코어가 그 정차가 후보에 보이면 엔진에 다시 알린다 */
+    val restoredAccepted: AcceptedStop? = null,
 ) {
     private var base = anchor
     private var continuousMs = (anchor.continuousDrivingMin * 60_000.0).toLong()
@@ -170,6 +182,10 @@ class TripSession private constructor(
 
     /** 마지막 틱의 정차 상태 (시연에서 돌아올 때 정차 감지기에 되돌린다) */
     var park: ParkState? = restoredPark
+        private set
+
+    /** 운전자가 들르기로 한 곳 (맥박에 담는다). 그곳에 서거나(화장실 정차·휴식) 새 여정이 되거나 [TripRules.acceptedHoldMs]가 지나면 없다 */
+    var accepted: AcceptedStop? = restoredAccepted
         private set
 
     /** 지금 기준점 (연속 주행은 지금까지 센 값) */
@@ -187,6 +203,7 @@ class TripSession private constructor(
             if (prev != null && now - prev.since >= rules.newTripParkMs) {
                 base = newTrip(now)
                 continuousMs = 0L
+                accepted = null
                 event = TripEvent.NewTrip(anchor)
             } else {
                 continuousMs += dt
@@ -204,17 +221,33 @@ class TripSession private constructor(
         return event
     }
 
-    /** 정차 기록 (StopRecorder). 화장실 정차면 마지막 화장실을 당긴다. 이 세계 시각으로 믿을 수 없는 기록은 무시한다 */
+    /**
+     * 정차 기록 (StopRecorder). 화장실 정차면 마지막 화장실을 당긴다. 화장실 정차나 휴식이면 들르기로 한 곳도 끝난 것이다
+     * (엔진도 그때 수락한 곳을 내린다). 이 세계 시각으로 믿을 수 없는 기록은 무시한다
+     */
     fun onStop(log: StopLog, now: Long) {
-        if (!log.restroom || log.start > log.end || log.end > now + rules.futureToleranceMs) return
-        if (moveRestroom(StopHistory.restroomAt(log, rules))) save(now, force = true)
+        if (log.start > log.end || log.end > now + rules.futureToleranceMs) return
+        var changed = false
+        if (accepted != null && (log.restroom || log.end - log.start >= rules.restMs)) {
+            accepted = null
+            changed = true
+        }
+        if (log.restroom && moveRestroom(StopHistory.restroomAt(log, rules))) changed = true
+        if (changed) save(now, force = true)
+    }
+
+    /** 운전자가 고른 정차를 내비에 넣었다 (코어: 성공한 들르기마다). 바로 저장한다 */
+    fun onAccepted(stopId: String, now: Long) {
+        accepted = AcceptedStop(stopId, now)
+        save(now, force = true)
     }
 
     /** 바로 저장 (시연으로 바꾸기 전, 서비스 종료) */
     fun flush(now: Long) = save(now, force = true)
 
     fun heartbeat(now: Long): TripHeartbeat = anchor.let {
-        TripHeartbeat(now, it.tripStart, it.lastRestroomAt, it.restroomFallbackAt, it.continuousDrivingMin, park)
+        val held = accepted?.takeIf { a -> now - a.at <= rules.acceptedHoldMs }
+        TripHeartbeat(now, it.tripStart, it.lastRestroomAt, it.restroomFallbackAt, it.continuousDrivingMin, park, accepted = held)
     }
 
     private fun moveRestroom(at: Long): Boolean {
@@ -241,7 +274,8 @@ class TripSession private constructor(
          * - 맥박이 없거나 믿을 수 없음 → 새 여정
          * - 맥박 뒤로 흐른 시간 < 15분 → 그대로 이어 감. 달리던 중이었으면 그 시간도 주행으로 센다 (재시작 동안 차는 달렸다)
          * - 15분 이상 → 그 사이 차가 꺼져 서 있었다(헤드유닛은 시동과 함께 꺼진다). 저장된 정차가 없으면 마지막 맥박부터 정차로 본다
-         * - 그 정차가 4시간 이상 → 새 여정. 아니면 같은 여정을 정차부터 이어 간다 (휴식은 정차 길이로, 화장실은 모름 규칙으로)
+         * - 그 정차가 4시간 이상 → 새 여정. 아니면 같은 여정을 정차부터 이어 간다 (꺼져 있던 시간은 휴식으로, 화장실은 모름 규칙으로)
+         * - 저장된 정차의 화장실·휴식은 마지막 맥박이 본 만큼만 센다. 차가 지금도 P인지는 첫 틱이 안다 ([restoredPark]를 감지기에 되돌린다)
          */
         fun open(
             saved: TripHeartbeat?,
@@ -260,16 +294,23 @@ class TripSession private constructor(
             if (park != null && now - park.since >= rules.newTripParkMs) {
                 return TripSession(freshAnchor(now, maxOrNull(fromHistory, hb.restroomFallbackAt), rules), null, TripOrigin.NEW, now, elapsed, store, rules)
             }
+            // 저장된 정차는 마지막 맥박이 본 만큼만 선 것으로 센다. 차가 지금도 P면 첫 틱(onTick)이 그 사이를 이어 세고, 떠나 있으면
+            // 정차는 마지막 맥박 때 끝난 것이다: 정차 감지기·엔진과 같은 규칙이다 (서비스 닫힘 검증 N3). 예전에는 여기서 '지금까지
+            // 서 있었다'로 세서, 맥박 2분 뒤 떠난 12분 전 정차가 화장실 정차로 게이지를 채웠는데 기록에는 없었다
+            val seenParkedMs = hb.park?.let { (hb.savedAt - it.since).coerceAtLeast(0L) } ?: 0L
             val continuous = when {
                 park == null -> hb.continuousDrivingMin + gap / 60_000.0
-                now - park.since >= rules.restMs -> 0.0
+                // 15분 넘게 꺼져 있었다(헤드유닛은 시동과 함께 꺼진다) 또는 마지막 맥박 때 이미 15분을 서 있었다: 휴식
+                offline || seenParkedMs >= rules.restMs -> 0.0
                 else -> hb.continuousDrivingMin
             }
             var anchor = TripAnchor(hb.tripStart, hb.lastRestroomAt, hb.restroomFallbackAt, continuous)
             fromHistory?.let { anchor = anchor.withRestroomAt(it) }
-            if (park != null && park.doorSeen && now - park.since >= rules.restroomStopMs) anchor = anchor.withRestroomAt(park.since + rules.restroomStopMs)
+            if (hb.park != null && hb.park.doorSeen && seenParkedMs >= rules.restroomStopMs) anchor = anchor.withRestroomAt(hb.park.since + rules.restroomStopMs)
             if (offline) anchor = anchor.withRestroomAt(now - rules.unknownRestroomMs)
-            return TripSession(anchor, park, if (offline) TripOrigin.RESUMED_AFTER_BREAK else TripOrigin.RESUMED, now, elapsed, store, rules)
+            // 들르기로 한 곳은 끊김 없이 이어 갈 때만 이어받는다: 15분 넘게 꺼져 있었으면 그사이 섰던 것이다
+            val accepted = hb.accepted?.takeIf { !offline && now - it.at <= rules.acceptedHoldMs }
+            return TripSession(anchor, park, if (offline) TripOrigin.RESUMED_AFTER_BREAK else TripOrigin.RESUMED, now, elapsed, store, rules, accepted)
         }
 
         /** 시연처럼 기준점이 정해진 여정. [store]가 없으면 저장하지 않는다 */
@@ -292,6 +333,7 @@ class TripSession private constructor(
             if (h.tripStart > h.savedAt + tol) return false
             if (h.restroomFallbackAt > h.savedAt + tol || h.lastRestroomAt.values.any { it > h.savedAt + tol }) return false
             if (h.park != null && h.park.since > h.savedAt + tol) return false
+            if (h.accepted != null && h.accepted.at > h.savedAt + tol) return false
             val c = h.continuousDrivingMin
             return !c.isNaN() && c >= 0.0 && c <= 24 * 60.0
         }

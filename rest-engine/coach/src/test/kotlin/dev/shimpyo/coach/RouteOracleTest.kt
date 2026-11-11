@@ -2,11 +2,13 @@ package dev.shimpyo.coach
 
 import dev.shimpyo.coach.fakes.Road
 import dev.shimpyo.coach.fakes.TripNaviPort
+import dev.shimpyo.coach.fakes.naviDoesNotAnswer
 import dev.shimpyo.coach.fakes.stop
 import dev.shimpyo.engine.StopCandidate
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitCancellation
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.currentTime
 import kotlinx.coroutines.test.runCurrent
@@ -94,7 +96,7 @@ class RouteOracleTest {
     @Test
     fun anUnresponsiveNaviIsPausedSoOneRefreshCostsOneTimeout() = runTest {
         var hang = true
-        val fx = Fx(this) { _, _, _, _ -> if (hang) awaitCancellation() else TripEstimate(42_000.0, 1_600.0) }
+        val fx = Fx(this) { _, _, _, timeoutMs -> if (hang) naviDoesNotAnswer(timeoutMs) else TripEstimate(42_000.0, 1_600.0) }
         val others = (1..5).map { stop("o$it", "시설${it}휴게소", 10.0 * it).c }
         val start = currentTime
         assertNull(fx.oracle.refine(anseong, Road.car()))
@@ -172,7 +174,7 @@ class RouteOracleTest {
     @Test
     fun clearForgetsTheCacheFailuresAndPause() = runTest {
         var hang = true
-        val fx = Fx(this) { _, _, _, _ -> if (hang) awaitCancellation() else TripEstimate(42_000.0, 1_600.0) }
+        val fx = Fx(this) { _, _, _, timeoutMs -> if (hang) naviDoesNotAnswer(timeoutMs) else TripEstimate(42_000.0, 1_600.0) }
         assertNull(fx.oracle.refine(anseong, Road.car()))
         fx.oracle.clear()
         hang = false
@@ -191,6 +193,102 @@ class RouteOracleTest {
     @Test
     fun oneRequestTimeoutFitsInsideTheRefreshBudget() {
         // 그래야 멈춘 내비를 한 번의 갱신 안에서 알아채고 쉰다 (예산이 먼저 끝나면 실패로 세지 못한다)
-        assertTrue(CandidateTuning.ORACLE_REQUEST_TIMEOUT_MS < CandidateTuning.REFRESH_BUDGET_MS)
+        assertTrue(CandidateTuning.ORACLE_LINE_WAIT_MS + CandidateTuning.ORACLE_REQUEST_TIMEOUT_MS < CandidateTuning.REFRESH_BUDGET_MS)
+        // 답 없는 내비는 포트의 시간 초과로 드러난다: 그 실패를 '답 없음'으로 읽을 수 있어야 한다
+        assertTrue(CandidateTuning.ORACLE_NO_ANSWER_MS <= CandidateTuning.ORACLE_REQUEST_TIMEOUT_MS)
+    }
+
+    // ------------------------------------------------------------ 내비 차례 기다리기 (서비스 감사 SV-N6)
+
+    @Test
+    fun waitingInLineBehindANaviCommandIsNotNoAnswer() = runTest {
+        // 포트(NaviKit)는 내비에 한 번에 하나만 보낸다. 들르기(경유지 추가 확인 20~45초)가 잠금을 잡고 있으면 requestTrip은 시작도 못 한다.
+        // 예전: 그 기다림을 요청 시간에 넣어 8초에 끊고 '답 없는 내비'로 보고 30초 → 1분 → … 쉬었다 (그동안 같은 이름 쌍을 못 고른다, SV-N1)
+        var lineMs = 9_000L
+        val fx = Fx(this) { _, _, _, _ ->
+            delay(lineMs) // 내비 잠금을 기다린다
+            TripEstimate(42_000.0, 1_600.0)
+        }
+        assertNotNull("차례를 9초 기다려도 요청이 답하면 답이다", fx.oracle.refine(anseong, Road.car()))
+
+        // 잠금을 오래 잡고 있으면 (경유지 확인 중) 기다리다 그만둔다: 실패도 '답 없음'도 아니다
+        lineMs = 40_000L
+        val other = stop("other", "망향휴게소(부산방향)", 60.0).c
+        val start = currentTime
+        assertNull(fx.oracle.refine(other, Road.car()))
+        assertEquals("차례를 기다려 주는 시간 + 요청 시간까지만", CandidateTuning.ORACLE_LINE_WAIT_MS + CandidateTuning.ORACLE_REQUEST_TIMEOUT_MS, currentTime - start)
+        assertEquals(2, fx.navi.tripCalls)
+        assertNull("곧바로 다시 줄을 서지 않는다", fx.oracle.refine(stop("third", "천안휴게소(부산방향)", 80.0).c, Road.car()))
+        assertEquals(2, fx.navi.tripCalls)
+        assertNotNull("그 사이에도 캐시는 답한다", fx.oracle.refine(anseong, Road.car()))
+
+        // 잠깐 쉰 뒤(늘어나지 않는다) 같은 후보를 다시 묻는다: 실패한 후보로 적어 두지 않았다
+        lineMs = 0L
+        fx.extraMs += CandidateTuning.ORACLE_BUSY_PAUSE_MS
+        assertNotNull(fx.oracle.refine(other, Road.car()))
+        assertEquals(3, fx.navi.tripCalls)
+    }
+
+    @Test
+    fun aLineThatNeverMovesIsPausedLikeNoAnswerAfterThreeWaits() = runTest {
+        // 잠금을 영영 놓지 않는 포트에 갱신마다 줄을 서지 않게: 연달아 세 번 차례가 오지 않으면 답 없는 내비처럼 쉰다
+        val fx = Fx(this) { _, _, _, _ -> awaitCancellation() }
+        repeat(CandidateTuning.ORACLE_LINES_FOR_BACKOFF) {
+            assertNull(fx.oracle.refine(anseong, Road.car()))
+            fx.extraMs += CandidateTuning.ORACLE_BUSY_PAUSE_MS
+        }
+        assertEquals(CandidateTuning.ORACLE_LINES_FOR_BACKOFF, fx.navi.tripCalls)
+        assertNull("이제는 잠깐 쉼이 아니라 30초 쉼이다", fx.oracle.refine(anseong, Road.car()))
+        assertEquals(CandidateTuning.ORACLE_LINES_FOR_BACKOFF, fx.navi.tripCalls)
+        fx.extraMs += CandidateTuning.ORACLE_BACKOFF_MIN_MS
+        assertNull(fx.oracle.refine(anseong, Road.car()))
+        assertEquals(CandidateTuning.ORACLE_LINES_FOR_BACKOFF + 1, fx.navi.tripCalls)
+    }
+
+    @Test
+    fun aRequestThatGotItsTurnAndFailedIsStillAFailure() = runTest {
+        // 차례는 왔는데 내비가 오류를 냈다: 줄 서기와 섞지 않는다 (그 후보는 1분 뒤에 다시)
+        val fx = Fx(this) { _, _, _, _ ->
+            delay(2_000)
+            error("ROUTE_NOT_FOUND")
+        }
+        assertNull(fx.oracle.refine(anseong, Road.car()))
+        fx.extraMs += CandidateTuning.ORACLE_BUSY_PAUSE_MS
+        assertNull("실패한 후보는 1분 동안 다시 묻지 않는다", fx.oracle.refine(anseong, Road.car()))
+        assertEquals(1, fx.navi.tripCalls)
+    }
+
+    // ------------------------------------------------------------ 요청 수 한도 (서비스 감사 SV-N1)
+
+    @Test
+    fun thePermitIsAskedOnlyForARealNaviRequest() = runTest {
+        val fx = Fx(this, answering(42_000.0))
+        var permits = 0
+        val counting = { permits++; true }
+        assertNotNull(fx.oracle.refine(anseong, Road.car(), counting))
+        assertEquals(1, permits)
+        assertNotNull(fx.oracle.refine(anseong, Road.car(1.0), counting))
+        assertEquals("캐시가 답하면 묻지 않는다 (요청 수 한도에 세지 않는다)", 1, permits)
+        assertEquals(1, fx.navi.tripCalls)
+    }
+
+    @Test
+    fun withoutAPermitNothingIsSentAndNothingIsRemembered() = runTest {
+        val fx = Fx(this, answering(42_000.0))
+        assertNull(fx.oracle.refine(anseong, Road.car()) { false })
+        assertEquals(0, fx.navi.tripCalls)
+        assertNotNull("허락 없이 못 물은 것은 실패가 아니다: 바로 다시 물을 수 있다", fx.oracle.refine(anseong, Road.car()))
+        assertNotNull("캐시는 허락 없이도 답한다", fx.oracle.refine(anseong, Road.car()) { false })
+        assertEquals(1, fx.navi.tripCalls)
+    }
+
+    @Test
+    fun aPausedOrFailedCandidateDoesNotSpendAPermit() = runTest {
+        val fx = Fx(this) { _, _, _, _ -> error("NETWORK") }
+        var permits = 0
+        val counting = { permits++; true }
+        assertNull(fx.oracle.refine(anseong, Road.car(), counting))
+        assertNull("1분 안에는 다시 묻지 않으니 허락도 쓰지 않는다", fx.oracle.refine(anseong, Road.car(), counting))
+        assertEquals(1, permits)
     }
 }

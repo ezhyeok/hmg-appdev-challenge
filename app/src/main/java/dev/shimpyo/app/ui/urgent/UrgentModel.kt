@@ -4,6 +4,8 @@ import androidx.compose.runtime.Immutable
 import dev.shimpyo.app.ui.coachEverRan
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.UrgentState
+import dev.shimpyo.engine.Prompt
+import dev.shimpyo.engine.PromptKind
 import dev.shimpyo.engine.RankedStop
 import java.util.concurrent.atomic.AtomicLong
 
@@ -128,3 +130,9 @@ fun urgentView(
     }
     return UrgentView(id, status, if (status == UrgentStatus.READY) results else emptyList())
 }
+
+/**
+ * 급해 화면이 떠 있는 동안 화면 위에 알릴 다른 질문 (UI 감사 #27: 마지막 기회 같은 질문이 버튼 없이 음성으로만 지나갔다).
+ * 급해 질문 자체("…안내할까요?")는 결과 카드가 답이라 따로 보이지 않는다. 멈춘 코치의 남은 질문도 보이지 않는다.
+ */
+fun urgentQuestion(state: CoachUiState): Prompt? = state.prompt?.takeIf { state.serviceRunning && it.kind != PromptKind.URGENT_RESULT }

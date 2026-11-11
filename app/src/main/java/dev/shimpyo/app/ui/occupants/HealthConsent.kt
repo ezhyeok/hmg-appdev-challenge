@@ -5,6 +5,7 @@ import androidx.compose.runtime.rememberUpdatedState
 import dev.shimpyo.app.ui.Labels.isHealth
 import dev.shimpyo.app.ui.PrefsState
 import dev.shimpyo.app.ui.components.LocalOverlays
+import dev.shimpyo.app.ui.components.OverlayState
 import dev.shimpyo.app.ui.components.PleosSwitch
 import dev.shimpyo.app.ui.components.PopupSpec
 import dev.shimpyo.app.ui.components.SettingRow
@@ -21,48 +22,51 @@ const val HEALTH_CONSENT_TITLE = "건강 관련 정보 처리에 동의합니다
 const val HEALTH_CONSENT_DETAIL = "이 정보는 기기에만 저장되고 서버로 보내지 않습니다. 언제든 지울 수 있습니다."
 const val HEALTH_CONSENT_TEXT = "$HEALTH_CONSENT_TITLE — $HEALTH_CONSENT_DETAIL"
 
-/**
- * 동의 스위치 행. 켤 때는 확인 팝업으로 명시적으로 동의를 받고,
- * 끌 때 건강 관련 탑승자가 있으면 지운다는 확인을 받는다.
- * 철회 확인은 누르는 순간의 탑승자 목록으로 지운다: 팝업이 떠 있는 동안 음성으로 탑승자가 바뀌어도 그 변경을 되돌리지 않게
- * (UI 감사 #23: 팝업을 연 때의 목록으로 덮어썼다).
- */
+/** 동의 스위치 행 (탑승자 화면의 추가 패널, 설정 화면). 누르면 [onHealthConsentTap] */
 @Composable
 fun HealthConsentRow(prefs: PrefsState, occupants: List<Occupant>, onSetOccupants: (List<Occupant>) -> Unit) {
     val overlays = LocalOverlays.current
+    // 팝업이 떠 있는 동안 바뀐 목록과 콜백을 확인 순간에 읽는다
     val latest = rememberUpdatedState(occupants)
+    val send = rememberUpdatedState(onSetOccupants)
     SettingRow(
         title = HEALTH_CONSENT_TITLE,
         subtitle = HEALTH_CONSENT_DETAIL,
         icon = ShimpyoIcons.Lock,
-        onClick = {
-            if (!prefs.healthConsent) {
-                overlays.confirm(
-                    PopupSpec(
-                        title = "건강 관련 정보 처리 동의",
-                        description = "$HEALTH_CONSENT_TEXT\n\n임신부·과민성 방광·과민성 장 탑승자를 고르면 화장실 기준 시간을 맞춥니다.",
-                        confirmText = "동의",
-                        onConfirm = { prefs.updateHealthConsent(true) },
-                    ),
-                )
-            } else if (occupants.any { it.type.isHealth }) {
-                overlays.confirm(
-                    PopupSpec(
-                        title = "동의를 철회할까요?",
-                        description = "임신부·민감 탑승자 정보를 목록에서 지워요.",
-                        confirmText = "철회하고 지우기",
-                        onConfirm = {
-                            prefs.updateHealthConsent(false)
-                            onSetOccupants(withoutHealth(latest.value))
-                        },
-                    ),
-                )
-            } else {
-                prefs.updateHealthConsent(false)
-            }
-        },
+        onClick = { onHealthConsentTap(prefs, overlays, occupants = { latest.value }, onSetOccupants = { send.value(it) }) },
         trailing = { PleosSwitch(prefs.healthConsent) },
     )
+}
+
+/**
+ * 동의 스위치를 눌렀다. 켤 때는 확인 팝업으로 명시적으로 동의를 받고, 끌 때 건강 관련 탑승자가 있으면 지운다는 확인을 받는다
+ * (없으면 바로 끈다). [occupants]는 부를 때마다 지금 목록을 준다: 철회 확인은 [확인]을 누르는 순간의 목록에서 건강 유형만 뺀다.
+ * 팝업을 연 때의 목록으로 덮어쓰면 그 사이 음성으로 더한 탑승자가 사라진다 (UI 감사 #23, HealthConsentTest).
+ * 안드로이드 없이 시험할 수 있게 Composable 밖에 둔다.
+ */
+fun onHealthConsentTap(prefs: PrefsState, overlays: OverlayState, occupants: () -> List<Occupant>, onSetOccupants: (List<Occupant>) -> Unit) {
+    when {
+        !prefs.healthConsent -> overlays.confirm(
+            PopupSpec(
+                title = "건강 관련 정보 처리 동의",
+                description = "$HEALTH_CONSENT_TEXT\n\n임신부·과민성 방광·과민성 장 탑승자를 고르면 화장실 기준 시간을 맞춥니다.",
+                confirmText = "동의",
+                onConfirm = { prefs.updateHealthConsent(true) },
+            ),
+        )
+        occupants().any { it.type.isHealth } -> overlays.confirm(
+            PopupSpec(
+                title = "동의를 철회할까요?",
+                description = "임신부·민감 탑승자 정보를 목록에서 지워요.",
+                confirmText = "철회하고 지우기",
+                onConfirm = {
+                    prefs.updateHealthConsent(false)
+                    onSetOccupants(withoutHealth(occupants()))
+                },
+            ),
+        )
+        else -> prefs.updateHealthConsent(false)
+    }
 }
 
 /** 동의 철회 때 남길 탑승자 */

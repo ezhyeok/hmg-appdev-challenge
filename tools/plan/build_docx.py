@@ -140,6 +140,13 @@ def edit_part1_and_names(doc):
     assert '□ 개인' in par, "participation-unit checkbox not found"
     doc = doc[:s] + par.replace('□ 개인', '■ 개인', 1) + doc[e:]
 
+    # 참가 부문: □ 대학(원)생 -> ■ 대학(원)생 (참가자가 2026-11-12에 정함)
+    i = doc.index('참가 부문:')
+    s, e = _paragraph_bounds(doc, i)
+    par = doc[s:e]
+    assert '□ 대학(원)생' in par or '□ 대학' in par, "division checkbox not found"
+    doc = doc[:s] + par.replace('□ 대학', '■ 대학', 1) + doc[e:]
+
     # 참가 인원: 1명
     i = doc.index('참가 인원:')
     s, e = _paragraph_bounds(doc, i)

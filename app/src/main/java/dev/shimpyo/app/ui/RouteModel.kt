@@ -59,8 +59,69 @@ fun remainingCongestion(c: CongestionSegment): CongestionSegment {
     return c.copy(startDistanceM = 0.0, lengthM = end, durationS = c.durationS * end / c.lengthM)
 }
 
-/** 정체 이름표: "정체 20분" (남은 부분 기준) */
-fun congestionLabel(c: CongestionSegment): String = "정체 ${Labels.duration((remainingCongestion(c).durationS / 60.0).roundToInt())}"
+/** 정체 항목 사이 빈 구간이 이보다 짧으면 한 정체로 묶는다 (m). 엔진 GapAnalyzer.JAM_JOIN_M과 같은 값이다 (CongestionDisplayTest가 지킨다) */
+const val JAM_JOIN_M = 1_000.0
+
+/** 화면에 정체로 그리는 최소 지나는 시간 (초). 이보다 짧은 느린 구간은 띠·타임라인·칩에 보이지 않는다 */
+const val JAM_DISPLAY_MIN_S = 5 * 60.0
+
+/**
+ * 화면에 보일 정체. 내비는 한 정체를 도로 구간마다 쪼개 보내고, 100m 안팎의 느린 구간도 정체 항목으로 준다
+ * (2026-11-12 판교→부산역: 35항목, 대부분 30~200m·지나는 데 10~40초). 그대로 그리자 계획 타임라인에
+ * "정체 0분 · 대왕판교로 · 400m 앞부터 100m"가 여덟 줄 이어지고 경로 띠에 "정체 0분"이 붙었다.
+ *
+ * - 남은 부분만 본다(차가 정체 안이면 지금 위치부터). 똑같은 항목이 두 번 오면 한 번만 센다.
+ * - 가까운 순으로 놓고, 앞 묶음의 끝에서 [JAM_JOIN_M] 안에 시작하는 항목은 같은 정체다. 범위가 겹치는 항목(내비 offset은 10km
+ *   밖에서 1km 단위다)은 앞 항목 끝에 이어 놓는다: 길이와 지나는 시간은 항목의 합이다.
+ * - 단, 두 항목 사이의 빈 구간에 화장실 기회([opportunitiesM], 경로 거리)가 있으면 묶지 않는다. 엔진(GapAnalyzer)이 그렇게 본다:
+ *   그 휴게소는 뒤 정체 전 마지막 화장실이다. 화면이 묶어 버리면 "정체 전 마지막 화장실"이라고 묻는 곳이 정체 한가운데로 그려진다.
+ * - 묶음의 이름(도로·시작·끝)은 가장 긴 항목의 것.
+ * - 지나는 데 [JAM_DISPLAY_MIN_S] 이상 걸리는 묶음만 보인다.
+ *
+ * 돌려주는 구간은 시작 = 첫 항목의 시작, 길이·시간 = 합이다. 도착 시간 계산([travelSeconds], [restroomGaps]의 분)은 이 함수가 아니라
+ * 원래 항목을 쓴다: 짧은 느린 구간도 도착 시간에는 들어간다.
+ */
+fun displayJams(congestion: List<CongestionSegment>, opportunitiesM: List<Double> = emptyList()): List<CongestionSegment> {
+    val items = congestion.distinct().map(::remainingCongestion)
+        .filter { it.lengthM > 0.0 && it.startDistanceM.isFinite() && it.lengthM.isFinite() && it.durationS.isFinite() }
+        .sortedBy { it.startDistanceM }
+    if (items.isEmpty()) return emptyList()
+    val out = ArrayList<CongestionSegment>()
+    var first = items[0]
+    var longest = first
+    var end = first.startDistanceM + first.lengthM
+    var length = first.lengthM
+    var seconds = first.durationS
+    fun close() {
+        if (seconds >= JAM_DISPLAY_MIN_S) out += longest.copy(startDistanceM = first.startDistanceM, lengthM = length, durationS = seconds)
+    }
+    for (i in 1 until items.size) {
+        val c = items[i]
+        val gapFrom = end
+        if (c.startDistanceM - end <= JAM_JOIN_M && opportunitiesM.none { it >= gapFrom && it <= c.startDistanceM }) {
+            end = max(end, c.startDistanceM) + c.lengthM
+            length += c.lengthM
+            seconds += c.durationS
+            if (c.lengthM > longest.lengthM) longest = c
+        } else {
+            close()
+            first = c
+            longest = c
+            end = c.startDistanceM + c.lengthM
+            length = c.lengthM
+            seconds = c.durationS
+        }
+    }
+    close()
+    return out
+}
+
+/** 지금 상태에서 화면에 보일 정체: 경로 앞 화장실 기회([opportunities])를 사이에 둔 항목은 묶지 않는다 */
+fun displayJams(state: CoachUiState): List<CongestionSegment> =
+    displayJams(state.congestion, opportunities(state).mapNotNull { it.routeDistanceM })
+
+/** 정체 이름표: "정체 20분" (남은 부분 기준). 1분 미만도 1분으로 쓴다: "정체 0분"은 없다 */
+fun congestionLabel(c: CongestionSegment): String = "정체 ${Labels.minutesOf(remainingCongestion(c).durationS)}"
 
 /** 정체 상세: "청주IC–남이JC · 3km 앞부터 18km", 정체 안이면 "지금부터 12km" */
 fun congestionDetail(c: CongestionSegment): String {
@@ -93,9 +154,11 @@ fun restroomGaps(state: CoachUiState): List<RestroomGap> {
     val opps = opportunities(state).map { it.routeDistanceM!! }
     if (opps.isEmpty()) return emptyList()
     val points = listOf(0.0) + opps
+    // '정체를 지나는 동안'이라고 말하는 것은 화면에 정체로 보이는 것뿐이다 (짧은 느린 구간 때문에 공백이 띠에서 사라지지 않게)
+    val jams = displayJams(state.congestion, opps)
     return points.zipWithNext().mapNotNull { (a, b) ->
         val min = (travelSeconds(a, b, state.congestion, speed) / 60.0).roundToInt()
-        val congested = state.congestion.any { it.startDistanceM < b && it.startDistanceM + it.lengthM > a }
+        val congested = jams.any { it.startDistanceM < b && it.startDistanceM + it.lengthM > a }
         if (min >= GAP_ALERT_MIN) RestroomGap(a, b, min, congested) else null
     }
 }
@@ -242,9 +305,8 @@ fun stripData(state: CoachUiState, maxAxisM: Double? = null, nearFocus: Boolean 
     restroomGaps(state).forEach { g ->
         if (!g.congested) spans += StripSpan(g.startM, g.endM, StripSpanKind.GAP, "공백 ${Labels.duration(g.minutes)}")
     }
-    state.congestion.forEach { c ->
-        val r = remainingCongestion(c)
-        if (r.lengthM > 0.0) spans += StripSpan(r.startDistanceM, r.startDistanceM + r.lengthM, StripSpanKind.CONGESTION, congestionLabel(c))
+    displayJams(state).forEach { j ->
+        spans += StripSpan(j.startDistanceM, j.startDistanceM + j.lengthM, StripSpanKind.CONGESTION, congestionLabel(j))
     }
     val farthest = max(
         stops.maxOfOrNull { it.distanceM } ?: 0.0,

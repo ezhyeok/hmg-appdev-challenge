@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import dev.shimpyo.app.ui.GoToBusy
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.LocalLayout
 import dev.shimpyo.app.ui.RestroomGap
@@ -42,11 +43,12 @@ import dev.shimpyo.app.ui.components.ShimpyoIcons
 import dev.shimpyo.app.ui.components.SmallChip
 import dev.shimpyo.app.ui.congestionDetail
 import dev.shimpyo.app.ui.congestionLabel
+import dev.shimpyo.app.ui.displayJams
+import dev.shimpyo.app.ui.goToProgressText
 import dev.shimpyo.app.ui.drive.StripLegend
 import dev.shimpyo.app.ui.livePlan
 import dev.shimpyo.app.ui.opportunities
 import dev.shimpyo.app.ui.plannedDistanceText
-import dev.shimpyo.app.ui.remainingCongestion
 import dev.shimpyo.app.ui.restroomGaps
 import dev.shimpyo.app.ui.routeSpeedMps
 import dev.shimpyo.app.ui.stripData
@@ -91,7 +93,7 @@ sealed interface TimelineRow {
         val distanceText: String = Labels.distance(distanceM),
     ) : TimelineRow
 
-    /** [segment]는 남은 부분이다 (차가 정체 안이면 지금 위치부터, 시간도 남은 길이만큼) */
+    /** [segment]는 화면에 보일 정체 한 덩어리다 (RouteModel.displayJams: 이어진 항목을 묶고, 차가 정체 안이면 남은 부분만) */
     data class Congestion(val segment: CongestionSegment) : TimelineRow {
         override val distanceM: Double get() = segment.startDistanceM
     }
@@ -106,6 +108,7 @@ sealed interface TimelineRow {
 /**
  * 상태 → 타임라인. 같은 거리에서는 지금 → 정차 → 공백 → 정체 → 목적지 순.
  * 계획 정차는 지금 후보 값으로 그리고(livePlan), 지나친 정차와 목적지 뒤 후보는 뺀다 (UI 감사 #4).
+ * 정체는 이어진 항목을 묶어 지나는 데 5분 이상인 것만 한 줄씩 둔다 (displayJams).
  */
 fun timeline(state: CoachUiState): List<TimelineRow> {
     val plan = livePlan(state)
@@ -126,10 +129,7 @@ fun timeline(state: CoachUiState): List<TimelineRow> {
         }
     }
     restroomGaps(state).forEach { rows += TimelineRow.Gap(it) }
-    state.congestion.forEach { c ->
-        val r = remainingCongestion(c)
-        if (r.lengthM > 0.0) rows += TimelineRow.Congestion(r)
-    }
+    displayJams(state).forEach { rows += TimelineRow.Congestion(it) }
     state.remainDistanceM?.let { d -> rows += TimelineRow.Destination(state.destinationName, d, state.remainTimeS ?: d / speed) }
     return rows.sortedWith(compareBy<TimelineRow> { it.distanceM }.thenBy { order(it) })
 }
@@ -204,13 +204,14 @@ fun noOpportunityText(state: CoachUiState): String = candidatesWaiting(state.can
     ?: if (state.ahead.any { it.facilities.restroom && it.routeDistanceM == null }) "경로 거리를 확인하는 중이에요" else "이 경로에는 화장실 기회 정보가 없어요"
 
 /**
- * @param goToPendingId 내비에 넣는 중인 곳. 결과가 올 때까지 같은 곳의 버튼을 막는다 (UI 감사 #24: 두 번 누르면 경유지 요청이 1초 안에 두 번 갔다)
+ * @param busy 진행 중인 들르기(내비에 넣는 중, ContentState.goToBusy). 끝날 때까지 경유지 버튼을 모두 막고 진행을 보인다
+ *   (UI 감사 #24: 두 번 누르면 경유지 요청이 1초 안에 두 번 갔다. 닫힘 검증 UI-N2: 끝은 코치가 정한다)
  */
 @Composable
 fun PlanScreen(
     state: CoachUiState,
     planRequested: Boolean,
-    goToPendingId: String?,
+    busy: GoToBusy?,
     onMakePlan: () -> Unit,
     onGoTo: (StopCandidate) -> Unit,
     modifier: Modifier = Modifier,
@@ -226,13 +227,13 @@ fun PlanScreen(
         ) {
             Column(Modifier.width(640.dp).fillMaxHeight().verticalScroll(rememberScrollState()).padding(bottom = layout.bottom)) {
                 Spacer(Modifier.height(layout.gap))
-                SummaryCard(state, summary, first, planRequested, goToPendingId, onMakePlan, onGoTo)
+                SummaryCard(state, summary, first, planRequested, busy, onMakePlan, onGoTo)
                 Spacer(Modifier.height(layout.gap))
                 StripCard(state)
             }
             Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(bottom = layout.bottom)) {
                 Spacer(Modifier.height(layout.gap))
-                Timeline(rows, noOpportunityText(state), goToPendingId, onGoTo)
+                Timeline(rows, noOpportunityText(state), busy, onGoTo)
             }
         }
     } else {
@@ -240,11 +241,11 @@ fun PlanScreen(
             modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = layout.margin, end = layout.margin, bottom = layout.bottom),
         ) {
             Spacer(Modifier.height(layout.gap))
-            SummaryCard(state, summary, first, planRequested, goToPendingId, onMakePlan, onGoTo)
+            SummaryCard(state, summary, first, planRequested, busy, onMakePlan, onGoTo)
             Spacer(Modifier.height(layout.gap))
             StripCard(state)
             Spacer(Modifier.height(layout.gap))
-            Timeline(rows, noOpportunityText(state), goToPendingId, onGoTo)
+            Timeline(rows, noOpportunityText(state), busy, onGoTo)
         }
     }
 }
@@ -255,7 +256,7 @@ private fun SummaryCard(
     summary: PlanSummary,
     first: StopCandidate?,
     requested: Boolean,
-    goToPendingId: String?,
+    busy: GoToBusy?,
     onMakePlan: () -> Unit,
     onGoTo: (StopCandidate) -> Unit,
 ) {
@@ -315,10 +316,15 @@ private fun SummaryCard(
         // 카드 안 전체 폭 Filled 하나 (다시 계산은 헤더의 [새로])
         when {
             requested -> PleosButton("계획을 세우는 중", {}, Modifier.fillMaxWidth(), filled = true, icon = ShimpyoIcons.Route, enabled = false)
-            first != null && goToPendingId == first.id ->
-                PleosButton("내비에 넣는 중", {}, Modifier.fillMaxWidth(), filled = true, icon = ShimpyoIcons.Navigation, enabled = false)
-            first != null -> PleosButton("첫 정차 경유지로 넣기", { onGoTo(first) }, Modifier.fillMaxWidth(), filled = true, icon = ShimpyoIcons.Navigation, enabled = goToPendingId == null)
+            first != null && busy?.stopId == first.id ->
+                PleosButton("내비에 넣는 중…", {}, Modifier.fillMaxWidth(), filled = true, icon = ShimpyoIcons.Navigation, enabled = false)
+            first != null -> PleosButton("첫 정차 경유지로 넣기", { onGoTo(first) }, Modifier.fillMaxWidth(), filled = true, icon = ShimpyoIcons.Navigation, enabled = busy == null)
             else -> PleosButton("계획 세우기", onMakePlan, Modifier.fillMaxWidth(), filled = true, icon = ShimpyoIcons.Route)
+        }
+        // 다른 곳(질문에 '응'한 곳, 타임라인에서 고른 곳)을 넣는 중이라 버튼이 꺼져 있으면 그 이유를 보인다
+        if (busy != null && busy.stopId != first?.id) {
+            Spacer(Modifier.height(Dimens.Space.xs))
+            Text(goToProgressText(busy), style = PleosType.BodyMedium, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         }
     }
 }
@@ -347,7 +353,7 @@ private val RailColumn = 72.dp
 private const val ARRIVED_M = 100.0
 
 @Composable
-private fun Timeline(rows: List<TimelineRow>, emptyText: String, goToPendingId: String?, onGoTo: (StopCandidate) -> Unit) {
+private fun Timeline(rows: List<TimelineRow>, emptyText: String, busy: GoToBusy?, onGoTo: (StopCandidate) -> Unit) {
     val c = ShimpyoTheme.colors
     Column(Modifier.fillMaxWidth()) {
         if (rows.none { it is TimelineRow.Stop }) {
@@ -362,7 +368,7 @@ private fun Timeline(rows: List<TimelineRow>, emptyText: String, goToPendingId: 
                 TimelineRow.Now -> TimelineLine(RailKind.ROUTE, top = false, bottom = !last, marker = { NowMarker() }) {
                     RowText("지금", "0km", null, strong = true)
                 }
-                is TimelineRow.Stop -> StopLine(row, first, last, goToPendingId, onGoTo)
+                is TimelineRow.Stop -> StopLine(row, first, last, busy, onGoTo)
                 is TimelineRow.Gap -> TimelineLine(RailKind.GAP, top = !first, bottom = !last, marker = {}) {
                     EventText(
                         "화장실 공백 ${Labels.duration(row.gap.minutes)}",
@@ -386,10 +392,10 @@ private fun Timeline(rows: List<TimelineRow>, emptyText: String, goToPendingId: 
 }
 
 @Composable
-private fun StopLine(row: TimelineRow.Stop, first: Boolean, last: Boolean, goToPendingId: String?, onGoTo: (StopCandidate) -> Unit) {
+private fun StopLine(row: TimelineRow.Stop, first: Boolean, last: Boolean, busy: GoToBusy?, onGoTo: (StopCandidate) -> Unit) {
     val c = ShimpyoTheme.colors
     val p = row.planned
-    val pending = goToPendingId == row.stop.id
+    val pending = busy?.stopId == row.stop.id
     TimelineLine(
         RailKind.ROUTE,
         top = !first,
@@ -420,11 +426,11 @@ private fun StopLine(row: TimelineRow.Stop, first: Boolean, last: Boolean, goToP
                         SmallChip("${p.dwellMin}분", icon = ShimpyoIcons.Schedule, container = Color.Transparent, content = c.textSecondary)
                     }
                     Spacer(Modifier.width(Dimens.Space.s))
-                    PleosButton(if (pending) "넣는 중" else "경유지로", { onGoTo(row.stop) }, size = ButtonSize.Small, enabled = goToPendingId == null)
+                    PleosButton(if (pending) "넣는 중…" else "경유지로", { onGoTo(row.stop) }, size = ButtonSize.Small, enabled = busy == null)
                 }
             } else if (row.recommended) {
                 Spacer(Modifier.height(Dimens.Space.s))
-                PleosButton(if (pending) "넣는 중" else "경유지로", { onGoTo(row.stop) }, size = ButtonSize.Small, enabled = goToPendingId == null)
+                PleosButton(if (pending) "넣는 중…" else "경유지로", { onGoTo(row.stop) }, size = ButtonSize.Small, enabled = busy == null)
             }
         }
     }

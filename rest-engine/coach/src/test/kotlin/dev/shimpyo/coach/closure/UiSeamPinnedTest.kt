@@ -25,7 +25,7 @@ import org.junit.Test
 /**
  * 닫힘 검증(2026-11-12, UI 감사 담당): 화면(app/ui)이 계약(CoachState.kt)에서 기대하는 것 가운데 코어 쪽 테스트가 없던 것.
  * 지금 모두 통과한다. 화면은 코어보다 먼저 계약만 보고 만들어졌으므로, 코어가 이 약속을 어기면 화면 테스트는 그대로 통과한 채
- * 화면이 틀린다. 실패하는 것(아직 열린 틈)은 UiSeamOpenTest에 있다. 감사 번호는 scratchpad/audit/ui/report.md.
+ * 화면이 틀린다. 열려 있던 틈을 닫은 테스트는 CoachCoreUrgentTest·CoachCoreGoToTest·CoachCoreVoiceTest·CoachCoreTest에 있다. 감사 번호는 scratchpad/audit/ui/report.md.
  */
 class UiSeamPinnedTest {
 
@@ -171,13 +171,16 @@ class UiSeamPinnedTest {
         rig.command(UiCommand.MakePlan)
         rig.run(1_000)
         val first = checkNotNull(rig.state.plan).stops.first().stop.id
-        assertEquals("전제: 첫 계획 정차는 바로 앞 휴게소", "cheonan", first)
-        assertEquals(1L, rig.state.planGeneration)
+        // 시연 경로 시간이 시나리오 속도(시속 100km)와 맞은 뒤(U2)로는 첫 계획 정차가 정체 전 마지막 화장실인 옥산이다:
+        // 천안호두에서 서면 정체 뒤 죽암까지 73분이라 아이의 마감을 넘는다 (예전 시속 119km 계산으로는 72분이라 천안호두였다)
+        assertEquals("전제: 첫 계획 정차는 곧 지나칠 앞쪽 휴게소", "oksan", first)
+        val gen = rig.state.planGeneration
+        assertTrue("요청에 답한 계획에는 번호가 있다", gen > 0L)
         rig.runUntil(120_000) { rig.state.ahead.none { it.id == first } } ?: error("첫 정차를 지나치지 않았다")
         val late = rig.runUntil(35_000) { rig.state.plan!!.stops.none { it.stop.id == first } }
         assertNotNull("지나친 정차는 35초 안에 계획에서 빠진다 (30초 주기 또는 후보가 바뀔 때)", late)
         assertTrue("남은 계획 정차는 모두 앞쪽 후보에 있다", rig.state.plan!!.stops.all { p -> rig.state.ahead.any { it.id == p.stop.id } })
-        assertEquals("고쳐 낸 계획은 번호를 올리지 않는다 ('계획을 세우는 중'이 요청 없이 풀리지 않게)", 1L, rig.state.planGeneration)
+        assertEquals("고쳐 낸 계획은 번호를 올리지 않는다 ('계획을 세우는 중'이 요청 없이 풀리지 않게)", gen, rig.state.planGeneration)
     }
 
     // ------------------------------------------------------------ 세계 전환 (UI #15)

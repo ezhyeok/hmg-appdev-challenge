@@ -12,6 +12,7 @@ import dev.hmg.pleoskit.PleosForegroundService
 import dev.hmg.pleoskit.PleosPermissions
 import dev.shimpyo.app.coach.CoachService
 import dev.shimpyo.app.coach.CoachStore
+import dev.shimpyo.app.ui.LaunchExtras
 import dev.shimpyo.app.ui.PermissionPolicy
 import dev.shimpyo.app.ui.ShimpyoRoot
 import dev.shimpyo.app.ui.UiRestrictions
@@ -28,6 +29,7 @@ import kotlinx.coroutines.launch
  * - 서비스는 권한과 관계없이 화면이 보일 때 시작한다(이미 돌고 있으면 그대로). 서비스가 멈췄다가 화면으로 돌아오면 다시 시작한다.
  * - 실행 중 권한(차속, 위치)은 정차 중일 때 한 번만 묻는다([PermissionPolicy]). 새로 허용되면 서비스에 PermissionsChanged를 보낸다.
  * - 주행 제한은 화면이 서비스 없이 스스로 구독한다(UiRestrictions).
+ * - 런처라 exported다: 실행 인텐트에서는 [LaunchExtras]가 고른 값만 서비스로 넘긴다 (제출용 빌드는 시연 전환 하나).
  */
 class MainActivity : ComponentActivity() {
 
@@ -40,7 +42,7 @@ class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent { ShimpyoRoot() }
-        // 창 분할·크기 변경으로 화면이 다시 만들어질 때(savedInstanceState != null)는 처음 실행 인텐트의 개발용 옵션
+        // 창 분할·크기 변경으로 화면이 다시 만들어질 때(savedInstanceState != null)는 처음 실행 인텐트의 옵션
         // (--es demo 등)을 다시 보내지 않는다. 다시 보내면 시연이 처음부터 다시 시작된다(2026-11-11 창 분할에서 확인,
         // tools/laptop/demo-smoke.sh --split이 지킨다)
         forwardExtras = savedInstanceState == null
@@ -77,7 +79,6 @@ class MainActivity : ComponentActivity() {
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
-        Log.i("Shimpyo", "onNewIntent extras=${intent.extras?.keySet()}")
         setIntent(intent)
         forwardExtras = true
         startCoach()
@@ -100,14 +101,33 @@ class MainActivity : ComponentActivity() {
         lastMissing = now
     }
 
+    /**
+     * 서비스를 시작한다. 실행 인텐트에서 넘기는 것은 [LaunchExtras.pick]이 고른 값뿐이다: 시연 전환(`demo`, 이름을 확인해서)과,
+     * debug 빌드에서만 개발용 점검 옵션(selftest·route·verify·probe). 받은 extras 묶음을 통째로 넘기지 않는다 (닫힘 검증 UI-N1: 제출용 빌드에서도
+     * `--ez selftest true`가 좌석·창문을 움직였다). 한 인텐트는 한 번만 넘긴다.
+     */
     private fun startCoach() {
-        // 개발용 옵션(--ez verify true, --es demo 시나리오 등)을 서비스로 그대로 넘긴다. 한 인텐트는 한 번만 넘긴다
-        val extras = if (forwardExtras) intent.extras else null
+        val received = if (forwardExtras) intent else null
         forwardExtras = false
-        PleosForegroundService.start(this, CoachService::class.java, Intent().apply { extras?.let { putExtras(it) } })
+        val forward = Intent()
+        if (received != null) {
+            // 다른 앱이 보낸 인텐트다: 풀 수 없는 extra가 들어 있어도(BadParcelableException) 앱이 죽지 않게 읽는다
+            val picked = LaunchExtras.pick(
+                demo = runCatching { received.getStringExtra(LaunchExtras.DEMO) }.getOrNull(),
+                flag = { name -> runCatching { received.getBooleanExtra(name, false) }.getOrDefault(false) },
+                debugBuild = BuildConfig.DEBUG,
+                text = { name -> runCatching { received.getStringExtra(name) }.getOrNull() },
+            )
+            picked.demo?.let { forward.putExtra(LaunchExtras.DEMO, it) }
+            picked.devFlags.forEach { forward.putExtra(it, true) }
+            picked.devTexts.forEach { (name, value) -> forward.putExtra(name, value) }
+            if (!picked.isEmpty) Log.i(TAG, "launch options: demo=${picked.demo} dev=${picked.devFlags + picked.devTexts.keys}")
+        }
+        PleosForegroundService.start(this, CoachService::class.java, forward)
     }
 
     private companion object {
+        const val TAG = "Shimpyo"
         const val REQUEST_PERMISSIONS = 7001
         const val KEY_PERMISSIONS_ASKED = "permissionsAsked"
     }

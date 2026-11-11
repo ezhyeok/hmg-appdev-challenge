@@ -31,6 +31,7 @@ import kotlinx.coroutines.withTimeoutOrNull
  * - 길안내 중이고 이번 경로(epoch)의 TBT를 받았으면 TBT의 경로 위 휴게소·졸음쉼터만 쓴다. 이름으로 공공데이터 행을 찾아
  *   좌표·편의시설을 붙이고, 같은 이름이 여럿이면 차로 방위(StopIndex.matchByName의 heading)로, 그래도 여럿이면 requestTrip 거리로
  *   고른다. 못 고르면 좌표 없는 tbt: 후보. 거리는 TBT 누적 거리, etaS는 비운다(엔진이 정체로 계산한다).
+ *   한 번 확인한 행은 그 경로(epoch)가 끝날 때까지 그 행이다([resolved]): 엔진은 수락한 정차를 id로 따라간다.
  * - 경로가 바뀐 직후 TBT를 기다리는 동안은 목록을 바꾸지 않는다(범위는 0, withHorizon). 끝내 안 오면 반경 검색.
  * - 길안내가 없으면(또는 시연이면) 진행 방향 앞쪽 반경 검색. 실제면 가까운 순 [CandidatePolicy.oracleMax]곳을 requestTrip으로 보정하고
  *   유턴 시설과 목적지 뒤 시설을 뺀다.
@@ -60,6 +61,16 @@ class CandidateProvider(
     private var inFlight: Job? = null
     private val wake = Channel<Unit>(Channel.CONFLATED)
     private var lastLog: String? = null
+
+    /**
+     * 이번 내비 epoch에서 확인한 'TBT 기회 → 데이터 행' (서비스 감사 SV-N1). 차로 방위나 내비 거리로 확인한 행은 epoch가 끝날 때까지
+     * 그 행이다. 예전에는 갱신마다 새로 골라서, 정체에 들어 방위를 모르게 되고(P·저속) 내비도 못 재면 같은 휴게소의 후보 id가
+     * 데이터 행에서 좌표 없는 tbt:로 바뀌었고, 엔진이 수락한 정차를 잊고 다시 물었다. 다른 epoch(되돌아가는 새 경로)에서는 다시 고른다.
+     */
+    private val resolved = HashMap<OppKey, StopCandidate>()
+    /** 이번 epoch에 차로 방위가 반대 차로라고 뺀 이름. 방위를 다시 모르게 돼도 그 행으로 돌아가지 않는다 (행 ↔ tbt:를 오가지 않게) */
+    private val laneRejected = HashSet<OppKey>()
+    private var resolvedEpoch = Int.MIN_VALUE
 
     // ------------------------------------------------------------ 갱신 루프
 
@@ -132,6 +143,7 @@ class CandidateProvider(
         generation++
         inFlight?.cancel()
         basis = null
+        forgetResolved(Int.MIN_VALUE)
         oracle.clear()
         _snapshot.value = CandidateSnap(odometerM = odometer.meters, untilM = 0.0, naviEpoch = -1, state = CandidatesState.LOADING_DATA)
         wake.trySend(Unit)
@@ -163,6 +175,7 @@ class CandidateProvider(
     // ------------------------------------------------------------ TBT 경로
 
     private suspend fun fromRoute(plan: Plan.Route, pos: Fix, navi: NaviSnapshot, policy: CandidatePolicy, odo: Double, budget: Budget): CandidateSnap {
+        if (resolvedEpoch != navi.epoch) forgetResolved(navi.epoch)
         val list = ArrayList<StopCandidate>()
         val ids = HashSet<String>()
         val nameCount = HashMap<String, Int>()
@@ -179,13 +192,30 @@ class CandidateProvider(
         return CandidateSnap(list, odo, plan.untilM, state = CandidatesState.READY, source = CandidateSource.ROUTE)
     }
 
-    /** TBT 기회 하나에 맞는 데이터 행. 못 고르면 null */
+    /**
+     * TBT 기회 하나에 맞는 데이터 행. 못 고르면 null.
+     * - 이번 epoch에 확인한 행이 있으면 그 행 (TBT 거리와 어긋나지 않을 때: 경로가 같은 이름의 다른 시설을 또 지날 수 있다).
+     * - 방위를 알고 한 행만 남으면 차로 방위로 확인한 것이다. 여럿이면 내비 거리로 고르고, 고르면 확인한 것이다.
+     * - 방위를 모르는데 한 행뿐이면 확인 없이 임시로 쓴다(기억하지 않는다). 방위를 알던 때 차로 방위가 뺀 이름이면 쓰지 않는다.
+     */
     private suspend fun matchOpportunity(
         o: RouteOpportunity, kind: StopKind, pos: Fix, navi: NaviSnapshot, odo: Double, policy: CandidatePolicy, budget: Budget,
     ): StopCandidate? {
-        val matches = stops.matchByName(o.name, kind, pos.lat, pos.lon, o.routeDistanceM + MATCH_SLACK_M, pos.heading)
-            .filter { CandidateRules.plausibleMatch(it.straightDistanceM, o.routeDistanceM) }
-        if (matches.size <= 1) return matches.firstOrNull()
+        val key = OppKey(o.name, kind)
+        resolved[key]?.let { row ->
+            val straight = Geo.distanceM(pos.lat, pos.lon, row.lat, row.lon)
+            if (CandidateRules.plausibleMatch(straight, o.routeDistanceM)) return row.copy(straightDistanceM = straight)
+        }
+        val matches = namedRows(o, kind, pos, pos.heading)
+        if (matches.isEmpty()) {
+            // 방위 때문에 빠진 것인지 본다 (이름이 데이터에 없는 것과 가른다)
+            if (pos.heading != null && namedRows(o, kind, pos, heading = null).isNotEmpty()) laneRejected += key
+            return null
+        }
+        if (matches.size == 1) {
+            if (pos.heading != null) return matches[0].also { resolved[key] = it }
+            return matches[0].takeIf { key !in laneRejected }
+        }
         // 차로 방위로도 못 골랐다(방향을 모르거나 데이터에 방위가 없다). 내비 거리와 TBT 거리를 맞춰 본다
         if (policy.oracleMax == null) return null
         val measured = matches.map { m ->
@@ -194,7 +224,18 @@ class CandidateProvider(
             // TBT 거리는 갱신 시작(odo) 기준, requestTrip은 요청(at) 기준이다
             CandidateRules.Measured(m, r?.routeDistanceM?.plus(navi.moved(odo, at)), r?.directionOk)
         }
-        return CandidateRules.chooseMeasured(measured, o.routeDistanceM)
+        return CandidateRules.chooseMeasured(measured, o.routeDistanceM)?.also { resolved[key] = it }
+    }
+
+    /** TBT 이름과 맞고 직선거리가 TBT 경로 거리와 어울리는 데이터 행 */
+    private fun namedRows(o: RouteOpportunity, kind: StopKind, pos: Fix, heading: Float?): List<StopCandidate> =
+        stops.matchByName(o.name, kind, pos.lat, pos.lon, o.routeDistanceM + MATCH_SLACK_M, heading)
+            .filter { CandidateRules.plausibleMatch(it.straightDistanceM, o.routeDistanceM) }
+
+    private fun forgetResolved(epoch: Int) {
+        resolved.clear()
+        laneRejected.clear()
+        resolvedEpoch = epoch
     }
 
     /**
@@ -233,15 +274,19 @@ class CandidateProvider(
 
     // ------------------------------------------------------------ 도우미
 
-    /** 갱신 하나의 requestTrip 한도: 요청 수 [left]개, 시각 [deadline]까지. 넘으면 '모름'(null) */
+    /**
+     * 갱신 하나의 requestTrip 한도: 내비에 보내는 요청 [left]개, 시각 [deadline]까지. 넘으면 '모름'(null).
+     * 캐시가 답한 것은 요청이 아니라 세지 않는다 (예전에는 세어서, 방위를 모를 때 같은 이름 쌍을 앞 세 쌍만 골랐다, SV-N1).
+     */
     private inner class Budget(private var left: Int, private val deadline: Long) {
         suspend fun refine(c: StopCandidate, from: Fix): StopCandidate? {
-            if (left <= 0) return null
             val remaining = deadline - clock.elapsedMs()
-            if (remaining <= 0) return null
-            left--
-            return withTimeoutOrNull(remaining) { oracle.refine(c, from) }
+            // 시간이 다 됐어도 캐시가 아는 것은 쓴다 (내비에 묻지 않으니 기다리지 않는다)
+            if (remaining <= 0) return oracle.refine(c, from) { false }
+            return withTimeoutOrNull(remaining) { oracle.refine(c, from, ::spend) }
         }
+
+        private fun spend(): Boolean = (left > 0).also { if (it) left-- }
     }
 
     /** 시연이면 내비 경로를 보지 않는다 (빈 스냅샷: 길안내 아님) */
@@ -277,6 +322,9 @@ class CandidateProvider(
     private data class Key(val policy: CandidatePolicy, val loaded: Boolean, val hasPos: Boolean, val epoch: Int, val guiding: Boolean, val tbt: TbtKey?)
 
     private data class Basis(val key: Key, val atMs: Long, val retryAtMs: Long?)
+
+    /** TBT 기회를 가리키는 이름과 종류 (같은 경로 안에서 같은 시설을 가리킨다) */
+    private data class OppKey(val name: String, val kind: StopKind)
 
     private companion object {
         val NO_ROUTE = NaviSnapshot()

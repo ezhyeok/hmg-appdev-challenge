@@ -38,6 +38,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import dev.shimpyo.app.ui.GoToBusy
 import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.LocalLayout
 import dev.shimpyo.app.ui.RequestFocusOnce
@@ -59,6 +60,7 @@ import dev.shimpyo.app.ui.components.VoiceButton
 import dev.shimpyo.app.ui.components.pressable
 import dev.shimpyo.app.ui.drive.acceptLabel
 import dev.shimpyo.app.ui.drive.shortQuestion
+import dev.shimpyo.app.ui.goToProgressText
 import dev.shimpyo.app.ui.limitChars
 import dev.shimpyo.app.ui.shortStopName
 import dev.shimpyo.app.ui.theme.Dimens
@@ -79,6 +81,8 @@ import dev.shimpyo.engine.StopKind
  * 정차 중: 필터(교환대·24시간·주차 가능)와 시설 줄이 있는 목록.
  * CCP: 결과가 나오면 1순위에 포커스를 둔다 (screens.md 3.4).
  *
+ * @param busy 진행 중인 들르기(내비에 넣는 중, ContentState.goToBusy). 끝날 때까지 결과 카드를 모두 막고, 고른 카드에 '넣는 중…'을
+ *   보인다. 목록에 없는 곳(질문에 '응'한 곳 등)을 넣는 중이면 설명 줄에 진행을 보인다. [닫기]는 늘 누를 수 있다
  * @param question 이 화면이 떠 있는 동안 코치가 다른 질문을 했다(예: 마지막 기회). 주행 중에는 터치 요소를 늘리지 않고
  *   글자로만 알리고(대답은 음성 또는 닫은 뒤 주행 화면), 정차 중에는 버튼을 같이 둔다 (UI 감사 #27)
  */
@@ -87,7 +91,7 @@ fun UrgentScreen(
     view: UrgentView,
     driving: Boolean,
     maxItems: Int,
-    pickingId: String?,
+    busy: GoToBusy?,
     mic: MicModel,
     onMic: () -> Unit,
     onPick: (RankedStop) -> Unit,
@@ -124,8 +128,8 @@ fun UrgentScreen(
             val n = urgentNotice(view.status)
             when {
                 n != null -> Notice(rest, n, onClose, onRetry)
-                driving -> DrivingResults(view.results.take(maxItems.coerceIn(1, DriveLimits.MAX_URGENT_RESULTS)), pickingId, maxChars, onPick, onClose, rest)
-                else -> ParkedResults(view.results, pickingId, onPick, rest)
+                driving -> DrivingResults(view.results.take(maxItems.coerceIn(1, DriveLimits.MAX_URGENT_RESULTS)), busy, maxChars, onPick, onClose, rest)
+                else -> ParkedResults(view.results, busy, onPick, rest)
             }
         }
     }
@@ -193,12 +197,14 @@ private fun QuestionStrip(p: Prompt, driving: Boolean, cabinSupported: Boolean, 
 }
 
 @Composable
-private fun DrivingResults(results: List<RankedStop>, pickingId: String?, maxChars: Int, onPick: (RankedStop) -> Unit, onClose: () -> Unit, modifier: Modifier) {
+private fun DrivingResults(results: List<RankedStop>, busy: GoToBusy?, maxChars: Int, onPick: (RankedStop) -> Unit, onClose: () -> Unit, modifier: Modifier) {
     val layout = LocalLayout.current
     val firstFocus = remember { FocusRequester() }
     Column(modifier) {
-        // 가장 좁은 compact 세로(628dp - 여백 48)에서도 한 줄에 들어가는 길이 (UI 감사 #10: 예전 문구는 잘렸다)
-        Text("진행 방향 · 주차 가능 · 빠른 순", style = DriveType.Minimum, color = ShimpyoTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // 가장 좁은 compact 세로(628dp - 여백 48)에서도 한 줄에 들어가는 길이 (UI 감사 #10: 예전 문구는 잘렸다).
+        // 보이는 카드가 아닌 곳을 넣는 중이면 카드가 왜 꺼져 있는지 이 줄이 말한다 (터치 요소는 늘리지 않는다)
+        val lead = busyElsewhere(busy, results)?.let { limitChars(it, maxChars) } ?: "진행 방향 · 주차 가능 · 빠른 순"
+        Text(lead, style = DriveType.Minimum, color = ShimpyoTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
         Spacer(Modifier.height(if (layout.compact) Dimens.Space.s else Dimens.Space.m))
         // 두 카드가 남는 높이를 나눠 가진다 (주행 중 터치 영역은 클수록 좋다). 1곳이면 2순위 자리는 비워 둔다
         val slots: @Composable (Modifier) -> Unit = { cell ->
@@ -206,7 +212,7 @@ private fun DrivingResults(results: List<RankedStop>, pickingId: String?, maxCha
                 val r = results.getOrNull(i)
                 if (r != null) {
                     UrgentResultCard(
-                        i + 1, r, primary = i == 0, picking = pickingId == r.stop.id, enabled = pickingId == null, compact = layout.compact, maxChars = maxChars,
+                        i + 1, r, primary = i == 0, picking = busy?.stopId == r.stop.id, enabled = busy == null, compact = layout.compact, maxChars = maxChars,
                         onClick = { onPick(r) },
                         modifier = if (i == 0) cell.focusRequester(firstFocus) else cell,
                     )
@@ -286,7 +292,7 @@ private fun UrgentResultCard(
                     }
                 }
                 Spacer(Modifier.width(Dimens.Space.m))
-                Text(if (picking) "넣는 중" else "여기로", style = DriveType.ActionLabel, color = fg, maxLines = 1)
+                Text(if (picking) "넣는 중…" else "여기로", style = DriveType.ActionLabel, color = fg, maxLines = 1)
                 if (!picking) Icon(ShimpyoIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(Dimens.Icon.base), tint = fg)
             }
         }
@@ -315,6 +321,13 @@ private fun RankMark(rank: Int, primary: Boolean) {
         Text(rank.toString(), style = PleosType.BodyLargeStrong, color = if (primary) c.buttonFilledEnabled else c.textOnFilledPrimary)
     }
 }
+
+/**
+ * 보이는 결과에 없는 곳을 내비에 넣는 중일 때의 진행 문구("옥산휴게소를 내비에 넣는 중…"). 보이는 카드를 넣는 중이면
+ * 그 카드가 '넣는 중…'을 보이므로 null
+ */
+internal fun busyElsewhere(busy: GoToBusy?, shown: List<RankedStop>): String? =
+    busy?.takeIf { b -> shown.none { it.stop.id == b.stopId } }?.let(::goToProgressText)
 
 /** "3분 · 1.1km · 진행 방향": 총 소요(주행 + 주차·도보 + 유턴) 먼저 */
 private fun urgentMeta(r: RankedStop): String = listOfNotNull(
@@ -350,7 +363,7 @@ private fun urgentBadges(r: RankedStop): List<String> {
 // ------------------------------------------------------------ 정차 중 목록
 
 @Composable
-private fun ParkedResults(results: List<RankedStop>, pickingId: String?, onPick: (RankedStop) -> Unit, modifier: Modifier) {
+private fun ParkedResults(results: List<RankedStop>, busy: GoToBusy?, onPick: (RankedStop) -> Unit, modifier: Modifier) {
     var diaper by rememberSaveable { mutableStateOf(false) }
     var open24 by rememberSaveable { mutableStateOf(false) }
     var parking by rememberSaveable { mutableStateOf(false) }
@@ -365,13 +378,17 @@ private fun ParkedResults(results: List<RankedStop>, pickingId: String?, onPick:
             ToggleButton("주차 가능", parking, { parking = !parking }, icon = ShimpyoIcons.Parking)
         }
         Spacer(Modifier.height(Dimens.Space.l))
+        busyElsewhere(busy, shown)?.let {
+            Text(it, style = PleosType.BodyMedium, color = ShimpyoTheme.colors.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            Spacer(Modifier.height(Dimens.Space.s))
+        }
         if (shown.isEmpty()) {
             EmptyMessage("조건에 맞는 곳이 없어요", Modifier.fillMaxWidth().padding(vertical = Dimens.Space.huge), detail = "필터를 줄여 보세요")
         } else {
             ListGroup {
                 shown.forEachIndexed { i, r ->
                     if (i > 0) ListDivider()
-                    ParkedRow(results.indexOf(r) + 1, r, pickingId == r.stop.id, enabled = pickingId == null) { onPick(r) }
+                    ParkedRow(results.indexOf(r) + 1, r, busy?.stopId == r.stop.id, enabled = busy == null) { onPick(r) }
                 }
             }
         }
@@ -422,7 +439,7 @@ private fun ParkedRow(rank: Int, r: RankedStop, picking: Boolean, enabled: Boole
         }
         Spacer(Modifier.width(Dimens.Space.m))
         Column(horizontalAlignment = Alignment.End) {
-            Text(if (picking) "넣는 중" else Labels.minutesOf(r.totalTimeS), style = PleosType.TitleMedium, color = c.textPrimary)
+            Text(if (picking) "넣는 중…" else Labels.minutesOf(r.totalTimeS), style = PleosType.TitleMedium, color = c.textPrimary)
             Icon(ShimpyoIcons.ChevronRight, contentDescription = null, modifier = Modifier.size(Dimens.Icon.base), tint = c.iconTertiary)
         }
     }

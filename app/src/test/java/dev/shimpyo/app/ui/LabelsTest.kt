@@ -26,6 +26,8 @@ class LabelsTest {
         Reason("RESTROOM_PERSONAL", t.reasonRestroomPersonal("운전자", 3)),
         Reason("RESTROOM_CAP", t.reasonRestroomCap(Occupant("e", OccupantType.ELDERLY), 90)),
         Reason("RESTROOM_CAP", t.reasonRestroomCap(Occupant("b", OccupantType.INFANT), 90)),
+        Reason("RESTROOM_AFTER_MEAL", t.reasonRestroomAfterMeal()),
+        Reason("RESTROOM_ASLEEP", t.reasonRestroomAsleep("7살 아이")),
         Reason("FATIGUE_VOICED", t.reasonFatigueVoiced()),
         Reason("FATIGUE_STRONG", t.reasonFatigueStrong()),
         Reason("FATIGUE_DRIVING", t.reasonFatigueDriving(108)),
@@ -82,6 +84,9 @@ class LabelsTest {
         assertEquals("정체 1시간", Labels.shortReason(Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(60))))
         assertEquals("정체 1시간 30분", Labels.shortReason(Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(90))))
         assertEquals("공백 50분", Labels.shortReason(Reason("LAST_CHANCE_GAP", t.reasonLastChanceGap(50))))
+        // 0분이라고 쓰지 않는다 (화면 어디에도 "정체 0분"은 없다)
+        assertEquals("정체 전 마지막", Labels.shortReason(Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(0))))
+        assertEquals("공백 전 마지막", Labels.shortReason(Reason("LAST_CHANCE_GAP", t.reasonLastChanceGap(0))))
         // 여럿이 타서 앞당겨 묻는 이유는 인원과 함께 보인다
         assertEquals("4명이 타서", Labels.shortReason(Reason("LAST_CHANCE_GROUP", t.reasonLastChanceGroup(4))))
         assertEquals("여럿이 타서", Labels.shortReason(Reason("LAST_CHANCE_GROUP", "")))
@@ -123,6 +128,25 @@ class LabelsTest {
         assertEquals("CCTV", Labels.shortReason(Reason("URGENT_SAFETY", t.reasonUrgentSafety(false, true))))
         // 들르기를 받은 것과 경유지가 들어간 것은 다르다 (UI 감사 #3)
         assertEquals("들르기로 함", Labels.shortReason(Reason("NEXT_ACCEPTED", t.reasonNextAccepted())))
+    }
+
+    @Test
+    fun contextFactorsAndRequestedStopsHaveLabels() {
+        // 엔진 맥락 요인(식사 뒤, 잠든 아이)과 요청에 답한 곳의 코드 (FIXLIST U5, UI-N5). 요청에 답한 곳의 코드
+        // (NEXT_REQUESTED_*)는 엔진 수정 브랜치와 함께 들어온다: 그 전에는 ReasonCoverageTest가 보지 못하므로 문구를 여기서 지킨다
+        assertEquals("식사 뒤", Labels.shortReason(Reason("RESTROOM_AFTER_MEAL", t.reasonRestroomAfterMeal())))
+        val asleep = Reason("RESTROOM_ASLEEP", t.reasonRestroomAsleep("7살 아이"))
+        assertEquals("자는 중", Labels.shortReason(asleep))
+        assertEquals("7살 아이 자는 중", Labels.shortReason(asleep, "7살 아이"))
+        // 이름이 길면 이름 없이 (칩 12자)
+        assertEquals("자는 중", Labels.shortReason(asleep, "우리집 둘째 꼬마 손님"))
+        assertEquals("요청하신 화장실", Labels.shortReason(Reason("NEXT_REQUESTED_RESTROOM", "말씀하신 화장실이에요")))
+        assertEquals("요청하신 곳", Labels.shortReason(Reason("NEXT_REQUESTED_CARE", "말씀하신 곳이에요")))
+        listOf("RESTROOM_AFTER_MEAL", "RESTROOM_ASLEEP", "NEXT_REQUESTED_RESTROOM", "NEXT_REQUESTED_CARE").forEach { code ->
+            val s = Labels.shortReason(Reason(code, ""), "민감 탑승자")
+            assertNotNull(code, s)
+            assertTrue("$code → '$s'", s!!.length <= DriveLimits.MAX_CHIP_CHARS)
+        }
     }
 
     @Test
