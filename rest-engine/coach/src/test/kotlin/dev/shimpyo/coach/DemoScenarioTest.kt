@@ -1,7 +1,11 @@
 package dev.shimpyo.coach
 
+import dev.shimpyo.coach.fakes.DRIVER
+import dev.shimpyo.coach.fakes.FakeSettings
+import dev.shimpyo.coach.fakes.seededEngines
 import dev.shimpyo.engine.CoachEngine
 import dev.shimpyo.engine.CoachInput
+import dev.shimpyo.engine.CoachOutput
 import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.PersonalMemory
@@ -9,15 +13,15 @@ import dev.shimpyo.engine.PromptKind
 import dev.shimpyo.engine.RouteState
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
-import dev.shimpyo.engine.TripProfile
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
-import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * 시연 시나리오를 서비스와 같은 방식으로 엔진에 넣어 본다 (DemoDirector.apply + candidates → CoachEngine.update).
+ * 시연 시나리오를 코치와 같은 경로로 엔진에 넣어 본다: 시연 세계(CoachWorld.Demo)가 프로필을 만들어 엔진을 만들고
+ * (newEngine), 입력과 후보를 시연 기준으로 바꾼다(apply, candidates). 예전 테스트는 엔진 프로필을 테스트 안에서 따로 만들어서
+ * 서비스의 프로필 코드가 틀려도 통과했다 (구조 리뷰 2.1, e95c384 #2 '피로 시연이 안 됨').
  * 회귀: 2026-11-11 에뮬레이터에서 귀성길 시연이 '정체 전 마지막 화장실'을 묻지 않았다. 시연 후보에 평균 속도로 만든
  * etaS가 들어갔고, 직선으로 이은 시연 경로가 실제보다 짧아 죽암휴게소가 정체 구간 안에 들어갔기 때문이다.
  */
@@ -31,41 +35,42 @@ class DemoScenarioTest {
     private val jukam = restArea("jukam", "죽암휴게소(부산방향)", 36.486810, 127.429261)
     private val sintanjin = restArea("sintanjin", "신탄진졸음쉼터", 36.425354, 127.416697, StopKind.DROWSY_SHELTER)
 
+    /** 실제 설정의 탑승자(운전자 혼자). 시연은 이것이 아니라 시나리오 탑승자를 써야 한다 */
+    private val settings = FakeSettings(occupants = listOf(DRIVER))
+
+    private class Demo(val world: CoachWorld.Demo, val engine: CoachEngine) {
+        fun update(input: CoachInput): CoachOutput = engine.update(world.apply(input.copy(now = world.clock.now(), candidates = world.candidates(input.candidates))))
+    }
+
+    private fun startDemo(name: String, real: () -> Long): Demo {
+        val run = checkNotNull(DemoRun.start(name, wallNow = real(), elapsed = ElapsedClock { real() }))
+        val world = CoachWorld.Demo(run)
+        return Demo(world, world.newEngine(seededEngines(), settings, PersonalMemory(), run.anchor))
+    }
+
     @Test
     fun holidayDemoAsksOksanAsTheLastChanceBeforeTheJam() {
         var real = 1_700_000_000_000L
-        val director = DemoDirector { real }
-        val start = checkNotNull(director.start("holiday"))
-        val t0 = director.now()
-        val restroomAt = t0 - start.lastRestroomMin * 60_000L
-        val engine = CoachEngine(
-            profile = TripProfile(
-                start.occupants, tripStart = t0 - start.drivenMin * 60_000L, lastRestroomAt = start.occupants.associate { it.id to restroomAt },
-                continuousDrivingMin = start.drivenMin.toDouble(),
-            ),
-            memory = PersonalMemory(),
-        )
-        val oksanAt = checkNotNull(director.alongForTest(DemoDirector.Pt(oksan.lat, oksan.lon))) { "옥산이 시연 경로 위에 있어야 한다" }
+        val demo = startDemo("holiday") { real }
+        val run = demo.world.run
+        val oksanAt = checkNotNull(run.alongM(DemoRun.Pt(oksan.lat, oksan.lon))) { "옥산이 시연 경로 위에 있어야 한다" }
         val candidates = listOf(oksan, jukam, sintanjin)
 
         // 정체는 죽암휴게소 앞에서 끝난다 (정체 안에 화장실이 있으면 마지막 기회 조건이 깨진다)
-        val firstInput = director.apply(CoachInput(now = director.now(), gear = Gear.DRIVE, speedKph = 100f, candidates = director.candidates(candidates)))
+        val firstInput = demo.world.apply(CoachInput(now = demo.world.clock.now(), gear = Gear.DRIVE, speedKph = 100f, candidates = demo.world.candidates(candidates)))
         val jam = firstInput.route!!.congestion.single()
-        val jukamAhead = director.candidates(candidates).first { it.id == "jukam" }.routeDistanceM!!
+        val jukamAhead = demo.world.candidates(candidates).first { it.id == "jukam" }.routeDistanceM!!
         assertTrue("죽암 ${jukamAhead}m는 정체 끝 ${jam.startDistanceM + jam.lengthM}m 뒤", jukamAhead > jam.startDistanceM + jam.lengthM)
-        assertTrue("시연 후보에는 지어낸 etaS가 없다", director.candidates(candidates).all { it.etaS == null })
+        assertTrue("시연 후보에는 지어낸 etaS가 없다", demo.world.candidates(candidates).all { it.etaS == null })
 
         var askedAtM: Double? = null
         var recommendedAtM: Double? = null
         while (askedAtM == null) {
-            val travelled = director.travelledForTest()!!
-            val toOksan = oksanAt - travelled
+            val toOksan = oksanAt - run.travelledM()
             if (toOksan < 1_000.0) break
             // 실제 내비에 다른 경로가 켜져 있어도(에뮬레이터 내비는 서 있어 다음 회전이 늘 150m) 시연 질문이 나와야 한다
             val realNaviRoute = RouteState(guiding = true, remainDistanceM = 383_000.0, nextManeuverDistanceM = 150.0)
-            val out = engine.update(
-                director.apply(CoachInput(now = director.now(), gear = Gear.DRIVE, speedKph = 100f, route = realNaviRoute, candidates = director.candidates(candidates))),
-            )
+            val out = demo.update(CoachInput(now = 0L, gear = Gear.DRIVE, speedKph = 100f, route = realNaviRoute, candidates = candidates))
             if (recommendedAtM == null && out.next?.stop?.id == "oksan" && out.next!!.reasons.any { it.code.startsWith("LAST_CHANCE") }) {
                 recommendedAtM = toOksan
                 assertNotNull("추천에 엔진이 계산한 도착 시간", out.next!!.stop.etaS)
@@ -86,17 +91,7 @@ class DemoScenarioTest {
     fun fatigueDemoSuggestsARestSoon() {
         // 오후 졸음 시연: 오후 3시, 이미 95분 달림 → 몇 분(가상) 안에 휴식 제안 (예전에는 피로 게이지가 0분부터 세서 나오지 않았다)
         var real = 1_700_000_000_000L
-        val director = DemoDirector { real }
-        val start = checkNotNull(director.start("fatigue"))
-        val t0 = director.now()
-        val engine = CoachEngine(
-            profile = TripProfile(
-                start.occupants, tripStart = t0 - start.drivenMin * 60_000L,
-                lastRestroomAt = start.occupants.associate { it.id to t0 - start.lastRestroomMin * 60_000L },
-                continuousDrivingMin = start.drivenMin.toDouble(),
-            ),
-            memory = PersonalMemory(),
-        )
+        val demo = startDemo("fatigue") { real }
         // 시작 지점 앞 경로 위 시설 (공공데이터 부산방향 좌표). 그 뒤의 시설은 넣지 않았다(서비스도 60km 안만 찾는다)
         val ahead = listOf(
             restArea("ipjang", "입장졸음쉼터", 36.914432, 127.188465, StopKind.DROWSY_SHELTER),
@@ -105,7 +100,7 @@ class DemoScenarioTest {
         )
         var asked = false
         repeat(180) { // 실제 3분 = 가상 30분 (10배속)
-            val out = engine.update(director.apply(CoachInput(now = director.now(), gear = Gear.DRIVE, speedKph = 90f, candidates = director.candidates(ahead))))
+            val out = demo.update(CoachInput(now = 0L, gear = Gear.DRIVE, speedKph = 90f, candidates = ahead))
             if (out.prompt?.kind == PromptKind.REST_SUGGESTION) asked = true
             // 넣은 후보 뒤를 목적지까지의 공백으로 보면 '이후 2시간 34분 공백' 같은 틀린 마지막 기회가 나왔다
             assertTrue("틀린 공백 경고: ${out.next}", out.next?.reasons.orEmpty().none { it.code == "LAST_CHANCE_GAP" })
@@ -115,11 +110,21 @@ class DemoScenarioTest {
     }
 
     @Test
-    fun demoOffLeavesInputsUntouched() {
-        val director = DemoDirector { 0L }
-        assertNull(director.start(null))
-        val input = CoachInput(now = 5L, gear = Gear.DRIVE, candidates = listOf(oksan))
-        assertEquals(input, director.apply(input))
-        assertEquals(listOf(oksan), director.candidates(listOf(oksan)))
+    fun stopDemoShowsARestAndARestroomStopWithinTwoRealMinutes() {
+        // 휴게소 정차 시연: 10배속이라 실제 90초 = 가상 15분 휴식. 문을 한 번 열면 화장실 시계도 돌아간다
+        var real = 1_700_000_000_000L
+        val demo = startDemo("stop") { real }
+        var first: CoachOutput? = null
+        var last: CoachOutput? = null
+        repeat(120) { i ->
+            last = demo.update(CoachInput(now = 0L, gear = Gear.PARK, speedKph = 0f, doorOpened = i == 5))
+            if (first == null) first = last
+            real += 1_000L
+        }
+        val before = checkNotNull(first)
+        val after = checkNotNull(last)
+        assertTrue("110분 운전 뒤 15분 휴식 → 피로 게이지 회복 (${before.fatigue.minutes} → ${after.fatigue.minutes})", after.fatigue.minutes!! > before.fatigue.minutes!! + 30)
+        assertTrue("화장실 정차 → 화장실 게이지 회복 (${before.restroom.minutes} → ${after.restroom.minutes})", after.restroom.minutes!! > before.restroom.minutes!!)
+        assertEquals("시연 탑승자 (설정의 운전자 혼자가 아니라)", listOf("driver", "kid"), demo.world.occupants(settings).map { it.id })
     }
 }
