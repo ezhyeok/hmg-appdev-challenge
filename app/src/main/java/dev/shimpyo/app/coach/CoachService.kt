@@ -67,6 +67,8 @@ class CoachService : PleosForegroundService() {
     private var devJob: Job? = null
 
     override fun onServiceStarted() {
+        // 같은 프로세스에서 다시 시작했으면 지난 서비스의 질문·급해 목록이 화면에 남아 있다 (다시 올리지 않는다)
+        CoachStore.resetTransient()
         val scope = CoroutineScope(serviceScope.coroutineContext + coachThread)
         coachScope = scope
         val wall = CoachClock { System.currentTimeMillis() }

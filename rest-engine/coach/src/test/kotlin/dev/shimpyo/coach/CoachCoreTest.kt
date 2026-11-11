@@ -452,4 +452,43 @@ class CoachCoreTest {
         rig.runUntil(150_000) { rig.state.goToResult != null } ?: error("멈춘 들르기가 끝나지 않았다")
         assertEquals(GoToOutcome.FAILED, rig.state.goToResult!!.outcome)
     }
+
+    // ------------------------------------------------------------ 계획·들르기 결과 (UI 계약)
+
+    @Test
+    fun thePlanGenerationRisesOnlyWhenAPlanIsRequested() = runTest {
+        // 화면은 번호가 오르면 '계획을 세우는 중'을 끈다. 떠 있는 동안 고쳐 내는 계획으로 번호가 오르면 요청이 답을 받은 것처럼 보인다
+        val rig = CoreRig(this)
+        rig.drive(100f)
+        rig.start()
+        rig.command(UiCommand.MakePlan) // 첫 틱 전 요청도 답한다
+        rig.command(UiCommand.Demo("holiday"))
+        rig.run(2_000)
+        assertEquals(1L, rig.state.planGeneration)
+        assertNotNull(rig.state.plan)
+        rig.run(60_000) // 후보가 여러 번 바뀌어 계획을 다시 만든다
+        assertEquals("고쳐 낸 계획은 번호를 올리지 않는다", 1L, rig.state.planGeneration)
+        rig.command(UiCommand.MakePlan)
+        assertEquals(2L, rig.state.planGeneration)
+    }
+
+    @Test
+    fun goToResultsHaveDistinctTimestampsAndExpire() = runTest {
+        // 화면은 at으로 새 결과를 가린다. 같은 순간에 끝난 두 들르기가 같은 at이면 두 번째 결과를 못 본다
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER)))
+        rig.drive(100f)
+        rig.fix(37.40, 127.10)
+        rig.start()
+        rig.run(2_000)
+        val seen = mutableListOf<Long>()
+        rig.command(UiCommand.GoTo(Gyeongbu.oksan))
+        rig.state.goToResult?.let { seen += it.at }
+        rig.command(UiCommand.GoTo(Gyeongbu.jukam))
+        rig.state.goToResult?.let { seen += it.at }
+        rig.run(10_000)
+        rig.state.goToResult?.let { seen += it.at }
+        assertEquals("두 결과 (${rig.navi.commands})", 2, seen.distinct().size)
+        rig.run(CoachCore.GO_TO_RESULT_TTL_MS)
+        assertNull("오래된 결과는 거둔다", rig.state.goToResult)
+    }
 }

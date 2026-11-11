@@ -138,6 +138,14 @@ class CoachCore(private val d: CoachDeps) {
     private var planWanted = false
     private var planKey: Any? = null
     private var planAtMs = 0L
+    /** 요청(MakePlan)에 답해 새로 세운 계획의 번호 (CoachUiState.planGeneration). 떠 있는 동안 고쳐 내는 계획은 올리지 않는다 */
+    private var planGeneration = 0L
+    /** MakePlan을 받았고 아직 그 계획을 내지 않았다 (첫 틱 전에 와도 다음 계산에서 번호를 올린다) */
+    private var planRequested = false
+
+    /** 마지막으로 올린 들르기 결과의 at과 올린 실제 시각 (결과마다 다른 at, 오래된 결과 거두기) */
+    private var lastGoToAt = Long.MIN_VALUE
+    private var goToShownAtMs: Long? = null
 
     private var lastSavedMemory: PersonalMemory? = null
     private var memorySaving = false
@@ -263,6 +271,7 @@ class CoachCore(private val d: CoachDeps) {
             UiCommand.StopVoice -> stopVoice()
             UiCommand.MakePlan -> {
                 planWanted = true
+                planRequested = true
                 planKey = null
                 refreshPlan(force = true)
             }
@@ -337,6 +346,7 @@ class CoachCore(private val d: CoachDeps) {
             trackPinned(out, el)
         }
         if (freshAir.takeRevert(el, d.hub.recirculation)) revertFreshAir()
+        goToShownAtMs?.let { if (el - it >= GO_TO_RESULT_TTL_MS) onPromptEvent(PromptEvent.DismissGoToResult) }
         advanceUrgent(el, a, pos, input)
         refreshPlan(force = false)
         publish(out, input, navi, a.world, ahead)
@@ -413,9 +423,20 @@ class CoachCore(private val d: CoachDeps) {
                 is PromptEffect.StartGoTo -> startGoTo(e)
                 is PromptEffect.FreshAir -> startFreshAir(e.announce)
                 is PromptEffect.Forward -> dispatchIntent(e.intent)
-                is PromptEffect.PublishGoToResult -> ui.update { copy(goToResult = e.result) }
+                is PromptEffect.PublishGoToResult -> publishGoToResult(e.result)
             }
         }
+    }
+
+    /**
+     * 들르기 결과. 화면은 at으로 새 결과를 가린다(ui.md): 같은 순간(코치 시각 ms)에 두 결과가 나도 at이 겹치지 않게 늘 키운다.
+     * 결과는 [GO_TO_RESULT_TTL_MS] 뒤 거둔다 (지나간 실패 카드·다시 시도가 남지 않게)
+     */
+    private fun publishGoToResult(r: GoToResult?) {
+        val out = r?.let { if (it.at <= lastGoToAt) it.copy(at = lastGoToAt + 1) else it }
+        if (out != null) lastGoToAt = out.at
+        goToShownAtMs = out?.let { d.elapsed.elapsedMs() }
+        ui.update { copy(goToResult = out) }
     }
 
     private fun startAsk(e: PromptEffect.Ask) {
@@ -676,7 +697,8 @@ class CoachCore(private val d: CoachDeps) {
                 recorder.onWorldChanged(now, change.restorePark, lastSeenMs ?: now)
                 endUrgent(publish = false)
                 pinned = null
-                planWanted = false
+                // 지난 세계의 계획은 버린다. 아직 답하지 않은 요청만 새 세계에서 답한다
+                planWanted = planRequested
                 planKey = null
                 lastInput = null
                 lastOutput = null
@@ -791,7 +813,12 @@ class CoachCore(private val d: CoachDeps) {
             log.w("plan failed: ${e.message}")
             return
         }
-        ui.update { copy(plan = plan) }
+        if (planRequested) {
+            planRequested = false
+            planGeneration++
+        }
+        val gen = planGeneration
+        ui.update { copy(plan = plan, planGeneration = gen) }
     }
 
     // ------------------------------------------------------------ 저장
@@ -843,6 +870,8 @@ class CoachCore(private val d: CoachDeps) {
         /** 고정한 급해 정차를 엔진이 추천하지 않은 채로 두는 시간 */
         const val PIN_GRACE_MS = 15_000L
         const val PLAN_REFRESH_MS = 30_000L
+        /** 들르기 결과를 화면에 두는 시간 */
+        const val GO_TO_RESULT_TTL_MS = 10 * 60_000L
         const val MEMORY_EVERY_MS = 60_000L
         val HEALTH_TYPES = setOf(OccupantType.PREGNANT, OccupantType.OAB, OccupantType.IBS)
     }
