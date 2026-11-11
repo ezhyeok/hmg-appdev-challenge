@@ -178,6 +178,12 @@ data class CoachInput(
     val rangeKm: Double? = null,
     /** (v0.2 추가) 사용자가 공조 자동 조작을 허용했는지. true면 FRESH_AIR를 묻지 않고 cabinAction만 낸다 */
     val cabinAutoAllowed: Boolean = false,
+    /**
+     * (문맥 보정 추가) 지금 자고 있다고 알려진 탑승자 id ("아이가 자요"). 매 update마다 지금 상태를 넣는다(깼거나 모르면 뺀다).
+     * 엔진은 CHILD 탑승자만, 밤 시간대(CoachConfig.asleepNightStartHour~asleepNightEndHour)에만 화면 게이지를 늘려 잡는다.
+     * 모르는 id와 아이가 아닌 탑승자는 무시한다. 판단 마감(마지막 기회·계획)은 바뀌지 않는다
+     */
+    val asleepOccupantIds: Set<String> = emptySet(),
 )
 
 // ---------- 엔진 출력 ----------
@@ -253,7 +259,11 @@ data class PromptStat(val accepted: Int = 0, val declined: Int = 0)
 
 /** 기기에만 저장하는 학습 상태. 앱이 JSON으로 저장·복원한다 */
 data class PersonalMemory(
-    /** 탑승자 id → 관측된 화장실 간격(분), 최근 것부터 최대 N개 */
+    /**
+     * 탑승자 id → 관측된 화장실 간격(분), 최근 것부터 최대 N개.
+     * 세 간격 기록 모두 문맥 보정(식사 뒤, 잠든 아이)이 걸린 구간은 기준 조건으로 환산한 값이다: 식사 뒤 96분은 120분으로 남는다.
+     * 그래야 문맥이 개인 기준 간격을 한쪽으로 끌지 않는다 (docs/research/need-covariates.md 6장)
+     */
     val restroomIntervalsMin: Map<String, List<Double>> = emptyMap(),
     /** "질문종류:거리구간" → 수락·거절 횟수 */
     val promptStats: Map<String, PromptStat> = emptyMap(),

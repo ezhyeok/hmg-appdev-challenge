@@ -7,6 +7,8 @@ import dev.shimpyo.engine.EngineMath.NONE
  *
  * - 휴식: 기어 P가 [CoachConfig.restMinParkedMin]분 이상 → 피로를 0으로
  * - 화장실 정차: 기어 P가 [CoachConfig.restroomStopMinParkedMin]분 이상 + 그 사이 문 열림 → 화장실 시계를 0으로
+ * - 식사 길이: 기어 P가 [CoachConfig.mealStopMinMin]분 이상. 여기서는 길이만 알린다. 식사 정차인지는 선 곳·목적을 아는
+ *   엔진이 정한다 ([MealStopRule])
  *
  * 문턱을 넘는 순간(정차 중) 사건을 한 번 낸다. update가 드물게 와서 출발할 때야 문턱을 넘은 걸 알게 되어도
  * 출발 순간에 같은 사건을 낸다.
@@ -28,9 +30,14 @@ internal class StopTracker(private val config: CoachConfig) {
         var restAt: Long = NONE
             internal set
 
+        /** 식사 정차로 볼 만큼 길어진 시각. 없으면 NONE */
+        var mealLengthAt: Long = NONE
+            internal set
+
         internal fun clear() {
             restroomStopAt = NONE
             restAt = NONE
+            mealLengthAt = NONE
         }
     }
 
@@ -41,12 +48,14 @@ internal class StopTracker(private val config: CoachConfig) {
     private var firstDoorAt = NONE
     private var restroomFired = false
     private var restFired = false
+    private var mealFired = false
     private var leftAt = NONE // 마지막으로 P에서 나온 시각
     private var leftMaxKph = 0f // 그 뒤 잰 가장 높은 차속
     private val events = Events()
 
     private val restroomMs get() = config.restroomStopMinParkedMin * 60_000L
     private val restMs get() = config.restMinParkedMin * 60_000L
+    private val mealMs get() = config.mealStopMinMin * 60_000L
 
     fun update(mono: Long, gear: Gear, speedKph: Float?, doorOpened: Boolean): Events {
         events.clear()
@@ -67,6 +76,7 @@ internal class StopTracker(private val config: CoachConfig) {
                 firstDoorAt = NONE
                 restroomFired = false
                 restFired = false
+                mealFired = false
             }
             leftAt = NONE
         }
@@ -76,6 +86,9 @@ internal class StopTracker(private val config: CoachConfig) {
         parked = nowParked
         return events
     }
+
+    /** 지금(또는 마지막) 정차가 시작된 시각. 다시 대기는 같은 정차라 바뀌지 않는다. 선 적이 없으면 NONE */
+    val sessionStart: Long get() = parkStart
 
     /** 지금 정차한 지 몇 ms인지. 정차 중이 아니면 0 */
     fun parkedForMs(mono: Long): Long = if (parked && parkStart != NONE) maxOf(0L, mono - parkStart) else 0L
@@ -90,6 +103,10 @@ internal class StopTracker(private val config: CoachConfig) {
         if (!restFired && parkedMs >= restMs) {
             restFired = true
             events.restAt = parkStart + restMs
+        }
+        if (!mealFired && parkedMs >= mealMs) {
+            mealFired = true
+            events.mealLengthAt = parkStart + mealMs
         }
     }
 
