@@ -12,7 +12,6 @@ import dev.shimpyo.coach.CabinPort
 import dev.shimpyo.coach.Fix
 import dev.shimpyo.coach.PositionTracker
 import dev.shimpyo.coach.SignalHub
-import dev.shimpyo.engine.DrivingSample
 import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.TurnSignal
 import kotlinx.coroutines.CancellationException
@@ -51,7 +50,6 @@ class CarSignals(
     private val cabin: KitCabin,
     private val hub: SignalHub,
     private val positions: PositionTracker,
-    private val now: () -> Long,
     private val onRestriction: (Boolean) -> Unit,
 ) {
     /** 취소될 때까지 돈다 */
@@ -65,12 +63,7 @@ class CarSignals(
         car.connect()
         launch { car.gear.collect { hub.gear = gearOf(it) } }
         launch { car.speedMps.collect { hub.speedKph = it?.times(3.6f) } }
-        launch {
-            car.drivingRestricted.collect { r ->
-                hub.drivingRestricted = r
-                onRestriction(r)
-            }
-        }
+        launch { car.drivingRestricted.collect { r -> onRestriction(r) } }
     }
 
     private suspend fun collectVehicle() = coroutineScope {
@@ -82,10 +75,8 @@ class CarSignals(
         runCatching { vehicle.hvacTemperatureAreas().keys.firstOrNull() }.getOrNull()?.let { a ->
             watch(vehicle.hvacTemperatureC(a)) { hub.setTempC = it }
         }
-        watch(vehicle.steeringAngle()) { v ->
-            hub.steeringDeg = v
-            if (v != null) hub.addSample(DrivingSample(t = now(), speedKph = hub.speedKph, steeringDeg = v))
-        }
+        // 표본 시각은 허브가 정한다 (리뷰 R-F6: 여기서 실제 시각으로 찍으면 시연의 가상 시각과 섞인다)
+        watch(vehicle.steeringAngle()) { v -> hub.addSteering(v) }
         watch(vehicle.brakePedal()) { hub.brake = it }
         watch(vehicle.turnSignal()) { v ->
             hub.turnSignal = when (v) {

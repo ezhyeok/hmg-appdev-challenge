@@ -67,13 +67,16 @@ class CoachService : PleosForegroundService() {
     private var devJob: Job? = null
 
     override fun onServiceStarted() {
+        // 메인 스레드에서 쓴 시간을 남긴다 (서비스 감사 SV-N4: SDK 객체를 여기서 만들면 메인 스레드가 막힌다)
+        val startedAt = SystemClock.elapsedRealtime()
         // 같은 프로세스에서 다시 시작했으면 지난 서비스의 질문·급해 목록이 화면에 남아 있다 (다시 올리지 않는다)
         CoachStore.resetTransient()
         val scope = CoroutineScope(serviceScope.coroutineContext + coachThread)
         coachScope = scope
         val wall = CoachClock { System.currentTimeMillis() }
         val elapsed = ElapsedClock { SystemClock.elapsedRealtime() }
-        val hub = SignalHub()
+        // 허브는 코어와 같은 경과 시계로 표본을 받은 때를 적고, 틱마다 세계 시각으로 바꿔 준다 (리뷰 R-F6)
+        val hub = SignalHub(elapsed)
         val odometer = Odometer(elapsed)
         val positions = PositionTracker(elapsed) { PositionTracker.isMoving(hub.speedKph, hub.gear == Gear.PARK) }
         val gates = CoachGates()
@@ -93,7 +96,7 @@ class CoachService : PleosForegroundService() {
             ),
         )
         core = c
-        signals = CarSignals(kits.car, kits.vehicle, kits.location, cabin, hub, positions, wall::now) { r -> CoachStore.update { copy(drivingRestricted = r) } }
+        signals = CarSignals(kits.car, kits.vehicle, kits.location, cabin, hub, positions) { r -> CoachStore.update { copy(drivingRestricted = r) } }
 
         scope.launch { c.run() }
         scope.launch { tracker.run() }
@@ -112,6 +115,7 @@ class CoachService : PleosForegroundService() {
                 c.command(cmd)
             }
         }
+        Log.i(TAG, "onServiceStarted: ${SystemClock.elapsedRealtime() - startedAt} ms on the main thread")
     }
 
     /** 신호 수집을 (다시) 띄운다. 권한을 새로 받으면 Car 연결부터 다시 해야 차속 구독이 걸린다 */
