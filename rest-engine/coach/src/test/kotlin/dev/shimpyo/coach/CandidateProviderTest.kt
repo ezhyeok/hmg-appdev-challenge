@@ -443,6 +443,18 @@ class CandidateProviderTest {
     }
 
     @Test
+    fun guidanceStartingWithoutAnEpochChangeStillWaitsForTheTbt() = runTest {
+        // 방어: 내비 추적이 epoch를 올리지 않고 길안내만 켜도 경로 시작 직후 requestTrip을 보내지 않는다
+        val fx = Fx(this, nine.take(2), FakeTripEstimator(TripAnswer.Route(7_000.0)))
+        fx.provider.refresh(Road.car(), notGuiding.copy(epoch = 1), CandidatePolicy.REAL)
+        val asked = fx.oracle.calls.size
+        delay(CandidateTuning.ROUTE_TBT_WAIT_MS)
+        fx.provider.refresh(Road.car(), guiding(emptyList(), epoch = 1, received = false), CandidatePolicy.REAL)
+        assertEquals("TBT를 기다리는 동안 묻지 않는다", asked, fx.oracle.calls.size)
+        assertEquals(0.0, fx.provider.withHorizon(RouteState(guiding = true, remainDistanceM = 300_000.0), guiding(emptyList(), epoch = 1, received = false), 0.0)!!.candidatesUntilM!!, 0.0)
+    }
+
+    @Test
     fun theLoopRefreshesOnItsPeriodAndOnTriggersOnly() = runTest {
         val fx = Fx(this, nine.take(2), FakeTripEstimator(TripAnswer.Route(7_000.0)))
         var pos: Fix? = null

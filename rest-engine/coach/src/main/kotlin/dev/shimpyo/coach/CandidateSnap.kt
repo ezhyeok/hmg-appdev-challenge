@@ -14,6 +14,8 @@ data class CandidateSnap(
     val untilM: Double? = 0.0,
     /** 만들 때의 내비 epoch. 지금 epoch와 다르면 다른 경로에서 만든 목록이라 범위를 0으로 본다 (CandidateProvider.withHorizon) */
     val naviEpoch: Int = 0,
+    /** 만들 때 길안내 중이었는지. epoch와 함께 '같은 경로에서 만든 목록인지'를 가린다 */
+    val naviGuiding: Boolean = false,
     val state: CandidatesState = CandidatesState.LOADING_DATA,
     val source: CandidateSource = CandidateSource.NONE,
 )

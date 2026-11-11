@@ -52,8 +52,9 @@ class CandidateProvider(
     private val refreshLock = Mutex()
     /** 마지막 갱신의 입력 요약. 바뀌면 바로 다시 만든다 */
     private var basis: Basis? = null
-    private var seenEpoch: Int? = null
-    private var seenEpochAt = 0L
+    /** 지금 경로(epoch, 길안내 여부)를 처음 본 때. TBT 기다림을 여기서부터 잰다 */
+    private var seenRoute: Pair<Int, Boolean>? = null
+    private var seenRouteAt = 0L
     /** [reset]마다 늘린다. 갱신이 끝났을 때 다르면 결과를 버린다 */
     private var generation = 0
     private var inFlight: Job? = null
@@ -90,7 +91,7 @@ class CandidateProvider(
 
     /** 지금 다시 만들어야 하는지 */
     private fun isDue(req: CandidateRequest, now: Long): Boolean {
-        noteEpoch(req.navi.epoch, now)
+        noteRoute(req.navi, now)
         val b = basis ?: return true
         return b.key != keyOf(req) || now - b.atMs >= req.policy.periodMs || (b.retryAtMs != null && now >= b.retryAtMs)
     }
@@ -103,10 +104,10 @@ class CandidateProvider(
     suspend fun refresh(req: CandidateRequest) = refreshLock.withLock {
         val gen = generation
         val now = clock.elapsedMs()
-        noteEpoch(req.navi.epoch, now)
+        noteRoute(req.navi, now)
         val view = viewOf(req)
         val odo = odometer.meters
-        val plan = CandidateRules.plan(stops.loaded, req.pos, view, odo, now - seenEpochAt)
+        val plan = CandidateRules.plan(stops.loaded, req.pos, view, odo, now - seenRouteAt)
         basis = Basis(keyOf(req), now, (plan as? Plan.AwaitRoute)?.let { now + it.retryInMs })
         val snap = when (plan) {
             Plan.NoData -> empty(CandidatesState.LOADING_DATA, req.navi.epoch, odo)
@@ -117,7 +118,7 @@ class CandidateProvider(
             is Plan.Nearby -> fromNearby(plan, req.pos!!, view, req.policy, odo, now + REFRESH_BUDGET_MS)
         }
         if (snap != null && gen == generation) {
-            val out = snap.copy(naviEpoch = req.navi.epoch)
+            val out = snap.copy(naviEpoch = req.navi.epoch, naviGuiding = req.navi.guiding)
             _snapshot.value = out
             logIfChanged(out)
         }
@@ -146,13 +147,13 @@ class CandidateProvider(
 
     /**
      * [route]에 후보를 넣은 범위(candidatesUntilM)를 더한다. 자른 목록의 마지막 후보 뒤를 목적지까지의 공백으로 보지 않게 한다.
-     * 길안내가 아니면 그대로. 목록이 다른 epoch에서 만든 것이면 0(아무것도 주장하지 않는다).
+     * 길안내가 아니면 그대로. 목록이 다른 경로(epoch·길안내 여부)에서 만든 것이면 0(아무것도 주장하지 않는다).
      */
     fun withHorizon(route: RouteState?, navi: NaviSnapshot, odometerM: Double): RouteState? {
         val r = route ?: return null
         if (!r.guiding) return r
         val s = _snapshot.value
-        val until = if (s.naviEpoch != navi.epoch) 0.0 else {
+        val until = if (s.naviEpoch != navi.epoch || s.naviGuiding != navi.guiding) 0.0 else {
             val u = s.untilM ?: return r
             (u - navi.moved(s.odometerM, odometerM)).coerceAtLeast(0.0)
         }
@@ -251,10 +252,15 @@ class CandidateProvider(
         return Key(req.policy, stops.loaded, req.pos != null, v.epoch, v.guiding, tbt)
     }
 
-    private fun noteEpoch(epoch: Int, now: Long) {
-        if (seenEpoch == epoch) return
-        seenEpoch = epoch
-        seenEpochAt = now
+    /**
+     * 경로가 바뀐 때를 적는다. epoch만 보지 않고 길안내 여부도 본다: 길안내가 시작됐는데 epoch가 그대로인 일이 생겨도
+     * TBT를 기다리지 않고 경로 시작 직후 requestTrip을 보내지 않게 (방어)
+     */
+    private fun noteRoute(navi: NaviSnapshot, now: Long) {
+        val route = navi.epoch to navi.guiding
+        if (seenRoute == route) return
+        seenRoute = route
+        seenRouteAt = now
     }
 
     private fun empty(state: CandidatesState, epoch: Int, odo: Double) = CandidateSnap(emptyList(), odo, untilM = 0.0, naviEpoch = epoch, state = state)
