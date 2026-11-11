@@ -119,6 +119,9 @@ class ContextFactorEngineTest {
         val before = kst(2026, 9, 24, 19, 49, 29)
         val early = Trip(engine(adult(), start = before), before)
         assertEquals(93, early.stopFor(30, listOf(foodHere)).restroom.minutes)
+        // 정한 규칙 그대로: '20시 이후'는 20~23시대에 시작한 정차다. 자정을 넘겨 00:30에 선 정차는 0.8 (이르게 잡는 쪽)
+        val midnight = kst(2026, 9, 25, 0, 20)
+        assertEquals(93, Trip(engine(adult(), start = midnight), midnight).stopFor(30, listOf(foodHere)).restroom.minutes)
     }
 
     @Test
@@ -225,6 +228,44 @@ class ContextFactorEngineTest {
     }
 
     @Test
+    fun aDoorThatOpensOnlyAsTheCarLeavesStillStartsAMealInterval() {
+        // 25분 서 있는 동안 문 신호가 없다가 P → D로 바뀌는 update에 함께 온다. 그 update에서 시계가 돌아가므로
+        // 문이 1초 일찍 열린 경우와 같아야 한다 (예전에는 '서 있는 동안'에만 배수를 걸어 이 update를 놓쳤다)
+        val t = Trip(engine(adult(), config = noLearning), noon)
+        t.driveUntil(noon + 10 * MIN)
+        val park = t.now + SEC
+        t.parkUntil(park + 25 * MIN - SEC, listOf(foodHere), doorAfter = null)
+        val leaving = t.step(door = true)
+        assertEquals(120, leaving.restroom.minutes, "방금 돌아간 시계 × 0.8")
+        assertTrue("RESTROOM_AFTER_MEAL" in leaving.codes())
+    }
+
+    @Test
+    fun evidenceThatArrivesAfterTheTwentiethMinuteStillCounts() {
+        // 앱이 정차 중에 다시 시작하면 첫 update에는 후보 목록이 아직 비어 있다. 20분을 넘긴 그 update에 한 번만 판단하면
+        // 1초 뒤 목록이 와도 이 정차는 끝까지 식사 정차가 아니게 된다
+        val e = engine(adult())
+        e.update(CoachInput(now = noon, gear = Gear.DRIVE, speedKph = 100f))
+        val park = noon + 10 * MIN
+        e.update(CoachInput(now = park, gear = Gear.PARK, speedKph = 0f, doorOpened = true))
+        val blind = e.update(CoachInput(now = park + 25 * MIN, gear = Gear.PARK, speedKph = 0f))
+        assertEquals(128, blind.restroom.minutes, "아직 어디에 섰는지 모른다")
+        val seen = e.update(CoachInput(now = park + 25 * MIN + SEC, gear = Gear.PARK, speedKph = 0f, candidates = listOf(foodHere)))
+        assertEquals(97, seen.restroom.minutes, "120 − 22분 1초")
+        assertTrue("RESTROOM_AFTER_MEAL" in seen.codes())
+
+        // 서 있은 지 22분째에 "배고파": 그때부터 식사 정차로 본다
+        val t = Trip(engine(adult()), noon)
+        t.driveUntil(noon + 10 * MIN)
+        val p2 = t.now + SEC
+        assertEquals(131, t.parkUntil(p2 + 22 * MIN).restroom.minutes)
+        t.step(Gear.PARK, intent = VoiceIntent.Hungry)
+        val after = t.step(Gear.PARK)
+        assertEquals(100, after.restroom.minutes, "120 − 19분 2초")
+        assertTrue("RESTROOM_AFTER_MEAL" in after.codes())
+    }
+
+    @Test
     fun aStopSeenOnlyAtItsStartAndAgainMuchLaterStillCounts() {
         // 앱이 정차 중에 다시 시작하면 정차 시작 시각의 P 입력 한 번과 지금 입력만 온다 (CoachWorld.newEngine).
         // 그 한 번의 update에서 화장실 정차·휴식·식사 길이가 함께 판정돼도 순서와 상관없이 같은 결과여야 한다
@@ -282,6 +323,64 @@ class ContextFactorEngineTest {
         val leaving = t.step()
         assertEquals(123, leaving.restroom.minutes)
         assertEquals(listOf("RESTROOM_ELAPSED"), leaving.codes())
+    }
+
+    @Test
+    fun aListThatFlickersDoesNotMakeAFarAcceptedStopCountAsReached() {
+        // 수락한 식사 정차는 41km 앞인데 다른 곳에 섰고, 서 있는 동안 후보 목록이 한 번 비어서 왔다.
+        // 목록에서 사라진 것만으로 '도착'으로 보면 이 정차가 식사 정차가 된다: 마지막으로 본 거리가 가까울 때만 도착이다
+        val t = Trip(engine(adult(), config = noLearning), noon)
+        t.road = listOf(100 * km to foodAhead)
+        acceptMeal(t)
+        t.driveUntil(noon + 35 * MIN)
+        val park = t.now + SEC
+        t.parkUntil(park + 60 * SEC)
+        val road = t.road
+        t.road = emptyList()
+        t.step(Gear.PARK)
+        t.road = road
+        t.parkUntil(park + 30 * MIN - SEC)
+        val leaving = t.step()
+        assertEquals(123, leaving.restroom.minutes)
+        assertEquals(listOf("RESTROOM_ELAPSED"), leaving.codes())
+    }
+
+    @Test
+    fun aMealStopUsesUpTheHungryRequest() {
+        // "배고파" → 22분 식사 정차 → 다시 출발 → 그 말을 한 지 30분이 되기 전에 또 선 20분 정차는 식사 정차가 아니다
+        val t = Trip(engine(adult(), config = noLearning), noon)
+        t.step(intent = VoiceIntent.Hungry)
+        t.driveUntil(noon + 2 * MIN)
+        val first = t.now + SEC
+        t.parkUntil(first + 22 * MIN - SEC)
+        assertTrue("RESTROOM_AFTER_MEAL" in t.step().codes(), "첫 정차는 식사 정차")
+        t.driveUntil(noon + 26 * MIN)
+        val second = t.now + SEC
+        t.parkUntil(second + 21 * MIN - SEC)
+        val leaving = t.step()
+        assertEquals(132, leaving.restroom.minutes, "보정 없는 구간: 150 − 18")
+        assertEquals(listOf("RESTROOM_ELAPSED"), leaving.codes())
+    }
+
+    @Test
+    fun aProfileThatMovesTheResetInsideTheMealStopKeepsTheFactor() {
+        // 앱이 같은 정차를 조금 다른 시각으로 적어 프로필로 다시 넣는 경우(설정 변경, 시계 보정). 시계는 여전히 그 식사 정차에서
+        // 시작했으므로 배수가 남아야 한다. 예전에는 시계가 옮겨지면 배수가 풀려 게이지가 30분 늘었다
+        val profile = TripProfile(listOf(adult()), tripStart = noon)
+        val e = CoachEngine(noLearning, profile, random = Random(7))
+        val t = Trip(e, noon)
+        assertEquals(93, t.stopFor(30, listOf(foodHere)).restroom.minutes)
+        val park = noon + 10 * MIN + SEC
+        e.setProfile(profile.copy(lastRestroomAt = mapOf("me" to park + 5 * MIN)))
+        val out = t.step()
+        assertEquals(94, out.restroom.minutes, "120 − 25분 1초")
+        assertTrue("RESTROOM_AFTER_MEAL" in out.codes())
+        // 식사 정차가 끝난 뒤의 시각으로 고치면 그때부터는 보정 없는 구간이다
+        t.driveUntil(park + 45 * MIN)
+        e.setProfile(profile.copy(lastRestroomAt = mapOf("me" to park + 40 * MIN)))
+        t.driveUntil(park + 50 * MIN)
+        assertEquals(140, t.out.restroom.minutes)
+        assertEquals(listOf("RESTROOM_ELAPSED"), t.out.codes())
     }
 
     @Test

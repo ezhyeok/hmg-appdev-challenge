@@ -108,6 +108,7 @@ internal fun restroomLevel(minutes: Int, c: CoachConfig): Level = when {
  *   판단 마감은 깨어 있는 것으로 계산한다: 긴 공백 앞에서는 보수적으로, 깬 아이는 바로 화장실을 찾을 수 있다(NC §10-4).
  *   게이지는 '계속 잔다면 문턱에 닿기까지 실제 분'이다. 밤 시간대의 끝(07시)은 미리 아는 것이라 따라가므로 경계에서 튀지 않는다.
  * - 상한(걷기·카시트)은 실제 시간 그대로다. 피트스톱의 '정차 뒤 구간'(fromReset)은 배수 1.0으로 계산한다.
+ * - 이번 구간의 배수와 잔 시간은 엔진 안에만 있다. 엔진을 다시 만들면(앱 재시작) 보정 없는 구간으로 돌아간다 (프로필이 실어 오지 않는다).
  */
 internal class RestroomNeedModel(private val config: CoachConfig, local: LocalClock = LocalClock(config.zoneId)) {
 
@@ -296,11 +297,18 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
         var left = leftMin * 60_000.0
         var real = 0.0
         var t = wall
+        var slowed = false // 밤 구간을 지났는지
         repeat(MAX_NIGHT_EDGES) {
+            val inNight = night.contains(t)
             val span = night.msToEdge(t)
-            val rate = if (night.contains(t)) 1.0 / asleepFactor else 1.0
+            val rate = if (inNight) 1.0 / asleepFactor else 1.0
             val gain = span * rate
-            if (gain >= left) return (real + left / rate) / 60_000.0
+            if (gain >= left) {
+                // 밤 구간을 지나지 않았으면(낮잠) 받은 값을 그대로 돌려준다. ms로 바꿨다 되돌리면 마지막 자리가 달라질 수 있고,
+                // 그러면 같은 또래 두 아이 중 '가장 급한 사람'이 초마다 바뀐다
+                return if (slowed || inNight) (real + left / rate) / 60_000.0 else leftMin
+            }
+            if (inNight) slowed = true
             left -= gain
             real += span
             t += span
@@ -359,8 +367,9 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
      * 식사 정차: 이 정차([from, until], 엔진 시각) 동안 시계가 돌아간 사람의 이번 구간에 배수를 건다 (영아·반려견 제외).
      * 식사 정차 판정(20분)은 시계가 돌아간 때(3분)보다 늦게 오므로 구간의 처음부터 건다: 배수는 '정차 시작 3분에 시계를 돌리는'
      * 규칙 위에서 정한 값이다(NC §2 6행: 30분 식사 뒤 출발할 때 123 → 93분).
-     * 이 정차에서 시계가 돌아가지 않은 사람은 그대로 둔다(클래스 설명). 엔진은 정차가 이어지는 동안 매 update 부르므로,
-     * 문이 뒤늦게 열려 시계가 돌아가면 그때 걸린다.
+     * 이 정차에서 시계가 돌아가지 않은 사람은 그대로 둔다(클래스 설명). 엔진은 다음 정차까지 매 update 부르므로,
+     * 문이 뒤늦게 열려 시계가 돌아가거나 프로필이 그 정차 안의 다른 시각으로 시계를 옮겨도 그 구간에 걸린다.
+     * 그 정차가 끝난 뒤의 시각으로 돌아간 시계(다음 화장실 정차, 사용자가 고친 시각)는 범위 밖이라 걸리지 않는다.
      */
     fun onMealStop(from: Long, until: Long, factor: Double) {
         val f = saneFactor(factor)
@@ -452,7 +461,9 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
      * 남기는 값은 유효 시간 τ다(식사 뒤 96분 → 120분). '연달아 선 정차'를 거르는 최소 간격은 실제 시간으로 본다.
      */
     fun onRestroomStop(at: Long, memory: PersonalMemory, suggested: Boolean = false): PersonalMemory {
-        if (accruedMono != NONE && at > accruedMono) accrue(at, wallAt(at)) // 잠든 시간을 정차 시각까지 쌓고 잰다
+        // 잠든 시간을 정차 시각까지 쌓고 잰다. 다시 대기로 이어진 정차는 at이 지난 update보다 3분까지 앞설 수 있는데, 그 사이
+        // 잔 시간(유효 1분 미만)은 나누지 않고 앞 구간에 둔다
+        if (accruedMono != NONE && at > accruedMono) accrue(at, wallAt(at))
         val driver = mostConstrained(at)
         var exact = memory.restroomIntervalsMin
         var sugg = memory.restroomSuggestedMin

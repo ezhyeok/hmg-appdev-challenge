@@ -324,6 +324,22 @@ class ContextFactorTest {
     }
 
     @Test
+    fun aNappingChildHasExactlyTheAwakeNumbers() {
+        // 낮잠은 배수가 없다: 남은 시간이 깨어 있는 아이와 비트까지 같아야 한다. 마지막 자리 하나라도 다르면 같은 또래 두 아이 중
+        // '가장 급한 사람'이 초마다 바뀌어 게이지의 기준 탑승자와 이유 문구가 깜빡인다
+        val one = kst(2026, 9, 24, 13, 0)
+        val m = model(listOf(child("a", 7), child("b", 7)), one)
+        m.run(one, one, setOf("b"))
+        var t = one
+        while (t < one + 100 * MIN) {
+            t += 7 * SEC
+            m.advance(t, t, setOf("b"))
+            assertEquals(m.remainingMin(m.who("a"), t), m.remainingMin(m.who("b"), t), "t = ${(t - one) / 1000}초")
+            assertEquals("a", m.gauge(t, texts).drivenBy)
+        }
+    }
+
+    @Test
     fun crossingSevenInTheMorningTheGaugeKeepsFallingOneMinutePerMinute() {
         // 06시부터 자는 아이: 07시까지는 1.5배로 느리게, 그 뒤는 낮잠이라 그대로. 07시를 미리 아니까 게이지가 경계에서 튀지 않는다
         val six = kst(2026, 9, 25, 6, 0)

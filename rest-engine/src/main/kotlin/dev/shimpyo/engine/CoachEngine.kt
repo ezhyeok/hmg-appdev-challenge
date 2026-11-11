@@ -158,7 +158,8 @@ class CoachEngine(
         val moving = !stops.parked && movementKnown
         fatigue.advance(dtMs, moving, input.now, mono)
         // 식사 정차 판단에 쓸 것(선 곳, 식사 목적)은 아래 정차 사건이 수락한 정차를 내리기 전에 본다
-        meal.observe(stops.sessionStart, stops.parked, stops.parked && mealIntent(mono), input.candidates, speed, dtMs)
+        val wasMealStop = meal.factor != 1.0
+        meal.observe(mono, stops.sessionStart, stops.parked, stops.parked && mealIntent(mono), input.candidates, speed, dtMs)
         if (ev.restroomStopAt != NONE) {
             val acc = accepted
             val suggested = acc != null && (acc.kind == PromptKind.LAST_CHANCE || acc.kind == PromptKind.REST_SUGGESTION)
@@ -173,8 +174,16 @@ class CoachEngine(
             accepted = null
         }
         if (ev.mealLengthAt != NONE) meal.onMealLength(input.now - (mono - stops.sessionStart))
-        // 식사 정차로 본 뒤에는 서 있는 동안 매번 건다: 문이 늦게 열려 시계가 뒤에 돌아가도 그 구간에 걸린다 (RestroomNeedModel.onMealStop)
-        if (meal.factor != 1.0 && (stops.parked || ev.mealLengthAt != NONE)) needs.onMealStop(stops.sessionStart, mono, meal.factor)
+        if (meal.factor != 1.0) {
+            if (!wasMealStop) {
+                // 식사 정차로 봤다: "배고파" 요청은 이 정차로 해결됐다 (바로 다음 정차까지 식사 정차가 되거나, 식사 뒤에 식사할 곳을 권하지 않게)
+                mealWantedAt = NONE
+                mealAnswer.clear()
+            }
+            // 그 정차에서 시계가 돌아간 사람의 구간에 건다. 다음 정차까지 매 update 다시 건다: 문이 늦게(떠나는 순간에) 열려 시계가
+            // 뒤에 돌아가도, 프로필이 그 정차 안의 다른 시각으로 시계를 옮겨도 그 구간에 남는다 (RestroomNeedModel.onMealStop)
+            needs.onMealStop(stops.sessionStart, meal.until, meal.factor)
+        }
         needs.advance(mono, input.now, input.asleepOccupantIds)
         needs.tick(mono)
         fatigue.onCabin(input.cabin, mono)
@@ -533,6 +542,9 @@ class CoachEngine(
     /** 저장용 스냅샷 */
     fun memory(): PersonalMemory = memory
 
+    /** 지금 문맥 보정(식사 뒤 구간, 잠든 아이)이 걸린 탑승자가 있는지. 효과 시뮬레이션이 '보정 없음' 가정을 지키는 데 쓴다 */
+    internal fun contextInEffect(): Boolean = needs.tracked.any { it.mealFactor != 1.0 || it.asleep }
+
     // ------------------------------------------------------------------
 
     private class PurposeContext(val restroom: Level, val fatigue: Level, val wallNow: Long, val mono: Long)
@@ -617,9 +629,11 @@ class CoachEngine(
         if (mealWantedAt != NONE && mono - mealWantedAt <= WANT_HOLD_MS) return true
         val a = accepted ?: return false
         if (Purpose.MEAL !in a.purposes) return false
-        val cur = currentCandidates.firstOrNull { it.id == a.stopId } ?: return true
-        val d = route.distanceOf(cur)
-        return d.isNaN() || d <= config.mealPlaceRadiusM
+        val cur = currentCandidates.firstOrNull { it.id == a.stopId }
+        if (cur != null) return MealStopRule.proximityM(cur) <= config.mealPlaceRadiusM
+        // 목록에 없다: 도착해서 빠졌을 수 있다. 마지막으로 본 거리가 가까웠을 때만 그렇게 본다. 멀리 있던 곳이 목록에서 잠깐 빠진 것은
+        // (목록 깜빡임) 도착이 아니다
+        return MealStopRule.proximityM(a.stop) <= MealStopRule.ARRIVAL_MAX_TRAVEL_M
     }
 
     /**
