@@ -3,8 +3,10 @@ package dev.shimpyo.app.coach
 import ai.pleos.playground.navi.constants.TurnType
 import ai.pleos.playground.navi.constants.WaypointIndex
 import ai.pleos.playground.navi.data.RequestWaypointInfo
+import ai.pleos.playground.navi.data.TrafficStatus
 import ai.pleos.playground.navi.data.RouteInfo
 import ai.pleos.playground.navi.data.TripRequest
+import android.util.Log
 import dev.hmg.pleoskit.NaviEvent
 import dev.hmg.pleoskit.NaviKit
 import dev.shimpyo.coach.Fix
@@ -33,6 +35,7 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
 
     override suspend fun routeStatus(): NaviRouteStatus {
         val s = navi.routeState()
+        s.trafficStatus?.let(::logCongestion)
         return NaviRouteStatus(
             mode = runCatching { NaviMode.valueOf(s.naviMode.name) }.getOrDefault(NaviMode.UNKNOWN),
             congestion = s.trafficStatus?.congestionItemList.orEmpty().map { c ->
@@ -91,6 +94,31 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
     } catch (e: Exception) {
         false
     }
+
+    @Volatile private var lastCongestionLog: String? = null
+
+    /**
+     * 정체 시간(trafficCongestionTime)이 '통과 시간'인지 '늘어난 시간'인지 가리기 위한 확인 로그 (엔진 RouteContext는 통과 시간으로 본다).
+     * avrSpeed는 km/h(SDK 문서)라 통과 시간 = distance(m) × 3.6 / avrSpeed(초). 내용이 바뀔 때만, 앞 3개까지 남긴다
+     */
+    private fun logCongestion(t: TrafficStatus) {
+        val items = t.congestionItemList
+        if (items.isEmpty()) return
+        val sum = t.summary
+        val line = buildString {
+            append("congestion: summary dist=%.0fm time=%ds avr=%.1fkm/h cross=%s".format(sum.totalCongestionDist, sum.totalCongestionTime, sum.totalCongestionAvrSpeed, crossS(sum.totalCongestionDist, sum.totalCongestionAvrSpeed)))
+            append(" n=${items.size}")
+            items.take(3).forEach { c ->
+                append(" | off=%.0fm dist=%.0fm time=%ds avr=%.1fkm/h cross=%s %s".format(c.offset, c.distance, c.trafficCongestionTime, c.avrSpeed, crossS(c.distance, c.avrSpeed), c.trafficCongestionType))
+            }
+        }
+        if (line != lastCongestionLog) {
+            lastCongestionLog = line
+            Log.i("Shimpyo", line)
+        }
+    }
+
+    private fun crossS(distanceM: Double, avrKph: Double): String = if (avrKph > 0) "%.0fs".format(distanceM * 3.6 / avrKph) else "?"
 
     override val changes: Flow<NaviChange> = navi.events.mapNotNull { e ->
         when (e) {
