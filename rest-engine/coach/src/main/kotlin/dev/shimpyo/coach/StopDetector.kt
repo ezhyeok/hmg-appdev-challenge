@@ -60,6 +60,17 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
         return ParkedStop(start, t, door)
     }
 
+    /**
+     * 정차 중 이미 화장실 정차가 됐으면 그 시각 (엔진 StopTracker와 같은 식: max(첫 문 열림, 세운 시각 + 3분)), 아니면 null.
+     * 출발 전에 앱이 다시 시작돼도 TripSession이 마지막 화장실 시각을 잃지 않게 쓴다 (서비스 감사 D12)
+     */
+    fun restroomReachedAt(now: Long): Long? {
+        val s = since ?: return null
+        val door = doorAt ?: return null
+        if (now - s < minStopMs) return null
+        return maxOf(door, s + minStopMs)
+    }
+
     /** 시계가 바뀌었다 (시연 켜기·끄기). 정차 중이면 새 시계의 [now]부터 다시 센다. 문 열림도 새로 본다 */
     fun rebase(now: Long) {
         if (since == null) return

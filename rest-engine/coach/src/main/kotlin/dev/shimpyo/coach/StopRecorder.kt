@@ -32,6 +32,9 @@ class StopRecorder(
 
     val parkState: ParkState? get() = detector.parkState
 
+    /** 정차 중 이미 화장실 정차가 됐으면 그 시각 (StopDetector.restroomReachedAt) */
+    fun restroomReachedAt(now: Long): Long? = detector.restroomReachedAt(now)
+
     /** 시작할 때 읽은 저장 기록 (읽기는 코어가 IO에서 한다. 미래 시각 정리는 TripSession이 먼저 한다) */
     fun load(list: List<StopLog>) {
         saved = list

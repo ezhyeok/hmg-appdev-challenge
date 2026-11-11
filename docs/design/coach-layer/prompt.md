@@ -224,8 +224,9 @@ data class ParkState(val sinceMs: Long, val doorAtMs: Long?)   // 코치 시각.
   (시연 값은 가상 시각이다).
 - 재시작하면 TripSession이 이어 가기로 정했을 때(heartbeat가 충분히 최근일 때) `StopRecorder.resume(state, now)`를 부른다.
   미래 시각은 버린다. 다음 틱이 P가 아니면 그 틱에 정차가 끝난다(앱이 꺼진 사이 출발했으면 정차 끝이 늦게 잡힌다).
-- `doorAtMs`가 있고 `now - sinceMs ≥ 3분`이면 정차 중 이미 화장실 정차다. 엔진과 같은 시각은 `max(doorAtMs, sinceMs + 3분)`.
-  TripSession이 재시작 때 `lastRestroomAt`을 정하는 데 쓸 수 있다.
+- `StopRecorder.restroomReachedAt(now)`: 정차 중 이미 화장실 정차가 됐으면 그 시각(엔진과 같은 식 `max(첫 문 열림, 세운 시각 + 3분)`).
+  TripSession이 heartbeat의 마지막 화장실 시각을 출발 전에 갱신하는 데 쓴다(재시작해도 잃지 않게, D12).
+  테스트: `restroomIsKnownWhileStillParked`.
 
 ### 4.3 기록 규칙 (StopRecorder)
 

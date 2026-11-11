@@ -118,6 +118,23 @@ class StopDetectorTest {
         assertNull("거꾸로 간 시각으로 정차를 만들지 않는다", d.onTick(t0 - 10 * min, Gear.DRIVE, 5f, false))
     }
 
+    @Test
+    fun restroomIsKnownWhileStillParked() {
+        // D12: 출발 전에 재시작돼도 화장실 정차를 알 수 있게 (ClockSwitchTest 스케치)
+        val d = StopDetector()
+        d.onTick(t0, Gear.PARK, 0f, false)
+        assertNull("문이 안 열렸다", d.restroomReachedAt(t0 + 5 * min))
+        d.onTick(t0 + min, Gear.PARK, 0f, doorOpened = true)
+        assertNull("아직 3분 전", d.restroomReachedAt(t0 + 2 * min))
+        assertEquals("세운 지 3분", t0 + 3 * min, d.restroomReachedAt(t0 + 3 * min))
+        val late = StopDetector()
+        late.onTick(t0, Gear.PARK, 0f, false)
+        late.onTick(t0 + 5 * min, Gear.PARK, 0f, doorOpened = true)
+        assertEquals("3분 뒤에 문을 열었으면 그 시각", t0 + 5 * min, late.restroomReachedAt(t0 + 6 * min))
+        late.onTick(t0 + 7 * min, Gear.DRIVE, 5f, false)
+        assertNull("정차가 끝나면 없다", late.restroomReachedAt(t0 + 8 * min))
+    }
+
     // ---------------------------------------------------------------- 시계 전환 (서비스 감사 D3, 구조 리뷰 §2.4)
 
     private val real1000 = t0
