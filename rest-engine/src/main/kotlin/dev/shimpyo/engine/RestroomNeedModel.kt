@@ -1,6 +1,7 @@
 package dev.shimpyo.engine
 
 import dev.shimpyo.engine.EngineMath.NONE
+import kotlin.math.abs
 import kotlin.math.floor
 import kotlin.math.pow
 import kotlin.math.round
@@ -94,8 +95,21 @@ internal fun restroomLevel(minutes: Int, c: CoachConfig): Level = when {
  *   그 경우는 이유에 LAST_CHANCE_GROUP('여럿이 타서')을 붙여 화면이 설명한다 (CoachEngine, [soloDeadlineMin]).
  * - 정차 간 상한: 어르신·임신부 걷기 2시간, 영아 카시트 2시간은 확률과 상관없이 문턱의 상한으로 건다 (AI §9-1).
  * - 음성으로 필요를 알린 사람은 바로 0(NOW).
+ *
+ * 문맥 보정 (docs/research/need-covariates.md 6장·8장, 'NC'): 사람마다 시계를 유효 시간 τ로 돌린다.
+ *   τ += dt / m(지금),  S(t) = S0(τ),  배운 값도 τ (b += τ^k)
+ * 배수 m을 '필요해지는 시간'에 곱하는 가속수명 모형이라 위의 닫힌 식이 그대로 쓰이고, 기록을 τ로 남기므로 문맥이 그 사람의
+ * 기준 간격을 한쪽으로 끌지 않는다. 배수가 없으면 τ = 지난 시간이고 모든 값이 보정 전과 같다(ContextFactorTest가 지킨다).
+ * - 식사 정차 뒤 구간 ([Tracked.mealFactor], 기본 0.8): 그 정차에서 시계가 돌아간 사람의 구간 전체에 건다(영아·반려견 제외).
+ *   구간 안에서 상수라 t를 t/m으로 바꾸는 것과 같다. 게이지와 판단 마감 모두에 쓴다. 다음 화장실에서 풀린다.
+ *   문이 열리지 않아 시계가 돌아가지 않은 정차에는 걸지 않는다: 아무도 내리지 않았으면 먹고 마셨다고 볼 근거가 약하고,
+ *   그대로 흘러간 시계가 이미 이른 쪽이다.
+ * - 밤에 잠든 아이 ([Tracked.asleep], 기본 1.5): 잠든 밤 시간만큼 τ가 덜 흐른다(도중에 잠들고 깨도 누적). **화면 게이지에만** 쓴다.
+ *   판단 마감은 깨어 있는 것으로 계산한다: 긴 공백 앞에서는 보수적으로, 깬 아이는 바로 화장실을 찾을 수 있다(NC §10-4).
+ *   게이지는 '계속 잔다면 문턱에 닿기까지 실제 분'이다. 밤 시간대의 끝(07시)은 미리 아는 것이라 따라가므로 경계에서 튀지 않는다.
+ * - 상한(걷기·카시트)은 실제 시간 그대로다. 피트스톱의 '정차 뒤 구간'(fromReset)은 배수 1.0으로 계산한다.
  */
-internal class RestroomNeedModel(private val config: CoachConfig) {
+internal class RestroomNeedModel(private val config: CoachConfig, local: LocalClock = LocalClock(config.zoneId)) {
 
     class Tracked internal constructor(occupant: Occupant, lastRestroom: Long) {
         var occupant: Occupant = occupant
@@ -122,13 +136,29 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         var capMin: Double = Double.POSITIVE_INFINITY
             internal set
 
-        /** 화면 게이지 문턱 = min(Q(0.5), 상한). 화장실 직후의 '가득 찬 게이지' (분) */
+        /** 화면 게이지 문턱 = min(Q(0.5), 상한). 화장실 직후의 '가득 찬 게이지' (분, 기준 조건) */
         var thresholdMin: Double = 0.0
             internal set
 
+        /** 상한을 걸기 전의 게이지 문턱 Q(0.5) (분, 기준 조건) */
+        internal var curveMin: Double = 0.0
+
+        /** 이번 구간의 식사 배수. 1.0이면 없다. 시계가 돌아가면(다음 화장실) 1.0으로 돌아간다 */
+        var mealFactor: Double = 1.0
+            internal set
+
+        /** 지금 자고 있다고 알려진 아이인지 (CoachInput.asleepOccupantIds). 배수는 밤 시간대에만 걸린다 */
+        var asleep: Boolean = false
+            internal set
+
+        /** 이번 구간에서 잠 때문에 덜 흐른 시간 (ms) = ∫ (1 − 1/배수) dt. 한 번도 자지 않았으면 정확히 0 */
+        internal var sleptSavedMs: Double = 0.0
+
         val id: String get() = occupant.id
         val voiced: Boolean get() = voicedAt != NONE
-        val capBinding: Boolean get() = capMin <= posterior.quantile(0.5)
+
+        /** 상한(걷기·카시트)이 게이지를 정하는지: 식사 뒤 곡선(실제 분)보다 상한이 먼저일 때 */
+        val capBinding: Boolean get() = capMin <= curveMin * mealFactor
     }
 
     private val list = ArrayList<Tracked>()
@@ -141,8 +171,18 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
     private var cachedElapsed = -1
     private var cachedVoiced = false
     private var cachedObs = -1
+    private var cachedMeal = false
+    private var cachedAsleep = false
 
     private val k get() = config.restroomWeibullShape
+
+    // 잠든 아이: 밤 시간대와 배수 (1.0이면 끈다. 0 이하·NaN 같은 값도 끈다)
+    private val night = DailyWindow(local, config.asleepNightStartHour, config.asleepNightEndHour)
+    private val asleepFactor = saneFactor(config.asleepIntervalFactor)
+
+    /** 잠으로 덜 흐른 시간을 여기까지 쌓았다 (엔진 시각)과 그때의 벽시계. [advance]가 한 번도 안 불렸으면 NONE */
+    private var accruedMono = NONE
+    private var accruedWall = 0L
 
     /** 사전 중앙값: 사람별 지정값이 있으면 그것, 없으면 유형별 값 */
     fun priorMedianMin(o: Occupant): Double {
@@ -190,7 +230,9 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
                 prev.occupant = o
                 if (raw != prev.profileValue) {
                     prev.profileValue = raw
-                    prev.lastRestroom = if (prev.stopAt != NONE) maxOf(prev.stopAt, profileLast) else profileLast
+                    val last = if (prev.stopAt != NONE) maxOf(prev.stopAt, profileLast) else profileLast
+                    // 사용자가 고친 시각부터는 새 구간이다: 식사 정차에서 시작한 구간도, 그 구간에서 잔 시간도 아니다
+                    if (last != prev.lastRestroom) resetClock(prev, last)
                 }
                 prev
             } else {
@@ -211,15 +253,127 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
                 config.restroomSuggestedWeight, config.restroomMemoryMax,
             )
             t.capMin = capMin(t.occupant)
-            t.thresholdMin = minOf(t.posterior.quantile(p), t.capMin)
+            t.curveMin = t.posterior.quantile(p)
+            t.thresholdMin = minOf(t.curveMin, t.capMin)
         }
         cached = null
     }
 
+    /** 마지막 화장실 뒤 지난 실제 시간 (분) */
     fun elapsedMin(t: Tracked, mono: Long): Double = maxOf(0L, mono - t.lastRestroom) / 60_000.0
 
-    fun remainingMin(t: Tracked, mono: Long): Double =
-        if (t.voiced) 0.0 else t.thresholdMin - elapsedMin(t, mono)
+    /**
+     * 유효 시간 τ (분): 기준 조건(낮, 최근 식사 없음)으로 환산한 '마지막 화장실 뒤 시간'. 화면 게이지와 학습이 쓴다.
+     * 잠으로 덜 흐른 시간을 빼고 식사 배수로 나눈다. 배수가 없으면 지난 시간과 비트까지 같다
+     */
+    fun tauMin(t: Tracked, mono: Long): Double = (elapsedMin(t, mono) - t.sleptSavedMs / 60_000.0) / t.mealFactor
+
+    /**
+     * 게이지: 이 사람의 곡선이 문턱에 닿을 때까지 남은 실제 분 (상한 포함, 음성 요청이면 0).
+     * 배수가 없으면 예전 식 '문턱 − 지난 시간'과 같다.
+     */
+    fun remainingMin(t: Tracked, mono: Long): Double {
+        if (t.voiced) return 0.0
+        val left = curveLeftMin(t, mono)
+        val curve = if (t.asleep) asleepWallMin(left, wallAt(mono)) else left
+        return minOf(curve, t.capMin - elapsedMin(t, mono))
+    }
+
+    /**
+     * 곡선이 문턱에 닿기까지 더 흘러야 하는 시간 (분, 깨어 있을 때의 실제 분) = (Q(0.5) − τ) × 식사 배수.
+     * 식사 배수는 구간 안에서 상수라 문턱을 그만큼 줄인 것과 같다: Q × m − (지난 시간 − 잠으로 덜 흐른 시간)
+     */
+    private fun curveLeftMin(t: Tracked, mono: Long): Double =
+        t.curveMin * t.mealFactor - (elapsedMin(t, mono) - t.sleptSavedMs / 60_000.0)
+
+    /**
+     * 잠든 아이가 계속 잔다면, 깨어 있을 때 leftMin분에 해당하는 양이 흐르는 데 걸리는 실제 분.
+     * 밤 시간대 안에서는 실제 1분에 1/배수 분씩만 흐른다. 시간대 경계는 미리 아는 것이라 따라간다:
+     * '지금 배수 그대로'로 곱하면 07시에 게이지가 3분의 1만큼 한 번에 떨어진다 (연료계는 1분에 1분씩 줄어야 한다).
+     */
+    private fun asleepWallMin(leftMin: Double, wall: Long): Double {
+        if (leftMin <= 0.0 || night.isEmpty) return leftMin
+        var left = leftMin * 60_000.0
+        var real = 0.0
+        var t = wall
+        repeat(MAX_NIGHT_EDGES) {
+            val span = night.msToEdge(t)
+            val rate = if (night.contains(t)) 1.0 / asleepFactor else 1.0
+            val gain = span * rate
+            if (gain >= left) return (real + left / rate) / 60_000.0
+            left -= gain
+            real += span
+            t += span
+        }
+        return (real + left) / 60_000.0
+    }
+
+    /** 엔진 시각 → 벽시계. 마지막 [advance] 때의 차이를 쓴다 (그 전이면 엔진 시각 = 벽시계) */
+    private fun wallAt(mono: Long): Long = if (accruedMono == NONE) mono else accruedWall + (mono - accruedMono)
+
+    /**
+     * 시계를 지금까지 진행하고 이번 입력의 '잠든 사람'을 반영한다. 매 update에 한 번 부른다.
+     * 지난 update부터 지금까지는 그때 알려진 상태(잠듦/깸)로 쌓고, 이번 목록은 지금부터 적용한다.
+     * 아이(CHILD)만 받는다. 목록의 모르는 id, 어른·영아·반려견은 무시한다.
+     */
+    fun advance(mono: Long, wallNow: Long, asleepIds: Set<String>) {
+        accrue(mono, wallNow)
+        val on = asleepFactor != 1.0 && !night.isEmpty && asleepIds.isNotEmpty()
+        for (t in list) {
+            val a = on && t.occupant.type == OccupantType.CHILD && t.id in asleepIds
+            if (a != t.asleep) {
+                t.asleep = a
+                cached = null
+            }
+        }
+    }
+
+    /**
+     * 잠든 아이의 '덜 흐른 시간'을 to까지 쌓는다: 그 사이 밤 시간대와 겹친 실제 시간 × (1 − 1/배수).
+     * 겹친 길이는 경계까지 정확히 재므로 update가 1초마다 오든 몇 분 만에 오든 같은 값이다.
+     */
+    private fun accrue(to: Long, wallAtTo: Long) {
+        val from = accruedMono
+        if (from != NONE && to > from) {
+            for (t in list) {
+                if (!t.asleep) continue
+                val start = maxOf(from, t.lastRestroom) // 이 사람의 이번 구간 안쪽만
+                if (to > start) t.sleptSavedMs += night.overlapMs(wallAtTo - (to - start), wallAtTo) * (1.0 - 1.0 / asleepFactor)
+            }
+        }
+        if (from == NONE || to >= from) {
+            accruedMono = to
+            accruedWall = wallAtTo
+        }
+    }
+
+    /** 시계를 at으로 돌린다. 새 구간에는 앞 구간의 문맥(식사 배수, 잔 시간)이 넘어오지 않는다 */
+    private fun resetClock(t: Tracked, at: Long) {
+        t.lastRestroom = at
+        t.mealFactor = 1.0
+        t.sleptSavedMs = 0.0
+        cached = null
+    }
+
+    /**
+     * 식사 정차: 이 정차([from, until], 엔진 시각) 동안 시계가 돌아간 사람의 이번 구간에 배수를 건다 (영아·반려견 제외).
+     * 식사 정차 판정(20분)은 시계가 돌아간 때(3분)보다 늦게 오므로 구간의 처음부터 건다: 배수는 '정차 시작 3분에 시계를 돌리는'
+     * 규칙 위에서 정한 값이다(NC §2 6행: 30분 식사 뒤 출발할 때 123 → 93분).
+     * 이 정차에서 시계가 돌아가지 않은 사람은 그대로 둔다(클래스 설명). 엔진은 정차가 이어지는 동안 매 update 부르므로,
+     * 문이 뒤늦게 열려 시계가 돌아가면 그때 걸린다.
+     */
+    fun onMealStop(from: Long, until: Long, factor: Double) {
+        val f = saneFactor(factor)
+        if (f == 1.0) return
+        for (t in list) {
+            if (t.occupant.type == OccupantType.INFANT || t.occupant.type == OccupantType.DOG) continue
+            if (t.lastRestroom < from || t.lastRestroom > until) continue
+            if (t.mealFactor != f) {
+                t.mealFactor = f
+                cached = null
+            }
+        }
+    }
 
     /** 남은 시간이 가장 짧은 탑승자 (동률이면 프로필 순서상 앞사람) */
     fun mostConstrained(mono: Long, eligible: ((Tracked) -> Boolean)? = null): Tracked? {
@@ -237,6 +391,7 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
      * 한 사람씩만 볼 때의 마감 (분): 탑승자마다 필요 확률이 p에 닿을 때까지 남은 시간(정차 간 상한 포함) 중 가장 짧은 것.
      * 음성 요청이 있으면 0. [deadlineMin]의 위 한계이고, 묶음 확률 때문에 마지막 기회가 앞당겨졌는지 가리는 데 쓴다.
      * fromReset이면 모두 방금 화장실에 다녀온 상태(e_i = 0)로 계산한다. 탑승자가 없으면 null.
+     * 마감의 유효 시간은 e_i / 식사 배수다 (잠든 아이 배수는 넣지 않는다). fromReset이면 배수 1.0.
      */
     fun soloDeadlineMin(mono: Long, p: Double, fromReset: Boolean = false): Double? {
         if (list.isEmpty()) return null
@@ -244,7 +399,9 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         for (t in list) {
             if (!fromReset && t.voiced) return 0.0
             val e = if (fromReset) 0.0 else elapsedMin(t, mono)
-            val single = minOf(t.posterior.quantile(p), t.capMin) - e
+            val f = if (fromReset) 1.0 else t.mealFactor
+            // 곡선은 유효 시간 Q(p)에, 곧 실제 시간 Q(p) × 배수에 닿는다. 상한은 실제 시간
+            val single = minOf(t.posterior.quantile(p) * f, t.capMin) - e
             if (single < best) best = single
         }
         return maxOf(0.0, best)
@@ -271,12 +428,13 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         return lo
     }
 
-    /** 앞으로 deltaMin분 안에 탑승자 중 누군가 필요해질 확률 (독립 가정) */
+    /** 앞으로 deltaMin분 안에 탑승자 중 누군가 필요해질 확률 (독립 가정). 사람마다 유효 시간 (e_i + Δ) / 식사 배수로 본다 */
     private fun anyNeedProb(mono: Long, deltaMin: Double, fromReset: Boolean): Double {
         var surv = 1.0
         for (t in list) {
             val e = if (fromReset) 0.0 else elapsedMin(t, mono)
-            surv *= t.posterior.survival(e + deltaMin)
+            val f = if (fromReset) 1.0 else t.mealFactor
+            surv *= t.posterior.survival((e + deltaMin) / f)
         }
         return 1.0 - surv
     }
@@ -291,8 +449,10 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
      * 화장실 정차: 모두의 시계를 at으로 돌린다 (정차 때 배뇨는 대개 요의 없이 기회가 와서 한다).
      * 정차 시점에 게이지를 정하던 사람(가장 급한 사람)은 사건(앱이 권한 정차면 0.5회), 나머지는 중도절단 관측이다.
      * 이미 음성으로 관측을 남긴 사람은 다시 남기지 않는다.
+     * 남기는 값은 유효 시간 τ다(식사 뒤 96분 → 120분). '연달아 선 정차'를 거르는 최소 간격은 실제 시간으로 본다.
      */
     fun onRestroomStop(at: Long, memory: PersonalMemory, suggested: Boolean = false): PersonalMemory {
+        if (accruedMono != NONE && at > accruedMono) accrue(at, wallAt(at)) // 잠든 시간을 정차 시각까지 쌓고 잰다
         val driver = mostConstrained(at)
         var exact = memory.restroomIntervalsMin
         var sugg = memory.restroomSuggestedMin
@@ -301,13 +461,14 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         for (t in list) {
             val interval = (at - t.lastRestroom) / 60_000.0
             if (!t.voiced && interval >= config.restroomMinObservedMin) {
+                val tau = tauMin(t, at)
                 when {
-                    t !== driver -> censored = censored.prepend(t.id, interval, max)
-                    suggested -> sugg = sugg.prepend(t.id, interval, max)
-                    else -> exact = exact.prepend(t.id, interval, max)
+                    t !== driver -> censored = censored.prepend(t.id, tau, max)
+                    suggested -> sugg = sugg.prepend(t.id, tau, max)
+                    else -> exact = exact.prepend(t.id, tau, max)
                 }
             }
-            if (at > t.lastRestroom) t.lastRestroom = at
+            if (at > t.lastRestroom) resetClock(t, at)
             if (at > t.stopAt) t.stopAt = at
             t.voicedAt = NONE
         }
@@ -330,7 +491,7 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         cached = null
         if (interval < config.restroomMinObservedMin) return memory
         val mem = memory.copy(
-            restroomIntervalsMin = memory.restroomIntervalsMin.prepend(t.id, interval, config.restroomMemoryMax),
+            restroomIntervalsMin = memory.restroomIntervalsMin.prepend(t.id, tauMin(t, mono), config.restroomMemoryMax),
         )
         refresh(mem)
         return mem
@@ -357,17 +518,23 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         val minutes = floor(maxOf(0.0, remainingMin(b, mono)) + 1e-6).toInt() // 149.9999999 → 150
         val elapsed = floor(elapsedMin(b, mono)).toInt()
         val obs = b.posterior.observations
+        // 문맥 이유는 그 배수가 지금 보이는 게이지를 실제로 바꿀 때만 낸다 (말로 알렸거나 상한이 게이지를 정하면 내지 않는다)
+        val byCurve = !b.voiced && !b.capBinding
+        val afterMeal = byCurve && b.mealFactor != 1.0
+        val asleep = byCurve && b.asleep && curveLeftMin(b, mono).let { abs(asleepWallMin(it, wallAt(mono)) - it) > ASLEEP_REASON_MIN_DIFF }
         val c = cached
         if (c != null && cachedId == b.id && cachedMinutes == minutes && cachedElapsed == elapsed &&
-            cachedVoiced == b.voiced && cachedObs == obs
+            cachedVoiced == b.voiced && cachedObs == obs && cachedMeal == afterMeal && cachedAsleep == asleep
         ) return c
         val name = texts.occupantName(b.occupant)
-        val reasons = ArrayList<Reason>(3)
+        val reasons = ArrayList<Reason>(4)
         if (b.voiced) {
             reasons += Reason("RESTROOM_VOICED", texts.reasonRestroomVoiced(name))
         } else {
             reasons += Reason("RESTROOM_ELAPSED", texts.reasonRestroomElapsed(name, elapsed))
             if (b.capBinding) reasons += Reason("RESTROOM_CAP", texts.reasonRestroomCap(b.occupant, b.capMin.toInt()))
+            if (afterMeal) reasons += Reason("RESTROOM_AFTER_MEAL", texts.reasonRestroomAfterMeal())
+            if (asleep) reasons += Reason("RESTROOM_ASLEEP", texts.reasonRestroomAsleep(name))
         }
         if (obs > 0) reasons += Reason("RESTROOM_PERSONAL", texts.reasonRestroomPersonal(name, obs))
         val g = Gauge(minutes, restroomLevel(minutes, config), reasons, drivenBy = b.id)
@@ -377,6 +544,8 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
         cachedElapsed = elapsed
         cachedVoiced = b.voiced
         cachedObs = obs
+        cachedMeal = afterMeal
+        cachedAsleep = asleep
         return g
     }
 
@@ -408,6 +577,15 @@ internal class RestroomNeedModel(private val config: CoachConfig) {
     companion object {
         /** 이분법 횟수. 구간이 4시간이어도 오차가 0.001초 아래다 (마감은 1초에 한 번 계산한다) */
         private const val BISECTIONS = 24
+
+        /** 잠든 아이의 남은 시간을 따라갈 때 넘는 시간대 경계 수 (하루에 둘). 남은 시간은 길어야 몇 시간이다 */
+        private const val MAX_NIGHT_EDGES = 8
+
+        /** 잠든 아이 이유를 내는 최소 차이 (분). 부동소수 오차로 이유가 깜빡이지 않게 */
+        private const val ASLEEP_REASON_MIN_DIFF = 1e-6
+
+        /** 배수로 쓸 수 있는 값만: 0 이하·NaN·무한대는 '없음'(1.0)으로 본다 */
+        fun saneFactor(f: Double): Double = if (f.isFinite() && f > 0.0) f else 1.0
 
         val SENSITIVE: Set<OccupantType> = setOf(
             OccupantType.CHILD, OccupantType.INFANT, OccupantType.PREGNANT, OccupantType.ELDERLY,

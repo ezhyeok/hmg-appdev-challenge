@@ -233,4 +233,31 @@ data class CoachConfig(
     val stopOverheadMin: Int = 5,
     /** 남은 주행가능거리에서 남겨 둘 여유 (km). 근거: 엔진 v0 */
     val fuelReserveKm: Double = 50.0,
+
+    // ---------------- 화장실 문맥 보정 (모두 기본값이 있다. 배수 1.0이면 그 보정을 끈다) ----------------
+    // 근거: docs/research/need-covariates.md ('NC §n'). 배수 m은 '필요해지는 시간'에 곱한다(m < 1이면 더 빨리).
+    // 넣지 않는 것(NC §9): 깨어 있는 사람의 시간대 배수, 기온·계절, 카페인, 주행 신호로 요의를 안다는 주장.
+
+    /**
+     * 식사 정차 뒤 구간의 배수. 마신 물의 82%가 2시간 안에 나온다(Maughan 2016). 크기는 파생값이라 범위 0.6~1.0 중 0.8.
+     * '정차 시작 3분에 시계를 돌리는' 규칙(restroomStopMinParkedMin) 위에서 정한 값이라 그 규칙을 바꾸면 다시 정한다.
+     * 근거: NC §2 6행, §8
+     */
+    val mealIntervalFactor: Double = 0.8,
+    /** 저녁([mealEveningStartHour]시 이후)에 시작한 식사 정차의 배수. 저녁에 마신 물은 아침의 0.3~0.6배만 나온다. 근거: NC §1 6행 (Claybaugh 2000), §8 */
+    val mealIntervalFactorEvening: Double = 0.9,
+    /** 식사 정차로 볼 최소 정차 시간 (분, 기어 P). 식사 1회 섭취 약 0.4L를 '음식 있는 곳에서 20분 이상'으로 추정한다. 근거: NC §2 5행, §8 */
+    val mealStopMinMin: Int = 20,
+    /** 선 곳이 음식 있는 곳인지 볼 때, 후보가 이 거리 안이면 그곳에 선 것으로 본다 (m). 정차 기록의 장소 이름 반경과 같다. 근거: NC §8 */
+    val mealPlaceRadiusM: Double = 300.0,
+    /** 이 시각(현지 시) 이후에 시작한 식사 정차는 [mealIntervalFactorEvening]을 쓴다. 근거: NC §1 6행 (20시 측정), §8 */
+    val mealEveningStartHour: Int = 20,
+    /**
+     * 밤에 잠든 아이의 배수 (화면 게이지에만). 잠든 아이의 소변 생성은 낮의 0.51배(Mahler 2013), 담는 양은 1.43배(Rittig 2010)라
+     * 범위 1.3~2.0 중 보수적인 1.5. 판단 마감에는 쓰지 않는다(깨면 바로 화장실을 찾을 수 있다). 근거: NC §1 4·5행, §8, §10-4
+     */
+    val asleepIntervalFactor: Double = 1.5,
+    /** 잠든 아이 배수를 거는 밤 시간대 [asleepNightStartHour, asleepNightEndHour) (현지 시, 자정을 넘는다). 낮잠은 1.0. 근거: NC §8 */
+    val asleepNightStartHour: Int = 20,
+    val asleepNightEndHour: Int = 7,
 )

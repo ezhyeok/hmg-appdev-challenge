@@ -153,6 +153,12 @@ open class CoachTexts {
     open fun reasonRestroomVoiced(who: String): String = "$who${subj(who)} 화장실이 필요하다고 했어요"
     open fun reasonRestroomPersonal(who: String, n: Int): String = "${who}의 지난 기록 ${n}번을 반영했어요"
 
+    /** 식사 정차 뒤 구간이라 게이지를 줄여 잡았을 때. 먹고 마신 양을 안다고 말하지 않는다 (need-covariates.md 9장) */
+    open fun reasonRestroomAfterMeal(): String = "식사 뒤라 평소보다 조금 일찍 잡았어요"
+
+    /** 밤에 잠든 아이라 게이지를 늘려 잡았을 때 */
+    open fun reasonRestroomAsleep(who: String): String = "$who${subj(who)} 자는 동안은 여유를 조금 더 뒀어요"
+
     /** 정차 간 상한(카시트·걷기)이 게이지를 정할 때 */
     open fun reasonRestroomCap(o: Occupant, capMin: Int): String = when (o.type) {
         OccupantType.INFANT -> "아기는 카시트에 ${duration(capMin)} 넘게 있지 않는 게 좋아요"
