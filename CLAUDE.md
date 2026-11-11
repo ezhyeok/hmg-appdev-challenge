@@ -74,7 +74,7 @@
 - 내비 요청을 1초 안에 연달아 보내면(trip, route, waypoint) 시작된 경로가 곧바로 취소되는 일이 있었다. 요청 사이에 응답을 기다릴 것
 - **TBT(`getTBTInfo`)에 경로 위 휴게소(`TURN_ENTER_SERVICEAREA`)와 졸음쉼터(`TURN_RESTAREA`)가 이름과 함께 온다. 거리(`TBTInfo.distance`)는 직전 항목부터의 거리라서 누적해야 경로 거리가 된다** (2026-11-11 확인: 경유지 누적 47.1km = 내비 경유지 남은 거리 47.0km)
 - 정체 구간(`RouteStateInfo.trafficStatus.congestionItemList`)은 길안내 중 실제로 온다. `trafficCongestionTime` 단위는 초. `offset`의 기준(출발지/현재 위치)은 미확인
-- **정체 시간(`trafficCongestionTime`)은 통과 시간이 아니다** (2026-11-12 에뮬레이터, 판교 출발 경로, `KitNaviPort`의 `congestion:` 로그): 항목마다 30~100m 구간도 모두 60초(분 단위, 최소 1분)라 통과 시간(거리÷`avrSpeed`(km/h), 1~16초)과 다르다. 요약(`TrafficCongestionSummary`)은 3,200m·45.0km/h → 120초, 3,300m·46.1km/h → 120초, 5,900m·34.9~35.2km/h → 300초로 통과 시간(256·258·604초)의 약 절반 = 자유 흐름(약 70~80km/h) 대비 늘어난 시간(분 단위)에 맞는다. 엔진은 항목 시간을 통과 시간으로 쓴다(`RouteContext`): 엔진 담당 확인 필요
+- **정체 시간(`trafficCongestionTime`)은 통과 시간이 아니다** (2026-11-12 에뮬레이터, 판교 출발 경로, `KitNaviPort`의 `congestion:` 로그): 분 단위로 반올림한 늘어난 시간이다(최소 1분). 항목마다 30~100m 구간도 모두 60초였고 통과 시간(거리÷`avrSpeed`(km/h))은 1~16초였다. 요약(`TrafficCongestionSummary`)도 3,200m·45.0km/h → 120초, 3,300m·46.1km/h → 120초, 5,900m·34.9~35.2km/h → 300초로 통과 시간(256·258·604초)의 약 절반(자유 흐름 70~85km/h 대비 늘어난 시간)이다. 그래서 앱은 엔진에 넣는 정체 시간(`CongestionSegment.durationS` = 지나는 시간)을 거리 ÷ 평균 속도로 구한다(`NaviCongestion.crossingS`, 평균 속도가 없으면 자유 흐름 80km/h + 늘어난 시간, 상한 6시간). 원래 값은 `NaviCongestion.delayS`에 남긴다
 - 길안내 중 `requestTrip`은 경로를 방해하지 않는다. 휴게소 좌표로 `addWaypoint` 하면 가는 방향 휴게소로 잡힌다
 - `adb emu geo fix`는 FusedLocation만 바꾸고 Pleos 내비의 위치는 바꾸지 않는다 (내비는 판교 고정)
 - 조향각 리스너 값은 Virtual Console 값과 부호가 반대이고, 변화가 없어도 약 3초마다 온다

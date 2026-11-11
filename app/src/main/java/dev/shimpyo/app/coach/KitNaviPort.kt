@@ -38,12 +38,14 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
         s.trafficStatus?.let(::logCongestion)
         return NaviRouteStatus(
             mode = runCatching { NaviMode.valueOf(s.naviMode.name) }.getOrDefault(NaviMode.UNKNOWN),
-            congestion = s.trafficStatus?.congestionItemList.orEmpty().map { c ->
-                NaviCongestion(
+            // trafficCongestionTime은 지나는 시간이 아니라 분 단위로 반올림한 늘어난 시간이다(최소 1분, 2026-11-12 실측).
+            // 엔진이 쓰는 '지나는 시간'은 거리 ÷ 평균 속도(avrSpeed, km/h)로 구한다 (NaviCongestion.crossingS)
+            congestion = s.trafficStatus?.congestionItemList.orEmpty().mapNotNull { c ->
+                NaviCongestion.fromNavi(
                     offsetM = c.offset,
                     lengthM = c.distance,
-                    // trafficCongestionTime 단위는 초 (2026-11-11 확인)
-                    durationS = c.trafficCongestionTime.toDouble(),
+                    delayS = c.trafficCongestionTime.toDouble(),
+                    avrSpeedKph = c.avrSpeed,
                     type = c.trafficCongestionType.name,
                     roadName = c.roadName,
                     startName = c.startCrossName,
@@ -98,8 +100,8 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
     @Volatile private var lastCongestionLog: String? = null
 
     /**
-     * 정체 시간(trafficCongestionTime)이 '통과 시간'인지 '늘어난 시간'인지 가리기 위한 확인 로그 (엔진 RouteContext는 통과 시간으로 본다).
-     * avrSpeed는 km/h(SDK 문서)라 통과 시간 = distance(m) × 3.6 / avrSpeed(초). 내용이 바뀔 때만, 앞 3개까지 남긴다
+     * 정체 확인 로그: 내비가 준 늘어난 시간(time)과 앱이 엔진에 넣는 지나는 시간(cross = distance × 3.6 / avrSpeed, NaviCongestion.crossingS).
+     * 내용이 바뀔 때만, 앞 3개까지 남긴다 (2026-11-12 이 로그로 trafficCongestionTime이 지나는 시간이 아님을 확인했다)
      */
     private fun logCongestion(t: TrafficStatus) {
         val items = t.congestionItemList
@@ -118,7 +120,8 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
         }
     }
 
-    private fun crossS(distanceM: Double, avrKph: Double): String = if (avrKph > 0) "%.0fs".format(distanceM * 3.6 / avrKph) else "?"
+    private fun crossS(distanceM: Double, avrKph: Double): String =
+        NaviCongestion.crossingS(distanceM, avrKph, null)?.let { "%.0fs".format(it) } ?: "?"
 
     override val changes: Flow<NaviChange> = navi.events.mapNotNull { e ->
         when (e) {

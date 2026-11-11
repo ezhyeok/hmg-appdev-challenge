@@ -127,6 +127,10 @@ class CongestionBasis {
 
 ## 7. 정체 offset 기준 판정 (`CongestionBasis`)
 
+먼저 시간: NaviHelper의 `trafficCongestionTime`은 구간을 지나는 시간이 아니라 분 단위로 반올림한 늘어난 시간이다(최소 1분, 2026-11-12 실측,
+CLAUDE.md). 엔진은 `durationS`를 지나는 시간으로 쓰므로 포트 경계(`KitNaviPort` → `NaviCongestion.fromNavi`)에서 거리 ÷ 평균 속도로 바꾼다
+(`NaviCongestion.crossingS`, 평균 속도가 없으면 자유 흐름 80km/h + 늘어난 시간, 상한 6시간, 깨진 길이는 버림). 테스트 `NaviCongestionTest`.
+
 NaviHelper의 정체 `offset`이 출발지 기준인지 현재 위치 기준인지 문서에 없고, 에뮬레이터 내비는 움직이지 않아 확인하지 못했다. 그래서 주행 중에 판정한다.
 
 - 같은 구간(도로명 + 시작 교차로)을 처음 본 뒤 내비 남은 거리가 1km 이상 줄면 한 표: offset도 그만큼(±30%) 줄었으면 FROM_CAR, 거의 그대로(이동의 20% 안)면 FROM_ORIGIN, 아니면 표 없음(정체가 자라거나 줄었다).
