@@ -659,6 +659,7 @@ FS = 15.0
 RED_TEXT = "#B4321A"          # dark red for text on light backgrounds (warning meaning only)
 CALM = "#BFD6FF"              # light accent for 'fine' segments
 HERO_SCREEN = None            # set by --hero-screen; else emu/drive.png, else screen-drive.png
+HERO_OKSAN_DISTANCE = "2.4km"   # the 옥산휴게소 distance on the captured drive screen; the navi schematic repeats it
 
 
 def TS(x, y, parts, size=FS, anchor="start"):
@@ -743,7 +744,8 @@ def _navi_window(ww, wh):
     # next guidance card and remaining distance
     o.append(R(10, 10, ww - 20, 44, 10, WHITE, LINE, 1))
     o.append(wc_marker(32, 32, 12, True))
-    o.append(TS(52, 38, [("2.9km  ", 800, INK), ("옥산휴게소", 600, INK2)], 16))
+    # 옆의 쉼표 화면 캡처(emu/drive.png)가 보여 주는 옥산휴게소 거리와 같아야 한다 (2026-11-13 캡처: 2.4km)
+    o.append(TS(52, 38, [(HERO_OKSAN_DISTANCE + "  ", 800, INK), ("옥산휴게소", 600, INK2)], 16))
     o.append(R(0, wh - 34, ww, 34, 0, WHITE))
     o.append(L(0, wh - 34, ww, wh - 34, LINE, 1))
     o.append(TS(ww / 2, wh - 12, [("남은 거리 ", 500, INK3), ("310km", 800, INK)], FS, "middle"))

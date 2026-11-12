@@ -63,6 +63,7 @@ FIGURES = {
     "funnel": "fig5-funnel.png",
     "screens": "fig6-screens-mockup.png",
     "drive_screen": "screen-drive.png",      # one real driving screen for box 3 (copied in, not generated)
+    "emu_full": "emu/full-screen.png",       # whole emulator display after accepting (copied in, not generated)
 }
 
 
@@ -140,12 +141,16 @@ def edit_part1_and_names(doc):
     assert '□ 개인' in par, "participation-unit checkbox not found"
     doc = doc[:s] + par.replace('□ 개인', '■ 개인', 1) + doc[e:]
 
-    # 참가 부문: □ 대학(원)생 -> ■ 대학(원)생 (참가자가 2026-11-12에 정함)
+    # 참가 부문: □ 대학(원)생 -> ■ 대학(원)생 (참가자가 2026-11-12에 정함). 양식은 '□ '·'대학'·'(원)'·'생'을 서로 다른
+    # run에 둔다: XML 문자열에서 '□ 대학'을 찾으면 늘 실패한다 (2026-11-13). 그래서 첫 □ 뒤의 글자가 '대학'인지 본다
     i = doc.index('참가 부문:')
     s, e = _paragraph_bounds(doc, i)
     par = doc[s:e]
-    assert '□ 대학(원)생' in par or '□ 대학' in par, "division checkbox not found"
-    doc = doc[:s] + par.replace('□ 대학', '■ 대학', 1) + doc[e:]
+    box = par.find('□')
+    assert box >= 0 and _text_of(par[box:]).startswith('대학(원)생'), "division checkbox not found"
+    par = par[:box] + '■' + par[box + 1:]
+    assert '■ 대학(원)생' in _text_of(par) and '□ 일반' in _text_of(par), _text_of(par)
+    doc = doc[:s] + par + doc[e:]
 
     # 참가 인원: 1명
     i = doc.index('참가 인원:')
