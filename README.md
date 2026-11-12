@@ -33,7 +33,7 @@ adb shell am start -n dev.shimpyo.app/.MainActivity --es demo stop      # 휴게
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo off       # 시연 끄기 (실제 신호로 돌아간다)
 ```
 
-시연은 기어 D + 차속이 있을 때 질문이 나옵니다(주차 중에는 주행 질문을 거둡니다). 시연 중의 정차·학습은 실제 기록에 남지 않습니다.
+시연은 기어 D + 차속이 있을 때 질문이 나옵니다(주차 중에는 주행 질문을 거둡니다). 질문 카드가 떠 있는 동안에는 시연 시각과 위치가 함께 4배 느리게 흘러, 카드를 설명하고 누를 시간이 있습니다(가상 속도는 같아서 판단은 바뀌지 않습니다). 시연 중의 정차·학습은 실제 기록에 남지 않습니다.
 
 차량 신호는 Virtual Console 시나리오로 함께 바꿉니다: `tools/vc/vc.sh up` 다음 `tools/vc/vc.sh play tools/vc/shimpyo-fatigue.vc` (Virtual Console HTTP API, 에뮬레이터 8088 포트).
 
