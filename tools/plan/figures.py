@@ -1273,7 +1273,7 @@ def fig_effect():
     b.append(T(16, 32, "화장실 위기: 급해진 뒤 30분 넘게 화장실에 못 간 여정", 19, 800, INK))
     b.append(T(16, 58, "운전자 + 7살 아이 · 명절 정체 · 정책마다 같은 여정 {:,}번 (엔진 코드 시뮬레이션)".format(main["trips"]),
                15.5, 500, INK3))
-    pol = [("nowLike", "지금처럼", MUTED), ("every2h", "2시간마다 휴게소", MUTED),
+    pol = [("nowLike", "급할 때만 서기", MUTED), ("every2h", "2시간마다 휴게소", MUTED),
            ("shimpyoP07", "쉼표 (수락 70%)", "#5E98FF"), ("shimpyoP10", "쉼표 (수락 100%)", ACCENT)]
     x0, xmax, vmax = 176.0, 452.0, 0.45
     y0, bh, gap = 82.0, 30.0, 16.0
@@ -1318,15 +1318,16 @@ def fig_effect():
                        "middle"))
 
     # cost: compare with the recommended behaviour (2-hour rest), not with "never rest"
-    vs = main["vsNowLike"]
+    # 본문 표와 같은 값: 표가 찍는 값(정차 소수 한 자리, 시간 분)끼리 뺀다 (예전에는 평균끼리 빼서 표 4.3→5.4와 '1.15회'가 어긋났다)
     pp = main["policies"]
-    d_stops = vs["shimpyoP07"]["extraStops"]["mean"] - vs["every2h"]["extraStops"]["mean"]
-    d_min = vs["shimpyoP07"]["extraTripMin"]["mean"] - vs["every2h"]["extraTripMin"]["mean"]
+    shown = lambda x: float("%.1f" % x)  # noqa: E731
+    d_stops = shown(pp["shimpyoP07"]["stopsPerTrip"]["mean"]) - shown(pp["every2h"]["stopsPerTrip"]["mean"])
+    d_min = round(pp["shimpyoP07"]["tripMin"]["mean"]) - round(pp["every2h"]["tripMin"]["mean"])
     r2h = pp["every2h"]["crisisOver30MinShare"]["value"]
     r07 = pp["shimpyoP07"]["crisisOver30MinShare"]["value"]
     cy = y0 + 4 * (bh + gap) + 60
     b.append(TS(16, cy, [("대가 ", 800, INK),
-                         ("권장 습관인 2시간마다 휴게소와 비교하면, 쉼표(수락 70%%)는 여정당 정차 %.2f회·%d분이 늘고 "
+                         ("권장 습관인 2시간마다 휴게소와 비교하면, 쉼표(수락 70%%)는 여정당 정차 %.1f회·%d분이 늘고 "
                           "위기는 %d%%→%d%%로 준다." % (d_stops, round(d_min), round(r2h * 100), round(r07 * 100)),
                           500, INK2)], 15.5))
     b.append(T(16, cy + 23, "2시간마다 규칙은 운전자가 빠짐없이 지킨다고 가정한 값이다. 정차 횟수·소요 시간·연속 주행은 "
