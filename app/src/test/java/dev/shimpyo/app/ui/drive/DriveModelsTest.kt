@@ -2,6 +2,7 @@ package dev.shimpyo.app.ui.drive
 
 import dev.shimpyo.coach.CandidatesState
 import dev.shimpyo.coach.CoachUiState
+import dev.shimpyo.coach.GoToFailure
 import dev.shimpyo.coach.GoToOutcome
 import dev.shimpyo.coach.GoToResult
 import dev.shimpyo.engine.CongestionSegment
@@ -467,6 +468,21 @@ class DriveModelsTest {
         val meta = stopCard(s, driving = false).meta!!
         assertTrue(meta, meta.startsWith("계획 때 52km"))
         assertFalse(meta, meta.contains("뒤 도착"))
+    }
+
+    @Test
+    fun aFullWaypointListSaysWhyOnTheCardAndIsNotRepeatedAsAToast() {
+        // 2026-11-12 에뮬레이터: 내비는 경유지를 둘까지만 받는다. 셋째를 '다시 시도'해도 또 실패하므로 까닭과 할 일을 보인다
+        val a = stop("a", "안성휴게소", 4.0)
+        val full = GoToResult(a, GoToOutcome.FAILED, 1L, GoToFailure.WAYPOINTS_FULL)
+        val s = running.copy(goToResult = full, ahead = listOf(a))
+        val card = stopCard(s, driving = true)
+        assertEquals("내비 경유지가 가득 찼어요", card.context)
+        assertTrue(card.meta.orEmpty(), card.meta.orEmpty().contains("정차한 뒤"))
+        assertTrue("카드가 까닭을 보이면 토스트로 되풀이하지 않는다", cardShowsGoTo(s, driving = true, r = full))
+        val ahead = full.copy(failure = GoToFailure.AHEAD_OF_OTHER_WAYPOINT)
+        assertEquals("경유지 순서를 맞추지 못했어요", stopCard(s.copy(goToResult = ahead), driving = true).context)
+        assertEquals("까닭을 모르면 예전 문구", "경유지를 넣지 못했어요", stopCard(s.copy(goToResult = full.copy(failure = null)), driving = true).context)
     }
 
     @Test

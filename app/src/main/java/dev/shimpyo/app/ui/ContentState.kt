@@ -8,6 +8,7 @@ import androidx.compose.runtime.saveable.Saver
 import androidx.compose.runtime.saveable.listSaver
 import androidx.compose.runtime.setValue
 import dev.shimpyo.coach.CoachUiState
+import dev.shimpyo.coach.GoToFailure
 import dev.shimpyo.coach.GoToOutcome
 import dev.shimpyo.coach.GoToResult
 import dev.shimpyo.coach.voice.Hangul
@@ -133,6 +134,10 @@ fun goToToast(r: GoToResult, shownOnCard: Boolean): String? {
         GoToOutcome.ROUTE_STARTED -> "${Hangul.euRo(name)} 길안내를 시작했어요"
         GoToOutcome.ON_ROUTE -> "${Hangul.iGa(name)} 경로 위에 있어요. 진입로로 들어가세요"
         GoToOutcome.SEARCH_OPENED -> "내비에서 ${Hangul.eulReul(name)} 찾아 두었어요"
-        GoToOutcome.FAILED -> "${Hangul.eulReul(name)} 넣지 못했어요. 다시 시도해 주세요"
+        GoToOutcome.FAILED -> when (r.failure) {
+            GoToFailure.WAYPOINTS_FULL -> "내비 경유지가 가득 차서 ${Hangul.eulReul(name)} 넣지 못했어요"
+            GoToFailure.AHEAD_OF_OTHER_WAYPOINT -> "${Hangul.eulReul(name)} 경유지 순서에 맞춰 넣지 못했어요"
+            null -> "${Hangul.eulReul(name)} 넣지 못했어요. 다시 시도해 주세요"
+        }
     }
 }

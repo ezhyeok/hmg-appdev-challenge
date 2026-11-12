@@ -2,6 +2,7 @@ package dev.shimpyo.app.ui
 
 import androidx.compose.runtime.saveable.SaverScope
 import dev.shimpyo.coach.CoachUiState
+import dev.shimpyo.coach.GoToFailure
 import dev.shimpyo.coach.GoToOutcome
 import dev.shimpyo.coach.GoToResult
 import dev.shimpyo.engine.Facilities
@@ -108,6 +109,10 @@ class ContentStateTest {
         // 주행 화면 카드가 지금 그 결과를 보이면(DriveModels.cardShowsGoTo) 토스트는 띄우지 않는다
         assertNull(goToToast(added, shownOnCard = true))
         assertEquals("안성휴게소를 넣지 못했어요. 다시 시도해 주세요", goToToast(added.copy(outcome = GoToOutcome.FAILED), false))
+        assertEquals(
+            "내비 경유지가 가득 차서 안성휴게소를 넣지 못했어요",
+            goToToast(added.copy(outcome = GoToOutcome.FAILED, failure = GoToFailure.WAYPOINTS_FULL), false),
+        )
         assertEquals("안성휴게소로 길안내를 시작했어요", goToToast(added.copy(outcome = GoToOutcome.ROUTE_STARTED), false))
         assertEquals("안성휴게소가 경로 위에 있어요. 진입로로 들어가세요", goToToast(added.copy(outcome = GoToOutcome.ON_ROUTE), false))
     }

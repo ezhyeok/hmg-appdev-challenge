@@ -119,6 +119,35 @@ class GoToPlannerTest {
     }
 
     @Test
+    fun aFullWaypointListFailsWithItsReasonAndIsNotSentAgain() = runTest {
+        val navi = PromptFakes.Navi(modes = listOf(NaviMode.ROUTE_GUIDING), commands = listOf(WaypointResult.FULL))
+        assertEquals(GoToReport(GoToOutcome.FAILED, GoToFailure.WAYPOINTS_FULL), GoToRunner(navi).report(oksan, parked = false))
+        assertEquals("다시 보내도 내비가 또 버린다", 1, navi.calls.count { it.startsWith("addWaypoint") })
+    }
+
+    @Test
+    fun aStopAheadOfAWaypointTheAppDidNotAddFailsWithItsReason() = runTest {
+        val navi = PromptFakes.Navi(modes = listOf(NaviMode.ROUTE_GUIDING), commands = listOf(WaypointResult.AHEAD_OF_OTHER))
+        assertEquals(GoToReport(GoToOutcome.FAILED, GoToFailure.AHEAD_OF_OTHER_WAYPOINT), GoToRunner(navi).report(oksan, parked = false))
+        assertEquals(1, navi.calls.count { it.startsWith("addWaypoint") })
+    }
+
+    @Test
+    fun anUnconfirmedWaypointHasNoSpecialReason() = runTest {
+        val navi = PromptFakes.Navi(modes = listOf(NaviMode.ROUTE_GUIDING), commands = listOf(WaypointResult.NOT_CONFIRMED))
+        assertEquals(GoToReport(GoToOutcome.FAILED, null), GoToRunner(navi).report(oksan, parked = false))
+    }
+
+    @Test
+    fun failureSpeechSaysWhyAndWhatToDoAfterStopping() {
+        val full = GoToPlanner.speech(GoToOutcome.FAILED, oksan, GoToFailure.WAYPOINTS_FULL)
+        assertTrue(full, full.contains("두 곳") && full.contains("정차"))
+        val ahead = GoToPlanner.speech(GoToOutcome.FAILED, oksan, GoToFailure.AHEAD_OF_OTHER_WAYPOINT)
+        assertTrue(ahead, ahead.contains("경유지") && ahead.contains("정차"))
+        assertEquals("내비에 넣지 못했어요. 화면에서 다시 눌러 주세요", GoToPlanner.speech(GoToOutcome.FAILED, oksan, null))
+    }
+
+    @Test
     fun unknownModeSendsNothing() = runTest {
         val navi = PromptFakes.Navi(modes = listOf(IllegalStateException("query timeout"), NaviMode.UNKNOWN))
         assertEquals(GoToOutcome.FAILED, GoToRunner(navi).run(oksan, parked = false))

@@ -468,16 +468,16 @@ class CoachCore(private val d: CoachDeps) {
         pin.onGoToStarted(live)
         ui.update { copy(goToPending = live) }
         effect("goTo") {
-            val outcome = try {
-                goTo.run(live, e.parked)
+            val report = try {
+                goTo.report(live, e.parked)
             } catch (c: CancellationException) {
                 throw c
             } catch (x: Throwable) {
                 // Error 등: 결과를 못 보내면 들르기가 감시 시간(140초)까지 줄을 막는다
                 log.w("goTo ${live.name} crashed: ${x.message}")
-                GoToOutcome.FAILED
+                GoToReport(GoToOutcome.FAILED)
             }
-            send(Msg.MachineEvent(PromptEvent.GoToFinished(e.requestId, outcome, live)))
+            send(Msg.MachineEvent(PromptEvent.GoToFinished(e.requestId, report.outcome, live, report.failure)))
         }
     }
 
@@ -487,7 +487,7 @@ class CoachCore(private val d: CoachDeps) {
      */
     private fun onGoToResult(r: GoToResult, start: GoToStart?) {
         val ok = r.outcome != GoToOutcome.FAILED
-        log.i("goTo result: ${r.outcome} ${r.stop.name}")
+        log.i("goTo result: ${r.outcome}${r.failure?.let { " ($it)" } ?: ""} ${r.stop.name}")
         // 경로를 바꿨으면 내비를 곧바로 다시 읽는다 (경로 위 안내·검색 열기는 경로를 바꾸지 않았다)
         if (r.outcome == GoToOutcome.WAYPOINT_ADDED || r.outcome == GoToOutcome.ROUTE_STARTED) d.tracker.requestRefresh(routeChanged = true)
         pin.onGoToFinished(r.stop, ok, d.elapsed.elapsedMs())

@@ -81,7 +81,13 @@ sealed interface PromptEvent {
      */
     data class GoTo(val stop: StopCandidate, val urgentPick: Boolean = false) : PromptEvent
     /** StartGoTo 실행 결과. [stop]: 코어가 실행에 쓴 지금 위치 기준 후보 (거리를 말하는 데), 없으면 요청한 후보 */
-    data class GoToFinished(val requestId: Long, val outcome: GoToOutcome, val stop: StopCandidate? = null) : PromptEvent
+    data class GoToFinished(
+        val requestId: Long,
+        val outcome: GoToOutcome,
+        val stop: StopCandidate? = null,
+        /** outcome이 FAILED일 때의 까닭 (경유지가 가득 찼다 등). 화면과 음성이 할 일을 다르게 말한다 */
+        val failure: GoToFailure? = null,
+    ) : PromptEvent
     /** 화면이 들르기 결과 카드를 닫았다 (UiCommand.DismissGoToResult) */
     data object DismissGoToResult : PromptEvent
     /** 세계(시연·실제)·엔진 교체, 기록 지우기 */
@@ -201,7 +207,7 @@ class PromptMachine {
                 val picked = if (event.urgentPick) answerUrgentCard(event.stop, out) else emptyList()
                 requestGoTo(event.stop, (retried + picked).distinct(), ctx, out)
             }
-            is PromptEvent.GoToFinished -> inFlight?.takeIf { it.id == event.requestId }?.let { finish(it, event.outcome, event.stop, ctx, out) }
+            is PromptEvent.GoToFinished -> inFlight?.takeIf { it.id == event.requestId }?.let { finish(it, event.outcome, event.stop, ctx, out, event.failure) }
             // 다시 시도 연결은 끊지 않는다: 화면의 [다시 시도]는 닫기 다음에 같은 곳 GoTo를 보낸다 (서비스 닫힘 검증 D9)
             PromptEvent.DismissGoToResult -> publishResult(null, ctx, out)
             PromptEvent.Reset -> {
@@ -340,10 +346,18 @@ class PromptMachine {
         out += PromptEffect.StartGoTo(req.id, req.stop, lastParked)
     }
 
-    private fun finish(req: GoToRequest, outcome: GoToOutcome, liveStop: StopCandidate?, ctx: PromptContext, out: Effects) {
+    private fun finish(
+        req: GoToRequest,
+        outcome: GoToOutcome,
+        liveStop: StopCandidate?,
+        ctx: PromptContext,
+        out: Effects,
+        failure: GoToFailure? = null,
+    ) {
         inFlight = null
         val stop = liveStop ?: req.stop
-        publishResult(GoToResult(stop, outcome, ctx.coachMs), ctx, out)
+        val why = failure.takeIf { outcome == GoToOutcome.FAILED }
+        publishResult(GoToResult(stop, outcome, ctx.coachMs, why), ctx, out)
         val links = req.links.filter { it.generation == generation }
         val reports = ArrayList<PromptEffect>(2)
         if (outcome == GoToOutcome.FAILED) {
@@ -360,7 +374,7 @@ class PromptMachine {
                 }
             }
         }
-        announce(GoToPlanner.speech(outcome, stop), ctx, out)
+        announce(GoToPlanner.speech(outcome, stop, why), ctx, out)
         reports.forEach { out += it }
         // 대기 요청은 지금 결과를 지우지 않고 시작한다 (실패 카드가 보여야 '다시 눌러 주세요'가 맞다)
         queued?.let {

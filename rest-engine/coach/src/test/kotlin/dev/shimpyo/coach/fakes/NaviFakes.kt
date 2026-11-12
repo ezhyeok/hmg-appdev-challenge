@@ -11,6 +11,7 @@ import dev.shimpyo.coach.NaviPort
 import dev.shimpyo.coach.NaviRouteStatus
 import dev.shimpyo.coach.TbtItem
 import dev.shimpyo.coach.TripEstimate
+import dev.shimpyo.coach.WaypointResult
 import kotlinx.coroutines.awaitCancellation
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
@@ -73,7 +74,7 @@ class FakeNaviPort(private val clock: ElapsedClock) : NaviPort {
     override suspend fun tbt(): List<TbtItem> = answer("tbt") { tbt.invoke() }
     override suspend fun currentLocation(): Fix = answer("currentLocation") { location() }
     override suspend fun tripEstimate(lat: Double, lon: Double, name: String, timeoutMs: Long): TripEstimate = answer("tripEstimate") { trip() }
-    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): Boolean = answer("addWaypoint") { true }
+    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): WaypointResult = answer("addWaypoint") { WaypointResult.ADDED }
 
     /** 실제 내비처럼 길안내를 시작하면 경로가 있는 모드가 된다 */
     override suspend fun startRoute(lat: Double, lon: Double, name: String): Boolean = answer("startRoute") {

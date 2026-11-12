@@ -80,8 +80,14 @@ object GoToPlanner {
         Action.OPEN_SEARCH -> GoToOutcome.SEARCH_OPENED
     }
 
-    /** 결과를 알리는 문장 */
-    fun speech(outcome: GoToOutcome, stop: StopCandidate): String = when (outcome) {
+    /** 결과를 알리는 문장. 실패는 까닭([failure])이 있으면 운전자가 할 일과 함께 (운전 중 내비 조작은 권하지 않는다) */
+    fun speech(outcome: GoToOutcome, stop: StopCandidate, failure: GoToFailure? = null): String = when {
+        outcome != GoToOutcome.FAILED || failure == null -> speech(outcome, stop)
+        failure == GoToFailure.WAYPOINTS_FULL -> "내비 경유지가 이미 두 곳이라 더 넣지 못했어요. 정차한 뒤 내비에서 하나를 지우고 다시 눌러 주세요"
+        else -> "내비에 먼저 넣은 경유지보다 가까워서 순서를 맞추지 못했어요. 정차한 뒤 내비에서 경유지를 정리해 주세요"
+    }
+
+    private fun speech(outcome: GoToOutcome, stop: StopCandidate): String = when (outcome) {
         GoToOutcome.WAYPOINT_ADDED -> "${Hangul.eulReul(stop.name)} 경유지로 넣었어요"
         GoToOutcome.ROUTE_STARTED -> "${Hangul.euRo(stop.name)} 안내할게요"
         GoToOutcome.ON_ROUTE -> {
@@ -103,6 +109,9 @@ object GoToPlanner {
     }
 }
 
+/** 들르기 실행 결과. failure는 outcome이 FAILED일 때의 까닭 (모르면 null) */
+data class GoToReport(val outcome: GoToOutcome, val failure: GoToFailure? = null)
+
 /**
  * 들르기 실행기 (효과 실행). 코어가 PromptEffect.StartGoTo를 받으면 이것을 launch하고, 돌려받은 결과를
  * PromptEvent.GoToFinished로 우편함에 넣는다. 판단은 [GoToPlanner]가 하고 여기는 내비 호출과 다시 시도만 한다.
@@ -115,26 +124,29 @@ class GoToRunner(
     private val log: CoachLog = CoachLog.NONE,
     private val pause: suspend (Long) -> Unit = { delay(it) },
 ) {
-    suspend fun run(stop: StopCandidate, parked: Boolean): GoToOutcome =
-        withTimeoutOrNull(GoToPlanner.MAX_TOTAL_MS) { attempts(stop, parked) }
-            ?: GoToOutcome.FAILED.also { log.w("goTo ${stop.name}: no result in ${GoToPlanner.MAX_TOTAL_MS} ms") }
+    suspend fun run(stop: StopCandidate, parked: Boolean): GoToOutcome = report(stop, parked).outcome
 
-    private suspend fun attempts(stop: StopCandidate, parked: Boolean): GoToOutcome {
+    /** 결과와 실패의 까닭 (경유지가 가득 찼다 등). 코어는 이것을 쓴다 */
+    suspend fun report(stop: StopCandidate, parked: Boolean): GoToReport =
+        withTimeoutOrNull(GoToPlanner.MAX_TOTAL_MS) { attempts(stop, parked) }
+            ?: GoToReport(GoToOutcome.FAILED).also { log.w("goTo ${stop.name}: no result in ${GoToPlanner.MAX_TOTAL_MS} ms") }
+
+    private suspend fun attempts(stop: StopCandidate, parked: Boolean): GoToReport {
         var attempt = 1
         while (true) {
             val failure = when (val r = once(stop, parked)) {
-                is Attempt.Done -> return r.outcome
+                is Attempt.Done -> return r.report
                 is Attempt.Failed -> r.failure
             }
             log.w("goTo ${stop.name}: attempt $attempt failed ($failure)")
-            if (!GoToPlanner.retry(failure, attempt)) return GoToOutcome.FAILED
+            if (!GoToPlanner.retry(failure, attempt)) return GoToReport(GoToOutcome.FAILED)
             attempt++
             pause(GoToPlanner.RETRY_DELAY_MS)
         }
     }
 
     private sealed interface Attempt {
-        data class Done(val outcome: GoToOutcome) : Attempt
+        data class Done(val report: GoToReport) : Attempt
         data class Failed(val failure: GoToPlanner.Failure) : Attempt
     }
 
@@ -143,13 +155,20 @@ class GoToRunner(
         val action = GoToPlanner.action(stop, mode, parked) ?: return Attempt.Failed(GoToPlanner.failureWithoutAction(stop))
         val sent: Boolean? = when (action) {
             GoToPlanner.Action.ON_ROUTE -> true
-            GoToPlanner.Action.ADD_WAYPOINT -> guarded { navi.addWaypoint(stop.lat, stop.lon, stop.name) }
+            GoToPlanner.Action.ADD_WAYPOINT -> when (guarded { navi.addWaypoint(stop.lat, stop.lon, stop.name) }) {
+                WaypointResult.ADDED -> true
+                WaypointResult.NOT_CONFIRMED -> false
+                null -> null
+                // 다시 보내도 같다: 까닭과 함께 끝낸다 (운전자가 정차한 뒤 내비에서 정리해야 한다)
+                WaypointResult.FULL -> return Attempt.Done(GoToReport(GoToOutcome.FAILED, GoToFailure.WAYPOINTS_FULL))
+                WaypointResult.AHEAD_OF_OTHER -> return Attempt.Done(GoToReport(GoToOutcome.FAILED, GoToFailure.AHEAD_OF_OTHER_WAYPOINT))
+            }
             GoToPlanner.Action.START_ROUTE -> guarded { navi.startRoute(stop.lat, stop.lon, stop.name) }
             // 검색은 '열었다/못 열었다'만 알 수 있다. 못 열었으면 보내지 못한 것과 같다
             GoToPlanner.Action.OPEN_SEARCH -> guarded { navi.showPlaceSearch(stop.name) }?.takeIf { it }
         }
         return when (sent) {
-            true -> Attempt.Done(GoToPlanner.outcome(action))
+            true -> Attempt.Done(GoToReport(GoToPlanner.outcome(action)))
             null -> Attempt.Failed(GoToPlanner.Failure.NOT_SENT)
             false -> Attempt.Failed(GoToPlanner.Failure.UNCONFIRMED)
         }

@@ -44,8 +44,11 @@ interface NaviPort {
     suspend fun currentLocation(): Fix
     /** requestTrip: 길안내를 시작하지 않고 거리·ETA만 받는다 */
     suspend fun tripEstimate(lat: Double, lon: Double, name: String, timeoutMs: Long): TripEstimate
-    /** 경유지 추가. 내비가 경유지로 넣었다고 확인되면 true */
-    suspend fun addWaypoint(lat: Double, lon: Double, name: String): Boolean
+    /**
+     * 경유지 추가. 넣었다고 확인되면 ADDED, 경유지가 이미 둘이면 FULL(내비가 말없이 버린다, 2026-11-12), 밖에서 넣은 경유지보다
+     * 앞이라 순서를 맞출 수 없으면 AHEAD_OF_OTHER, 보냈지만 확인하지 못했으면 NOT_CONFIRMED. 까닭마다 운전자에게 할 말이 다르다
+     */
+    suspend fun addWaypoint(lat: Double, lon: Double, name: String): WaypointResult
     /** 목적지로 길안내 시작. 경로가 있는 길안내 모드(NaviMode.hasRoute)가 되면 true */
     suspend fun startRoute(lat: Double, lon: Double, name: String): Boolean
     /** 좌표를 모르는 곳: 내비 장소 검색 화면을 연다. 열었으면 true */

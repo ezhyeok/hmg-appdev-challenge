@@ -23,6 +23,7 @@ import dev.shimpyo.coach.StopLog
 import dev.shimpyo.coach.TripHeartbeat
 import dev.shimpyo.coach.UiCommand
 import dev.shimpyo.coach.UiSink
+import dev.shimpyo.coach.WaypointResult
 import dev.shimpyo.coach.VoicePort
 import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.Occupant
@@ -146,7 +147,7 @@ class CommandNavi(private val inner: FakeNaviPort) : NaviPort by inner {
 
     val commands = mutableListOf<Command>()
 
-    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): Boolean {
+    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): WaypointResult {
         commands += Command("addWaypoint", name, lat, lon)
         return inner.addWaypoint(lat, lon, name)
     }

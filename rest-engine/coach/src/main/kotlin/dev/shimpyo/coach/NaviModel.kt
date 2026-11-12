@@ -126,3 +126,14 @@ enum class NaviChange {
     WAYPOINT_ARRIVED,
     DESTINATION_ARRIVED,
 }
+
+/** 경유지 추가의 결과 (NaviPort.addWaypoint) */
+enum class WaypointResult {
+    ADDED,
+    /** 경유지가 이미 둘이라 내비가 받지 않는다 */
+    FULL,
+    /** 밖에서 넣은 경유지보다 앞이라 순서를 맞출 수 없어 보내지 않았다 */
+    AHEAD_OF_OTHER,
+    /** 보냈지만 들어갔는지 확인하지 못했다 */
+    NOT_CONFIRMED,
+}

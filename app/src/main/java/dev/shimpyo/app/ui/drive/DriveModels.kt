@@ -12,6 +12,7 @@ import dev.shimpyo.app.ui.plannedDistanceText
 import dev.shimpyo.app.ui.theme.DriveLimits
 import dev.shimpyo.coach.CandidatesState
 import dev.shimpyo.coach.CoachUiState
+import dev.shimpyo.coach.GoToFailure
 import dev.shimpyo.coach.GoToOutcome
 import dev.shimpyo.coach.GoToResult
 import dev.shimpyo.engine.Level
@@ -344,14 +345,21 @@ fun failedGoTo(state: CoachUiState): GoToResult? {
 fun cardShowsGoTo(state: CoachUiState, driving: Boolean, r: GoToResult): Boolean {
     val settled = if (state.goToPending?.id == r.stop.id) state.copy(goToPending = null) else state
     val card = stopCard(settled, driving)
-    return card.title == r.stop.name && card.context == goToContext(r.outcome)
+    return card.title == r.stop.name && card.context == goToContext(r.outcome, r.failure)
 }
 
-/** 경유지·길안내 요청이 실패했다: 넣었다고 말하지 않고 다시 시도를 연다 (UI 감사 #3) */
+/**
+ * 경유지·길안내 요청이 실패했다: 넣었다고 말하지 않고 다시 시도를 연다 (UI 감사 #3). 까닭을 알면(경유지가 가득 참 등) 할 일을
+ * 함께 보인다: 그 경우 다시 눌러도 또 실패한다 (2026-11-12 에뮬레이터, 내비는 경유지를 둘까지만 받는다)
+ */
 private fun failedGoToCard(r: GoToResult) = StopCardModel(
-    context = "경유지를 넣지 못했어요",
+    context = goToContext(GoToOutcome.FAILED, r.failure),
     title = r.stop.name,
-    meta = "다시 시도하거나 내비에서 넣어 주세요",
+    meta = when (r.failure) {
+        GoToFailure.WAYPOINTS_FULL -> "정차한 뒤 내비에서 경유지를 하나 지워 주세요"
+        GoToFailure.AHEAD_OF_OTHER_WAYPOINT -> "정차한 뒤 내비에서 경유지를 정리해 주세요"
+        null -> "다시 시도하거나 내비에서 넣어 주세요"
+    },
     chips = emptyList(),
     icon = ShimpyoIcons.Navigation,
     askingLevel = Level.WATCH,
@@ -370,13 +378,17 @@ private fun planCard(state: CoachUiState, maxChips: Int): StopCardModel {
     return StopCardModel("다음 계획", first.stop.name, meta, chips, ShimpyoIcons.Route, askingLevel = null)
 }
 
-/** 들르기·안내 요청 결과의 맥락 문구. FAILED는 [failedGoToCard]가 따로 그린다 */
-fun goToContext(outcome: GoToOutcome): String = when (outcome) {
+/** 들르기·안내 요청 결과의 맥락 문구. FAILED는 [failedGoToCard]가 이 문구와 할 일로 그린다 */
+fun goToContext(outcome: GoToOutcome, failure: GoToFailure? = null): String = when (outcome) {
     GoToOutcome.WAYPOINT_ADDED -> "경유지로 넣었어요"
     GoToOutcome.ROUTE_STARTED -> "길안내를 시작했어요"
     GoToOutcome.ON_ROUTE -> "경로 위 · 진입로로 들어가세요"
     GoToOutcome.SEARCH_OPENED -> "내비에서 찾아 두었어요"
-    GoToOutcome.FAILED -> "경유지를 넣지 못했어요"
+    GoToOutcome.FAILED -> when (failure) {
+        GoToFailure.WAYPOINTS_FULL -> "내비 경유지가 가득 찼어요"
+        GoToFailure.AHEAD_OF_OTHER_WAYPOINT -> "경유지 순서를 맞추지 못했어요"
+        null -> "경유지를 넣지 못했어요"
+    }
 }
 
 private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChips: Int, who: String?): StopCardModel {

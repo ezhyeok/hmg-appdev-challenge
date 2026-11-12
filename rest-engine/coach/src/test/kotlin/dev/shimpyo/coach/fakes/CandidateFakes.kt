@@ -10,6 +10,7 @@ import dev.shimpyo.coach.NaviRouteStatus
 import dev.shimpyo.coach.StopIndex
 import dev.shimpyo.coach.TbtItem
 import dev.shimpyo.coach.TripEstimate
+import dev.shimpyo.coach.WaypointResult
 import dev.shimpyo.coach.TripEstimator
 import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.StopCandidate
@@ -169,7 +170,7 @@ class TripNaviPort(var answer: suspend (lat: Double, lon: Double, name: String, 
     override suspend fun destination(): NaviDestination = error("not used")
     override suspend fun tbt(): List<TbtItem> = error("not used")
     override suspend fun currentLocation(): Fix = error("not used")
-    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): Boolean = error("not used")
+    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): WaypointResult = error("not used")
     override suspend fun startRoute(lat: Double, lon: Double, name: String): Boolean = error("not used")
     override suspend fun showPlaceSearch(keyword: String): Boolean = error("not used")
     override val changes: Flow<NaviChange> = emptyFlow()

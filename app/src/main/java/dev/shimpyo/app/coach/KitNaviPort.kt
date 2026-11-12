@@ -19,6 +19,7 @@ import dev.shimpyo.coach.NaviRouteStatus
 import dev.shimpyo.coach.TbtItem
 import dev.shimpyo.coach.TbtType
 import dev.shimpyo.coach.TripEstimate
+import dev.shimpyo.coach.WaypointResult
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.mapNotNull
@@ -97,12 +98,18 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
      * - 그 경유지보다 뒤면 그대로 붙인다.
      * - 앞이고 그 경유지를 이 앱이 넣었으면(좌표를 안다) 목적지는 그대로 두고 경유지를 순서대로 다시 정한다 (NaviKit.setWaypoints).
      * - 앞인데 밖에서 넣은 경유지면(좌표를 모른다) 넣지 않는다(false): 지키지도 못하고, 붙이면 지나쳐 갔다 돌아온다.
-     * 경유지가 없거나, 이미 둘이거나(내비가 버린다 → false), 같은 곳이 이미 있으면(true) kit이 처리한다.
+     * 같은 곳이 이미 있으면 kit이 처리한다(true). 경유지가 이미 둘이면 보내지 않는다: 내비가 말없이 버린다(FULL, 2026-11-12).
+     * 결과는 까닭과 함께 낸다(운전자에게 할 말이 다르다).
      */
-    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): Boolean {
+    override suspend fun addWaypoint(lat: Double, lon: Double, name: String): WaypointResult {
         val request = RequestWaypointInfo(latitude = lat, longitude = lon, poiName = name, waypointIndex = WaypointIndex.FIRST, poiId = "", address = "", poiSubId = "")
-        val only = runCatching { navi.waypoints() }.getOrNull()?.singleOrNull()
-        if (only == null || only.name == name) return remember(request, navi.addWaypoint(request))
+        val list = runCatching { navi.waypoints() }.getOrNull()
+        if (list != null && list.none { it.name == name } && list.size >= NaviKit.MAX_WAYPOINTS) {
+            Log.i("Shimpyo", "waypoint $name: the navi already has ${list.size} waypoints (${list.joinToString { it.name }})")
+            return WaypointResult.FULL
+        }
+        val only = list?.singleOrNull()
+        if (only == null || only.name == name) return result(request, navi.addWaypoint(request))
         val newDistanceM = try {
             navi.tripEstimate(TripRequest(lat, lon, "", name, ""), timeoutMs = ORDER_TRIP_TIMEOUT_MS).distance.toDouble()
         } catch (e: CancellationException) {
@@ -114,15 +121,18 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
         val plan = WaypointOrder.plan(only.remainDistance.toDouble(), newDistanceM, existingKnown = existing != null)
         Log.i("Shimpyo", "waypoint $name: ${newDistanceM?.toLong()}m, existing ${only.name} ${only.remainDistance}m -> $plan")
         return when (plan) {
-            WaypointOrder.Plan.APPEND -> remember(request, navi.addWaypoint(request))
+            WaypointOrder.Plan.APPEND -> result(request, navi.addWaypoint(request))
             WaypointOrder.Plan.INSERT_BEFORE -> {
                 val d = navi.destination()
                 val destination = RouteInfo(latitude = d.latitude, longitude = d.longitude, poiName = d.name, poiId = "", address = d.address, poiSubId = "")
-                remember(request, navi.setWaypoints(destination, listOf(request, existing!!)))
+                result(request, navi.setWaypoints(destination, listOf(request, existing!!)))
             }
-            WaypointOrder.Plan.REFUSE -> false
+            WaypointOrder.Plan.REFUSE -> WaypointResult.AHEAD_OF_OTHER
         }
     }
+
+    private fun result(request: RequestWaypointInfo, added: Boolean): WaypointResult =
+        if (remember(request, added)) WaypointResult.ADDED else WaypointResult.NOT_CONFIRMED
 
     private fun remember(request: RequestWaypointInfo, added: Boolean): Boolean {
         if (added) request.poiName?.let { sent[it] = request }

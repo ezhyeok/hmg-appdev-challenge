@@ -131,8 +131,19 @@ enum class GoToOutcome {
     FAILED,
 }
 
-/** at: 코치 시각 */
-data class GoToResult(val stop: StopCandidate, val outcome: GoToOutcome, val at: Long)
+/**
+ * 들르기가 실패한 까닭 중 운전자가 할 수 있는 일이 다른 것. 그 밖의 실패(내비가 답하지 않음 등)는 null이다.
+ * (2026-11-12 에뮬레이터: Pleos 내비는 경유지를 둘까지만 받고 셋째는 말없이 버린다. '다시 눌러 주세요'로는 해결되지 않는다)
+ */
+enum class GoToFailure {
+    /** 내비 경유지가 이미 둘이다 */
+    WAYPOINTS_FULL,
+    /** 밖에서 넣은 경유지(좌표를 모른다)보다 가까워 순서를 맞출 수 없다 (뒤에 붙이면 지나쳐 갔다 돌아온다) */
+    AHEAD_OF_OTHER_WAYPOINT,
+}
+
+/** at: 코치 시각. failure: outcome이 FAILED일 때 그 까닭 (모르면 null) */
+data class GoToResult(val stop: StopCandidate, val outcome: GoToOutcome, val at: Long, val failure: GoToFailure? = null)
 
 /** 화면 → 서비스 명령 */
 sealed interface UiCommand {

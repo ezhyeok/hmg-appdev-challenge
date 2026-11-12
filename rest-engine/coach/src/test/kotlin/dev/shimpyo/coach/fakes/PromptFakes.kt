@@ -12,6 +12,7 @@ import dev.shimpyo.coach.StopIndex
 import dev.shimpyo.coach.StopLog
 import dev.shimpyo.coach.TbtItem
 import dev.shimpyo.coach.TripEstimate
+import dev.shimpyo.coach.WaypointResult
 import dev.shimpyo.engine.Facilities
 import dev.shimpyo.engine.StopCandidate
 import dev.shimpyo.engine.StopKind
@@ -98,14 +99,20 @@ object PromptFakes {
 
         private fun next(q: ArrayDeque<Any>): Any = if (q.size > 1) q.removeFirst() else q.first()
 
-        private suspend fun command(label: String): Boolean {
+        private suspend fun raw(label: String): Any {
             calls += label
             return when (val v = next(commands)) {
                 HANG -> awaitCancellation()
                 PORT_TIMEOUT -> withTimeout(1) { awaitCancellation() }
                 is Throwable -> throw v
-                else -> v as Boolean
+                else -> v
             }
+        }
+
+        /** 참·거짓 명령. 목록에 WaypointResult를 넣었으면 ADDED만 참이다 */
+        private suspend fun command(label: String): Boolean = when (val v = raw(label)) {
+            is WaypointResult -> v == WaypointResult.ADDED
+            else -> v as Boolean
         }
 
         override suspend fun connect() {}
@@ -119,7 +126,13 @@ object PromptFakes {
             }
         }
 
-        override suspend fun addWaypoint(lat: Double, lon: Double, name: String) = command("addWaypoint:$name")
+        /** 목록에 WaypointResult를 넣으면 그대로, 참·거짓이면 ADDED·NOT_CONFIRMED */
+        override suspend fun addWaypoint(lat: Double, lon: Double, name: String): WaypointResult =
+            when (val v = raw("addWaypoint:$name")) {
+                is WaypointResult -> v
+                true -> WaypointResult.ADDED
+                else -> WaypointResult.NOT_CONFIRMED
+            }
         override suspend fun startRoute(lat: Double, lon: Double, name: String) = command("startRoute:$name")
         override suspend fun showPlaceSearch(keyword: String) = command("search:$keyword")
 

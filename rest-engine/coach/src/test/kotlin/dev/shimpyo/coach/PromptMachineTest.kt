@@ -236,6 +236,24 @@ class PromptMachineTest {
     }
 
     @Test
+    fun aFullWaypointListIsShownAndSpokenWithItsReason() {
+        // 2026-11-12 에뮬레이터: Pleos 내비는 경유지를 둘까지만 받고 셋째는 말없이 버린다. 예전에는 '다시 눌러 주세요'라고만 해서
+        // 다시 눌러도 또 실패했다. 실패에 이유를 실어 화면과 음성이 왜 안 되는지, 정차한 뒤 무엇을 하면 되는지 말한다
+        val r = Rig()
+        r.tick(p1)
+        r.on(Tapped(key(p1), true))
+        val failed = r.on(GoToFinished(1, GoToOutcome.FAILED, failure = GoToFailure.WAYPOINTS_FULL))
+        assertEquals(
+            listOf(
+                PublishGoToResult(GoToResult(oksan, GoToOutcome.FAILED, t0, GoToFailure.WAYPOINTS_FULL)),
+                Speak(GoToPlanner.speech(GoToOutcome.FAILED, oksan, GoToFailure.WAYPOINTS_FULL)),
+            ),
+            failed,
+        )
+        assertTrue("실패는 엔진에 수락으로 알리지 않는다", failed.none { it is Report })
+    }
+
+    @Test
     fun aFailedGoToShowsRetryAndTheRetryStillReportsTheAccept() {
         val r = Rig()
         r.tick(p1)
