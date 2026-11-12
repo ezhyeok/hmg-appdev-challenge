@@ -43,6 +43,8 @@ class DemoScenario internal constructor(
     val routeTotalM: Double,
     /** 시연 시각이 실제보다 몇 배 빨리 흐르는지 */
     val timeScale: Double = 1.0,
+    /** 화면에 보일 목적지 이름 (가상 경로라 실제 내비의 목적지가 아니다). 도심 주행처럼 없으면 null */
+    val destinationName: String? = null,
 ) {
     /** 경로 위 정체 한 구간: 경로 시작점 기준 시작 거리(m), 길이(m), 지나는 데 걸리는 시간(초) */
     data class Jam(val startM: Double, val lengthM: Double, val durationS: Double)
@@ -266,6 +268,7 @@ private object DemoScenarios {
             drivenMin = 46,
             congestion = listOf(DemoScenario.Jam(jamStart, jamLength, 60 * 60.0)),
             routeTotalM = 310_000.0,
+            destinationName = "부산",
         )
     }
 
@@ -280,6 +283,7 @@ private object DemoScenarios {
         drivenMin = 95,
         congestion = emptyList(),
         routeTotalM = 250_000.0,
+        destinationName = "대구",
     )
 
     fun urgent(): DemoScenario = DemoScenario(
@@ -299,11 +303,14 @@ private object DemoScenarios {
         path = listOf(DemoRun.Pt(37.01354, 127.14516)) + gyeongbuSouth.dropWhile { it.lat > 37.0 },
         metersPerSecond = 0.0,
         occupants = listOf(driver(), Occupant("kid", OccupantType.CHILD, ageYears = 7, label = "7살 아이")),
-        timeOfDay = null,
+        // 점심때 안성휴게소에서 쉬는 장면 (20분 넘게 서면 식사 정차 보정이 보인다). 예전에는 실제 시각을 따라 새벽에 시연하면
+        // 밤 문구('깬 지 18시간+')가 나왔다
+        timeOfDay = LocalTime.of(12, 40),
         drivenMin = 110,
         congestion = emptyList(),
         routeTotalM = 300_000.0,
         timeScale = 10.0,
+        destinationName = "부산",
     )
 }
 

@@ -133,8 +133,8 @@ sealed class CoachWorld {
         override fun engineMemory(loaded: PersonalMemory): PersonalMemory = PersonalMemory()
         override val engineConfig: CoachConfig
             get() = BASE_CONFIG.copy(promptTtlS = (BASE_CONFIG.promptTtlS * run.scenario.timeScale).roundToInt())
-        /** 시연 경로는 가상이라 실제 내비의 목적지를 보이지 않는다 */
-        override fun destinationName(navi: String?): String? = null
+        /** 시연 경로는 가상이라 실제 내비의 목적지 대신 시나리오의 목적지를 보인다 */
+        override fun destinationName(navi: String?): String? = run.scenario.destinationName
 
         /** 사용자가 이 시연의 탑승자를 고쳤는지 (아니면 시나리오가 정한 탑승자다) */
         val occupantsEdited: Boolean get() = occupantsOverride != null

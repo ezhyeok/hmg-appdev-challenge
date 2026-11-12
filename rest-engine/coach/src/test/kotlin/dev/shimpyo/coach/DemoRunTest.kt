@@ -57,13 +57,26 @@ class DemoRunTest {
     }
 
     @Test
-    fun stopScenarioStartsAtTheRealTimeWithoutAJumpThenRunsTenTimesFaster() {
+    fun stopScenarioIsALunchStopAtAnseongThenRunsTenTimesFaster() {
+        // 예전에는 시각 지정이 없어 실제 시각을 따랐다: 새벽에 시연하면 '깬 지 18시간+'·'졸음이 오기 쉬운 시간' 같은 밤 문구가
+        // 나왔다(2026-11-13 캡처). 정차 시연은 점심때 안성휴게소에서 쉬는 장면이다 (식사 정차 보정도 보인다)
         val clock = WorldClock(wallStart)
         val run = checkNotNull(start("stop", clock))
-        assertEquals("시각 지정이 없으면 시작 순간은 실제 시각과 같다 (연속)", wallStart, run.now())
+        val expected = ZonedDateTime.of(2026, 11, 12, 12, 40, 0, 0, seoul).toInstant().toEpochMilli()
+        assertEquals(expected, run.now())
         clock.advance(1_000)
-        assertEquals(wallStart + 10_000, run.now())
+        assertEquals(expected + 10_000, run.now())
         assertEquals("정차 시연은 움직이지 않는다", 0.0, run.travelledM(), 0.0)
+    }
+
+    @Test
+    fun eachDrivingDemoNamesItsDestination() {
+        // 시연 경로에 목적지 이름이 없으면 계획 화면이 '목적지 없음 · 남은 300km'라고 했다 (2026-11-13 캡처)
+        val clock = WorldClock(wallStart)
+        assertEquals("부산", checkNotNull(start("holiday", clock)).scenario.destinationName)
+        assertEquals("부산", checkNotNull(start("stop", clock)).scenario.destinationName)
+        assertEquals("대구", checkNotNull(start("fatigue", clock)).scenario.destinationName)
+        assertEquals("도심 주행은 목적지 없이", null, checkNotNull(start("urgent", clock)).scenario.destinationName)
     }
 
     @Test

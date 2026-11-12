@@ -75,6 +75,12 @@ class CoachWorldTest {
     }
 
     @Test
+    fun theDemoShowsItsScenarioDestinationNotTheRealNavis() {
+        assertEquals("부산", demo().destinationName("옥산휴게소"))
+        assertEquals("실제 세계는 내비의 목적지", "옥산휴게소", real.destinationName("옥산휴게소"))
+    }
+
+    @Test
     fun demoOutputsComeFromTheRunAndTheRealPositionIsOnlyOverlaid() {
         val d = demo()
         clock.advance(10_000)
