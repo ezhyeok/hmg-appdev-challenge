@@ -1,6 +1,7 @@
 package dev.shimpyo.coach.closure
 
 import dev.shimpyo.coach.CandidatesState
+import dev.shimpyo.coach.CoachWorld
 import dev.shimpyo.coach.IntentInterpreter
 import dev.shimpyo.coach.UiCommand
 import dev.shimpyo.coach.VoiceState
@@ -55,14 +56,16 @@ class UiSeamPinnedTest {
         val a0 = rig.state.ahead.first { it.id == "oksan" }.routeDistanceM!!
         rig.run(3_000)
         val d1 = checkNotNull(rig.state.promptStop?.routeDistanceM)
-        assertTrue("시연 차는 1초에 200m: 3초 뒤 ${d0.toInt()} → ${d1.toInt()}", d1 <= d0 - 500.0)
+        // 시연 차는 1초에 200m지만 카드가 떠 있는 동안은 4배 느리다 (CoachWorld.QUESTION_PACE): 3초에 150m
+        val moved = 3 * 200.0 * CoachWorld.QUESTION_PACE
+        assertTrue("카드가 떠 있는 동안 1초에 50m: 3초 뒤 ${d0.toInt()} → ${d1.toInt()}", d1 <= d0 - moved + 30.0)
         // 앞쪽 후보(계획 타임라인·경로 띠)도 매초 준다 (UI #19: 예전에는 20초마다)
-        assertTrue("ahead도 매 틱 줄어든다", rig.state.ahead.first { it.id == "oksan" }.routeDistanceM!! <= a0 - 500.0)
+        assertTrue("ahead도 매 틱 줄어든다", rig.state.ahead.first { it.id == "oksan" }.routeDistanceM!! <= a0 - moved + 30.0)
         assertEquals(listOf("LAST_CHANCE_CONGESTION"), rig.state.promptReasons.map { it.code })
         assertEquals("같은 카드", key, rig.state.prompt!!.id)
 
-        // 엔진이 거둔다 (500m 안): 카드·이유·장소가 함께 사라지고, 늦은 '들르기'는 아무 일도 하지 않는다
-        rig.runUntil(40_000) { rig.state.prompt == null } ?: error("카드가 내려가지 않았다")
+        // 엔진이 거두거나(500m 안) 카드 수명이 끝난다: 카드·이유·장소가 함께 사라지고, 늦은 '들르기'는 아무 일도 하지 않는다
+        rig.runUntil(70_000) { rig.state.prompt == null } ?: error("카드가 내려가지 않았다")
         assertTrue(rig.state.promptReasons.isEmpty())
         assertNull(rig.state.promptStop)
         rig.command(UiCommand.Answer(key, true))
@@ -180,7 +183,8 @@ class UiSeamPinnedTest {
         assertEquals("전제: 첫 계획 정차는 곧 지나칠 앞쪽 휴게소", "oksan", first)
         val gen = rig.state.planGeneration
         assertTrue("요청에 답한 계획에는 번호가 있다", gen > 0L)
-        rig.runUntil(120_000) { rig.state.ahead.none { it.id == first } } ?: error("첫 정차를 지나치지 않았다")
+        // 옥산 질문 카드가 떠 있는 동안은 시연이 4배 느리다 (CoachWorld.QUESTION_PACE): 카드 수명(약 55초)만큼 더 걸린다
+        rig.runUntil(180_000) { rig.state.ahead.none { it.id == first } } ?: error("첫 정차를 지나치지 않았다")
         val late = rig.runUntil(35_000) { rig.state.plan!!.stops.none { it.stop.id == first } }
         assertNotNull("지나친 정차는 35초 안에 계획에서 빠진다 (30초 주기 또는 후보가 바뀔 때)", late)
         assertTrue("남은 계획 정차는 모두 앞쪽 후보에 있다", rig.state.plan!!.stops.all { p -> rig.state.ahead.any { it.id == p.stop.id } })

@@ -171,8 +171,9 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 | 상태 | 시계 | 이유 |
 |---|---|---|
 | `CoachInput.now`, 엔진 | 세계의 코치 시각 | 엔진은 입력 시각으로만 판단한다. 시연은 가상 |
-| `DemoRun.now()` | 시작 실제 시각 + 시계 차이 + 시작 뒤 경과 × 배속 | 벽시계(NTP)가 바뀌어도 시연 시각이 튀지 않는다 |
-| 시연 진행 거리 | 경과 | 예전에는 벽시계라 NTP 보정에 시연 차가 순간 이동했다 |
+| `DemoRun.now()` | 시작 실제 시각 + 시계 차이 + 시연 진행 × 배속. 시연 진행 = 경과 × 빠르기(`pace`) | 벽시계(NTP)가 바뀌어도 시연 시각이 튀지 않는다 |
+| 시연 진행 거리 | 시연 진행 × 속도 | 예전에는 벽시계라 NTP 보정에 시연 차가 순간 이동했다 |
+| 시연 빠르기 | 질문 카드가 떠 있는 동안 0.25, 아니면 1 (`CoachWorld.questionShown`, `WorldSwitch.questionShown`) | 귀성길 카드가 실제 13~25초 만에 지나가 PT에서 설명하고 누를 시간이 빠듯했다(2026-11-13). 시각과 거리에 같이 곱해 가상 속도는 그대로다. 바꾸는 순간까지의 진행을 이어 받은 새 `DemoRun`을 같은 엔진·여정·세대로 끼우므로 세계 전환이 아니다 (`pacingSlowsTimeAndDistanceTogetherWithoutAJump`, `whileTheCardIsUpTheDemoCarMovesFourTimesSlowerAtTheSameVirtualSpeed`) |
 | 시연 날짜 | 주입한 실제 시각의 서울 날짜 | 예전에는 시스템 시계라 테스트가 날짜에 따라 달랐다 |
 | `TripAnchor`, `ParkState.since` | 그 여정을 가진 세계의 코치 시각 | 세계마다 여정이 따로다. 실제 여정의 시계는 벽시계라 시연 옆에 있다가 돌아와도 비교할 수 있다 |
 | 연속 주행 누적 | 그 세계 코치 시각의 증분 (0~2분) | 엔진 FatigueModel과 같게 (시연 배속에서도 시연 엔진과 맞는다) |

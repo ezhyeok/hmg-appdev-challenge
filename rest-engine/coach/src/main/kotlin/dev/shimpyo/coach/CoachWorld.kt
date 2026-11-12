@@ -62,6 +62,13 @@ sealed class CoachWorld {
     open fun destinationName(navi: String?): String? = navi
 
     /**
+     * 질문 카드가 떴거나([shown]) 내려갔다. 시연은 카드가 떠 있는 동안 시각과 위치를 함께 [QUESTION_PACE]로 늦춘다(가상 속도는
+     * 그대로라 엔진의 판단은 같다): 7.2배속 귀성길에서 옥산휴게소 카드가 실제 13~25초 만에 지나가, PT에서 카드를 설명하고 누를
+     * 시간이 빠듯했다 (2026-11-13). 실제 세계는 바꾸지 않는다. 바뀐 것이 없으면 이 값 그대로
+     */
+    open fun questionShown(shown: Boolean, elapsedNow: Long): CoachWorld = this
+
+    /**
      * 엔진 프로필을 만드는 단 한 곳. 탑승자는 이 세계의 것, 수면 시간 등은 설정, 여정 값은 [anchor]에서 온다.
      * 탑승자·설정이 바뀌어도 같은 기준점이면 tripStart가 같아 엔진이 여정을 이어 간다 (서비스 감사 D4, 구조 리뷰 D5).
      */
@@ -136,6 +143,11 @@ sealed class CoachWorld {
         /** 시연 경로는 가상이라 실제 내비의 목적지 대신 시나리오의 목적지를 보인다 */
         override fun destinationName(navi: String?): String? = run.scenario.destinationName
 
+        override fun questionShown(shown: Boolean, elapsedNow: Long): Demo {
+            val next = run.paced(if (shown) QUESTION_PACE else 1.0, elapsedNow)
+            return if (next === run) this else Demo(next, occupantsOverride)
+        }
+
         /** 사용자가 이 시연의 탑승자를 고쳤는지 (아니면 시나리오가 정한 탑승자다) */
         val occupantsEdited: Boolean get() = occupantsOverride != null
 
@@ -143,7 +155,13 @@ sealed class CoachWorld {
         fun withOccupants(list: List<Occupant>): Demo = Demo(run, list)
     }
 
-    private companion object {
-        val BASE_CONFIG = CoachConfig()
+    companion object {
+        private val BASE_CONFIG = CoachConfig()
+
+        /**
+         * 질문 카드가 떠 있는 동안의 시연 빠르기. 귀성길(실제 1초에 200m)이 1초에 50m가 되어, 진입로 2km 전에 물어도 엔진이 카드를
+         * 거두는 500m 앞까지 30초가 남는다. 그보다 멀면 카드의 실제 수명(PromptMachine.ENGINE_CARD_MS 45초)이 먼저 끝난다
+         */
+        const val QUESTION_PACE = 0.25
     }
 }

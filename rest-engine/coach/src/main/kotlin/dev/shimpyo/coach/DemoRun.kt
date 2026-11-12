@@ -81,8 +81,10 @@ class DemoScenario internal constructor(
  * 예전 DemoDirector는 시나리오·시작 시각·시계 차이를 세 필드로 따로 바꿔서 다른 스레드가 섞어 읽을 수 있었다 (구조 리뷰 Q2).
  *
  * 시각 (docs/design/coach-layer/world.md '시계' 표)
- * - 시연 시각 [now] = 시작한 실제 시각 + 시계 차이 + 시작 뒤 경과(ElapsedClock) × 배속. 엔진과 시연 세계 상태가 쓴다.
- * - 진행 거리 = 시작 뒤 경과(ElapsedClock) × 속도. 벽시계(NTP 보정)가 바뀌어도 시연 차가 순간 이동하지 않는다.
+ * - 시연 진행 = 시작 뒤 경과(ElapsedClock) × 빠르기([pace]). 빠르기를 바꾸면 그 순간까지의 진행을 이어 받은 새 값을 만든다 ([paced])
+ * - 시연 시각 [now] = 시작한 실제 시각 + 시계 차이 + 시연 진행 × 배속. 엔진과 시연 세계 상태가 쓴다.
+ * - 진행 거리 = 시연 진행 × 속도. 벽시계(NTP 보정)가 바뀌어도 시연 차가 순간 이동하지 않는다.
+ * 빠르기는 시각과 거리에 똑같이 곱해지므로 엔진이 보는 가상 속도는 빠르기와 상관없이 시나리오 그대로다.
  *
  * 경로 위치 캐시(후보 id → 경로 위 위치)는 경로가 바뀌지 않으니 결과를 바꾸지 않는 메모다. 시연마다 따로 둔다.
  */
@@ -95,23 +97,45 @@ class DemoRun private constructor(
     /** 시작 순간 시연 시각 - 실제 시각 */
     val clockOffsetMs: Long,
     private val elapsed: ElapsedClock,
+    /**
+     * 시연의 빠르기. 1이면 시나리오대로, 0.25면 시각과 위치가 함께 4배 느리게 간다 (질문 카드가 떠 있는 동안,
+     * CoachWorld.questionShown)
+     */
+    val pace: Double = 1.0,
+    /** 지금 빠르기가 시작된 경과 시각 (ElapsedClock) */
+    private val paceSinceElapsed: Long = startedAtElapsed,
+    /** 그때까지의 시연 진행 (ms, 배속 전) */
+    private val progressAtPaceMs: Double = 0.0,
+    /** 경로 위치 캐시. 빠르기만 바꾼 값은 같은 시연이라 함께 쓴다 */
+    private val along: ConcurrentHashMap<String, Double> = ConcurrentHashMap(),
 ) : CoachClock {
     data class Pt(val lat: Double, val lon: Double)
-
-    private val along = ConcurrentHashMap<String, Double>()
 
     val name: String get() = scenario.name
 
     /** 시작 순간의 시연 시각 */
     val startedAt: Long get() = startedAtWall + clockOffsetMs
 
-    override fun now(): Long = startedAt + (sinceStartMs() * scenario.timeScale).toLong()
+    override fun now(): Long = startedAt + (progressMs() * scenario.timeScale).toLong()
 
-    /** 시작 뒤 실제로 흐른 시간 (ms) */
-    private fun sinceStartMs(): Long = (elapsed.elapsedMs() - startedAtElapsed).coerceAtLeast(0L)
+    /** 시연 진행 (ms, 배속 전): 빠르기 1이면 시작 뒤 실제로 흐른 시간 */
+    private fun progressMs(elapsedNow: Long = elapsed.elapsedMs()): Double =
+        progressAtPaceMs + (elapsedNow - paceSinceElapsed).coerceAtLeast(0L) * pace
 
     /** 시연 경로를 따라 간 거리 (m) */
-    fun travelledM(): Double = sinceStartMs() / 1000.0 * scenario.metersPerSecond
+    fun travelledM(): Double = progressMs() / 1000.0 * scenario.metersPerSecond
+
+    /**
+     * 빠르기만 [pace]로 바꾼 같은 시연. [elapsedNow]까지의 진행을 이어 받아 시각과 위치가 끊기지 않는다. 같은 빠르기면 이 값 그대로
+     */
+    fun paced(pace: Double, elapsedNow: Long = elapsed.elapsedMs()): DemoRun {
+        require(pace > 0.0) { "pace must be positive: $pace" }
+        if (pace == this.pace) return this
+        return DemoRun(
+            scenario, startedAtWall, startedAtElapsed, clockOffsetMs, elapsed,
+            pace = pace, paceSinceElapsed = elapsedNow, progressAtPaceMs = progressMs(elapsedNow), along = along,
+        )
+    }
 
     /**
      * 시연 여정의 기준점 (시작 순간 기준): 이미 달린 시간만큼 앞선 출발, 모두 같은 마지막 화장실, 휴식 리듬에 채울 연속 주행.

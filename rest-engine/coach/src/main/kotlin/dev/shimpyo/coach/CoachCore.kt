@@ -424,6 +424,8 @@ class CoachCore(private val d: CoachDeps) {
                         val at = (stop?.routeDistanceM ?: stop?.straightDistanceM)?.let { " at ${it.toLong()}m" } ?: ""
                         log.i("prompt shown: ${p.kind} ${p.stop?.name ?: "-"}$at (${p.id})")
                     }
+                    // 시연은 카드가 떠 있는 동안 느리게 간다 (CoachWorld.questionShown). 같은 엔진·여정이라 다음 틱이 이어서 읽는다
+                    (worlds.questionShown(p != null) as? CoachWorld.Demo)?.let { log.i("demo pace ${it.run.pace}") }
                 }
                 is PromptEffect.Ask -> desk.ask(e.promptId, e.speech, e.listen) { text -> send(Msg.AskHeard(e.promptId, text)) }
                 PromptEffect.CancelVoice -> desk.cancelCard()

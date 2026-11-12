@@ -81,17 +81,40 @@ class CoachCoreTest {
     }
 
     @Test
-    fun theLastChanceCardStaysForRealSecondsInTheSevenTimesFasterDemo() = runTest {
-        // 시연 엔진의 질문 수명을 배속만큼 늘리지 않으면 실제 6초 만에 카드가 사라졌다 (prompt.md 2.5)
+    fun theLastChanceCardStaysLongEnoughToExplainAndTapInTheSevenTimesFasterDemo() = runTest {
+        // 시연 엔진의 질문 수명을 배속만큼 늘리지 않으면 실제 6초 만에 카드가 사라졌다 (prompt.md 2.5).
+        // 늘린 뒤에도 시연 차가 1초에 200m라 옥산 500m 앞에서 엔진이 거둘 때까지 실제 13~25초뿐이어서(2026-11-13 기기), PT에서
+        // 카드를 설명하고 누를 시간이 빠듯했다. 이제 카드가 떠 있는 동안 시연이 4배 느리게 간다 (CoachWorld.questionShown)
         val rig = CoreRig(this) // 대답하지 않는다
         rig.drive(100f)
         rig.start()
         rig.command(UiCommand.Demo("holiday"))
         rig.runUntil(150_000) { rig.state.prompt?.kind == PromptKind.LAST_CHANCE } ?: error("카드가 뜨지 않았다")
-        val shownFor = rig.runUntil(60_000) { rig.state.prompt?.kind != PromptKind.LAST_CHANCE } ?: 60_000
-        // 시연 차는 1초에 200m라 옥산 500m 앞에서 엔진이 거둔다 (2~5km에서 물으면 약 8~22초 뒤). 수명 6초보다 길어야 한다
-        assertTrue("카드가 ${shownFor}ms 떠 있었다", shownFor >= 8_000)
-        assertNull("지나친 곳의 카드는 내려간다", rig.state.prompt)
+        val askedAt = checkNotNull(rig.toOksanM())
+        val shownFor = rig.runUntil(120_000) { rig.state.prompt?.kind != PromptKind.LAST_CHANCE } ?: 120_000
+        // 2km에서 물어도 500m 앞까지 1.5km ÷ 50m/s = 30초. 카드 자체의 실제 수명(45초 + 음성 뒤 누를 시간)보다 오래 남지는 않는다
+        assertTrue("카드가 ${shownFor}ms 떠 있었다 (${askedAt}m에서 물음)", shownFor in 30_000L..(PromptMachine.ENGINE_CARD_MS + PromptMachine.MIN_TAP_MS + 2_000))
+        assertNull("카드가 내려가면", rig.state.prompt)
+        // 카드가 내려간 뒤에는 원래 빠르기(실제 1초에 200m)로 달린다
+        val before = rig.toOksanM()
+        rig.run(2_000)
+        val after = rig.toOksanM()
+        if (before != null && after != null) assertEquals("원래 빠르기", 400.0, before - after, 30.0)
+        assertTrue("빠르기를 바꾼 것이 로그에 남는다", rig.log.lines.any { "demo pace 0.25" in it } && rig.log.lines.any { "demo pace 1.0" in it })
+    }
+
+    @Test
+    fun whileTheCardIsUpTheDemoCarMovesFourTimesSlowerAtTheSameVirtualSpeed() = runTest {
+        val rig = CoreRig(this)
+        rig.drive(100f)
+        rig.start()
+        rig.command(UiCommand.Demo("holiday"))
+        rig.runUntil(150_000) { rig.state.prompt?.kind == PromptKind.LAST_CHANCE } ?: error("카드가 뜨지 않았다")
+        val m0 = checkNotNull(rig.toOksanM())
+        rig.run(4_000)
+        val m1 = checkNotNull(rig.toOksanM())
+        assertEquals("카드가 떠 있는 동안 실제 4초에 200m (원래 800m)", 200.0, m0 - m1, 30.0)
+        assertEquals("게이지와 질문은 그대로", PromptKind.LAST_CHANCE, rig.state.prompt?.kind)
     }
 
     @Test

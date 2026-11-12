@@ -169,6 +169,18 @@ class WorldSwitch(
         return changed
     }
 
+    /**
+     * 질문 카드가 떴거나 내려갔다 (CoachWorld.questionShown). 세계가 빠르기를 바꾸면(시연) 같은 엔진·여정·세대로 세계만 바꿔 끼운다:
+     * 시각과 위치가 이어지므로 세계 전환이 아니다 (질문·정차·후보를 초기화하지 않는다). 바뀐 세계, 아니면 null
+     */
+    fun questionShown(shown: Boolean): CoachWorld? {
+        val a = active
+        val next = a.world.questionShown(shown, elapsed.elapsedMs())
+        if (next === a.world) return null
+        current = a.with(world = next)
+        return next
+    }
+
     /** 설정(수면 시간 등)이 바뀌었다. 지금 세계의 기준점으로 프로필을 다시 넘긴다 (서비스 감사 D4: 시연 중이면 시연 여정이 리셋됐다) */
     fun profileChanged() {
         val a = active

@@ -56,6 +56,35 @@ class DemoRunTest {
         assertEquals("실제 1초에 200m", 2_000.0, run.travelledM(), 1e-9)
     }
 
+    /**
+     * 질문 카드가 떠 있는 동안 시연을 늦춘다 (CoachWorld.questionShown). 시각과 위치가 바꾸는 순간에 이어지고, 둘이 같은 비율로
+     * 느려져서 엔진이 보는 가상 속도(시속 100km)는 그대로다
+     */
+    @Test
+    fun pacingSlowsTimeAndDistanceTogetherWithoutAJump() {
+        val clock = WorldClock(wallStart)
+        val run = checkNotNull(start("holiday", clock))
+        val t0 = run.now()
+        clock.advance(10_000)
+        val slow = run.paced(0.25)
+        assertEquals("바꾸는 순간 시각이 이어진다", run.now(), slow.now())
+        assertEquals("바꾸는 순간 위치가 이어진다", run.travelledM(), slow.travelledM(), 1e-9)
+        assertEquals(0.25, slow.pace, 0.0)
+
+        clock.advance(4_000)
+        assertEquals("실제 4초에 200m (4배 느리게)", 2_200.0, slow.travelledM(), 1e-6)
+        assertEquals("시각도 4배 느리게: 1초 × 7.2", t0 + 72_000 + 7_200, slow.now())
+        // 가상 속도 = 200m ÷ 7.2초, 늦추기 전과 같다
+        assertEquals(200.0 / 7.2, (slow.travelledM() - 2_000.0) / ((slow.now() - t0 - 72_000) / 1000.0), 1e-6)
+
+        val normal = slow.paced(1.0)
+        assertEquals(slow.now(), normal.now())
+        clock.advance(1_000)
+        assertEquals("원래 빠르기로 돌아온다", 2_400.0, normal.travelledM(), 1e-6)
+        assertSame("같은 빠르기면 같은 값", normal, normal.paced(1.0))
+        assertEquals("시나리오·기준점은 그대로", run.anchor, normal.anchor)
+    }
+
     @Test
     fun stopScenarioIsALunchStopAtAnseongThenRunsTenTimesFaster() {
         // 예전에는 시각 지정이 없어 실제 시각을 따랐다: 새벽에 시연하면 '깬 지 18시간+'·'졸음이 오기 쉬운 시간' 같은 밤 문구가

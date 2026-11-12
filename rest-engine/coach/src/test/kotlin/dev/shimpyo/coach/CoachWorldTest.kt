@@ -74,6 +74,26 @@ class CoachWorldTest {
         assertFalse("구조 리뷰 D3: 시연 중에는 내비 위치로 보충하지 않는다", d.usesNaviLocationFallback)
     }
 
+    /** PT에서 발표자가 질문 카드를 설명하고 누를 시간 (7.2배속 귀성길에서 카드가 실제 13~25초 만에 지나갔다, 2026-11-13) */
+    @Test
+    fun aDemoSlowsWhileAQuestionIsUpAndTheRealWorldNeverDoes() {
+        assertSame("실제 세계는 그대로", real, real.questionShown(true, clock.elapsedMs()))
+
+        val d = demo().withOccupants(listOf(DRIVER))
+        clock.advance(10_000)
+        val slow = d.questionShown(true, clock.elapsedMs())
+        assertEquals(CoachWorld.QUESTION_PACE, slow.run.pace, 0.0)
+        assertEquals("시각이 이어진다", d.clock.now(), slow.clock.now())
+        assertEquals("고친 탑승자도 그대로", listOf(DRIVER), slow.occupants(settings))
+        assertSame("이미 느리면 같은 값", slow, slow.questionShown(true, clock.elapsedMs()))
+
+        clock.advance(4_000)
+        val normal = slow.questionShown(false, clock.elapsedMs())
+        assertEquals(1.0, normal.run.pace, 0.0)
+        assertEquals(slow.clock.now(), normal.clock.now())
+        assertSame(normal, normal.questionShown(false, clock.elapsedMs()))
+    }
+
     @Test
     fun theDemoShowsItsScenarioDestinationNotTheRealNavis() {
         assertEquals("부산", demo().destinationName("옥산휴게소"))
