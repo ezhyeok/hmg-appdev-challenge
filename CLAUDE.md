@@ -47,6 +47,7 @@
 - 에뮬레이터 성능 (측정 결과). 아래 세 가지를 지키지 않으면 SDK 호출이 수십 초씩 밀리고 `carwatchdogd`가 VHAL을 죽인다
   - **GPU 가속을 쓴다.** `start-emulator.ps1`의 기본값은 `-gpu host`다(SSH로 창 없이 띄워도 GeForce MX450을 쓴다). `swiftshader_indirect`(소프트웨어 렌더링)로 띄우면 에뮬레이터 프로세스가 호스트 CPU의 88%를 쓰고, `host`면 40% 정도다
   - **노트북에 충전기를 꽂는다.** 배터리 모드에서는 CPU가 정격의 43% 수준으로 제한된다. 확인: `(Get-CimInstance Win32_Battery).BatteryStatus`가 2면 AC
+  - **충전기가 꽂혀 있어도 전원을 확인한다.** 2026-11-13 00:39~00:40에 전원 연결이 40초 동안 11번 바뀌었다(충전기 접촉 불량, Kernel-Power 105). 그 뒤 배터리가 바닥나 01:26에 노트북이 최대 절전에 들어가 밤새 끊겼다(Kernel-Power 42 `Sleep Reason: Battery`). 유휴 절전이 아니었다. 긴 작업 전에는 `tools/laptop/power-check.ps1`로 AC와 최근 1시간의 전원 변경 수를 본다(`wait-emulator.sh`가 시작할 때 부른다). 최대 절전을 거친 에뮬레이터는 살아 있었지만 게스트 시계가 9시간 건너뛰었다
   - **부팅 후 `tools/laptop/wait-emulator.sh`로 기다린다**(가동 4분 이상, 운전자 프로필 user 10 활성). 그 전에 앱을 실행하거나 빌드하면 VHAL이 재시작되면서 시스템이 user 0으로 돌아가고 내비 앱이 조회에 응답하지 않는다. 그렇게 되면 에뮬레이터를 다시 부팅한다. 빌드는 에뮬레이터를 띄우기 전에 `run-app.ps1 -BuildOnly`로 해 둔다
   - **에뮬레이터가 멈춘 것처럼 보이면 재부팅 전에 `tools/laptop/emu-health.ps1`로 qemu 상태를 본다.** 증상은 `adb devices`에는 보이는데 `adb shell`이 응답하지 않고 qemu CPU가 0%다. 2026-11-11에는 에뮬레이터의 크래시 보고기(crashpad_handler)가 qemu를 덤프하려고 일시 정지시킨 뒤 자신이 죽어서 스레드가 모두 Suspended로 남았다. `emu-health.ps1 -Resume`으로 재개된다(`wait-emulator.sh`가 adb 무응답을 보면 자동으로 부른다). 재발 방지로 `start-emulator.ps1`은 `-crash-report-mode disabled -no-metrics`로 띄운다
   - 노트북 화면에서 창으로 띄우려면(시연 영상 녹화용) `tools/laptop/start-emulator-gui.cmd`를 더블클릭한다

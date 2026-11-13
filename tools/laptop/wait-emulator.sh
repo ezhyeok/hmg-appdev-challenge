@@ -12,6 +12,8 @@ MAX_LOAD="${1:-8}"
 MIN_UPTIME=240
 DEADLINE=$(( $(date +%s) + ${2:-1200} ))
 HEALTH='powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\User\hmg-appdev-challenge\repo\tools\laptop\emu-health.ps1 -Resume'
+# 전원부터 본다: 배터리로 돌면 1시간 남짓에 노트북이 최대 절전에 들어간다 (2026-11-13 01:26, power-check.ps1)
+timeout 40 ssh hmg-laptop 'powershell -NoProfile -ExecutionPolicy Bypass -File C:\Users\User\hmg-appdev-challenge\repo\tools\laptop\power-check.ps1' 2>/dev/null | tr -d '\r' | grep -E "^(power|WARN)"
 stalls=0
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
   # adb devices에는 보이는데 adb shell이 응답하지 않으면 qemu가 일시 정지됐을 수 있다 (emu-health.ps1 참고)
