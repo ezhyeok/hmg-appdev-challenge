@@ -110,6 +110,18 @@ interface StopIndex {
     fun matchByName(name: String, kind: StopKind, lat: Double, lon: Double, maxStraightM: Double, heading: Float? = null): List<StopCandidate>
     /** 차가 고속도로 차로 위인지 (지도 맞춤, MotorwayIndex: 차로 선형 가까이이고 방향이 맞다). 표를 읽기 전이나 모르면 false */
     fun onMotorway(lat: Double, lon: Double, heading: Float): Boolean = false
+
+    /**
+     * 일상 정차 후보 (NearbyStops): [near]와 같은 반경 검색이지만 화장실·주차·지금 영업·진행 방향(뒤쪽 제외)을 먼저 거른 뒤
+     * 가까운 순 [limit]곳. 자르고 거르면 도심에서 쓸 곳이 하나도 남지 않았다 (2026-11-13 감사: 잠실 서행에서 3km 안 45곳 중 0곳)
+     */
+    fun nearUsable(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, now: Long, limit: Int): List<StopCandidate> =
+        near(lat, lon, heading, radiusM, kinds, now, Int.MAX_VALUE)
+            .filter { it.facilities.restroom && it.parkable && it.openNow != false && it.directionOk != false }
+            .take(limit)
+
+    /** id로 정차 후보 하나 (재시작 뒤 '들르기로 한 곳'을 되살릴 때). 표를 읽기 전이거나 없으면 null */
+    fun byId(id: String): StopCandidate? = null
 }
 
 /** 후보까지의 실제 경로 거리·ETA·방향을 내비로 보정한다 (RouteOracle) */

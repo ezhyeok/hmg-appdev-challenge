@@ -112,6 +112,8 @@ sealed interface PromptEffect {
     data class ScheduleExpiry(val promptId: String, val atElapsedMs: Long) : PromptEffect
     /** engine.onPromptResult(promptId, accept). promptId는 엔진이 준 원래 id */
     data class Report(val promptId: String, val accept: Boolean) : PromptEffect
+    /** 출발 전 한마디에 '응': 지금 정차에서 이 뒤에 연 문은 화장실에 다녀온 것이다 (StopRecorder.intendRestroom, 엔진은 Report로 안다) */
+    data object RestroomIntended : PromptEffect
     /**
      * GoToRunner.run(stop, parked)를 실행하고 GoToFinished(requestId, …)를 보낸다. 세계 전환에도 취소하지 않는다.
      * 결과가 [PromptMachine.GO_TO_WATCHDOG_MS] 안에 안 오면 기계가 FAILED로 끝내고 다음 요청을 시작한다
@@ -262,7 +264,10 @@ class PromptMachine {
             if (offered.id in everShown) markClosed(offered.id)
             return
         }
-        val reasons = e.next?.takeIf { offered.stop != null && it.stop.id == offered.stop?.id }?.reasons.orEmpty()
+        // 장소를 묻는 질문은 지금 추천(같은 곳일 때만)의 이유로 맞춘다. 장소가 없는 질문(출발 전 한마디)은 엔진이 물을 때 정한 이유다
+        // (2026-11-13 감사: '도착까지 1시간 3분' 칩이 늘 비었다)
+        val reasons = if (offered.stop == null) offered.reasons
+        else e.next?.takeIf { it.stop.id == offered.stop?.id }?.reasons.orEmpty()
         show(offered, reasons, ctx, out)
     }
 
@@ -309,6 +314,7 @@ class PromptMachine {
             // 출발 전 한마디에 '응': 할 일은 운전자에게 있다. 말로 받았다고만 알린다 (음성을 끈 사람에게는 말하지 않는다)
             card.prompt.kind == PromptKind.DEPARTURE -> {
                 if (ctx.speak) out += PromptEffect.Speak(DEPARTURE_ACCEPTED)
+                out += PromptEffect.RestroomIntended
                 out += PromptEffect.Report(engineId, true)
             }
             else -> out += PromptEffect.Report(engineId, true)

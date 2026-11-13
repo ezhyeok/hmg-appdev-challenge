@@ -33,9 +33,25 @@ data class TripAnchor(
         return copy(lastRestroomAt = lastRestroomAt.mapValues { maxOf(it.value, at) }, restroomFallbackAt = maxOf(restroomFallbackAt, at))
     }
 
+    /** 한 사람만 화장실에 다녀왔다: 그 사람의 마지막 화장실을 [at]까지 당긴다 (다른 사람·나중에 탈 사람은 그대로). 뒤로는 가지 않는다 */
+    fun withRestroomFor(id: String, at: Long): TripAnchor {
+        val cur = lastRestroomAt[id] ?: restroomFallbackAt
+        if (at <= cur) return this
+        return copy(lastRestroomAt = lastRestroomAt + (id to at))
+    }
+
+    /**
+     * 재시작으로 되돌린 정차([since]에 시작)가 타는 중(아직 출발 전)의 정차였는지: 여정을 시작하고 CoachConfig.boardingWindowMin 안.
+     * 살아 있는 동안은 움직임으로 가린다 ([TripSession.moved]). 움직임을 모르는 재시작 때만 쓴다
+     */
+    fun boardingAt(since: Long): Boolean = since - tripStart < BOARDING_WINDOW_MS
+
     /** 가장 최근 화장실 */
     val latestRestroomAt: Long get() = maxOf(restroomFallbackAt, lastRestroomAt.values.maxOrNull() ?: Long.MIN_VALUE)
 }
+
+/** 타는 중의 정차로 보는 범위 (엔진 CoachConfig.boardingWindowMin과 같다) */
+private val BOARDING_WINDOW_MS = CoachConfig().boardingWindowMin * 60_000L
 
 /**
  * 지금 정차(기어 P) 상태. 정차 감지기(StopDetector.parkState)가 만들고, TripSession이 맥박에 담아
@@ -45,7 +61,7 @@ data class TripAnchor(
 data class ParkState(
     /** P로 바꾼 시각 (코치 시각) */
     val since: Long,
-    /** 이번 정차 중에 문이 열렸는지 */
+    /** 이번 정차 중에 (화장실 정차로 세는) 문이 열렸는지. 타는 중의 정차는 출발 전 한마디에 '응' 한 뒤의 문만 (StopDetector) */
     val doorSeen: Boolean,
 )
 
@@ -191,8 +207,16 @@ class TripSession private constructor(
     /** 지금 기준점 (연속 주행은 지금까지 센 값) */
     val anchor: TripAnchor get() = base.copy(continuousDrivingMin = continuousMs / 60_000.0)
 
-    /** 매 틱. [park]는 정차 감지기의 지금 정차 (달리는 중이면 null) */
-    fun onTick(now: Long, park: ParkState?): TripEvent? {
+    /**
+     * 이번 여정에서 차가 실제로 움직였는지 (엔진 CoachEngine.tripMoved와 같은 뜻). 아직이면 지금 정차는 타는 중이다: 그때 연 문은
+     * 화장실 정차로 세지 않는다 (StopDetector). 이어받은 여정은 연속 주행이 남아 있거나 되돌린 정차가 여정 시작 뒤 한참 지나 시작됐으면
+     * 움직인 것이다 ([TripAnchor.boardingAt])
+     */
+    var moved: Boolean = anchor.continuousDrivingMin > 0.0 || restoredPark?.let { !anchor.boardingAt(it.since) } == true
+        private set
+
+    /** 매 틱. [park]는 정차 감지기의 지금 정차 (달리는 중이면 null), [moving]: 지금 차가 움직이는지 (P가 아니고 시속 3km 초과) */
+    fun onTick(now: Long, park: ParkState?, moving: Boolean = false): TripEvent? {
         // 엔진과 같이: 시계가 뒤로 가면 0, 틱 사이가 길면 최대 2분만 주행으로 센다
         val dt = (now - lastNow).coerceIn(0L, rules.maxTickGapMs)
         lastNow = now
@@ -204,6 +228,7 @@ class TripSession private constructor(
                 base = newTrip(now)
                 continuousMs = 0L
                 accepted = null
+                moved = false
                 event = TripEvent.NewTrip(anchor)
             } else {
                 continuousMs += dt
@@ -216,6 +241,7 @@ class TripSession private constructor(
             }
             if (park.doorSeen && parkedMs >= rules.restroomStopMs) urgentSave = moveRestroom(park.since + rules.restroomStopMs) || urgentSave
         }
+        if (moving && park == null) moved = true
         this.park = park
         save(now, force = urgentSave)
         return event
@@ -234,6 +260,14 @@ class TripSession private constructor(
         }
         if (log.restroom && moveRestroom(StopHistory.restroomAt(log, rules))) changed = true
         if (changed) save(now, force = true)
+    }
+
+    /** "방금 화장실 다녀왔어" (엔진 VoiceIntent.RestroomDone과 같이): 그 사람(모르면 모두)의 마지막 화장실을 [at]으로. 바로 저장한다 */
+    fun onRestroomDone(occupantId: String?, at: Long) {
+        val moved = if (occupantId == null) base.withRestroomAt(at) else base.withRestroomFor(occupantId, at)
+        if (moved == base) return
+        base = moved
+        save(at, force = true)
     }
 
     /** 운전자가 고른 정차를 내비에 넣었다 (코어: 성공한 들르기마다). 바로 저장한다 */

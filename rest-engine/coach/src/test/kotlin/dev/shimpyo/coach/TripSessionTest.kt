@@ -5,6 +5,7 @@ import dev.shimpyo.coach.fakes.InMemoryTripStore
 import dev.shimpyo.coach.fakes.KID
 import dev.shimpyo.coach.fakes.WorldClock
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -50,6 +51,39 @@ class TripSessionTest {
 
     private fun heartbeat(savedAt: Long, continuous: Double = 50.0, park: ParkState? = null, tripStart: Long = t0, restroom: Long = t0 - 30 * min) =
         TripHeartbeat(savedAt, tripStart, mapOf("driver" to restroom), restroom, continuous, park)
+
+    // ------------------------------------------------------------ 이번 여정에서 움직였나 (타는 중, 2026-11-13 감사)
+
+    @Test
+    fun movedIsSetByRealMovementAndResetByANewTrip() {
+        val clock = WorldClock(t0)
+        val s = open(clock, InMemoryTripStore())
+        assertFalse("새 여정은 아직 움직이지 않았다", s.moved)
+        s.park(clock, 2)
+        s.onTick(clock.now(), null, moving = false)
+        assertFalse("기어만 바꾸고 서 있던 것은 움직인 것이 아니다", s.moved)
+        s.onTick(clock.now() + 1_000, null, moving = true)
+        assertTrue(s.moved)
+        // 4시간 넘게 섰다가 출발: 새 여정 (출발하는 틱에 움직였으면 그 틱에 다시 움직인 것이 된다)
+        clock.advance(5_000)
+        s.park(clock, 5 * 60)
+        clock.advance(1_000)
+        s.onTick(clock.now(), null, moving = false)
+        assertFalse("새 여정", s.moved)
+    }
+
+    @Test
+    fun aRestoredTripKnowsItHadMovedFromItsStopOrItsDriving() {
+        val clock = WorldClock(t0 + 2 * hour)
+        // 휴게소: 여정 시작 2시간 뒤에 선 정차를 이어받았다 (연속 주행은 휴식으로 0)
+        val atRestArea = open(clock, InMemoryTripStore(), saved = heartbeat(clock.now() - min, continuous = 0.0, park = ParkState(clock.now() - 20 * min, false)))
+        assertTrue(atRestArea.moved)
+        // 집 앞: 여정을 시작하자마자 선 정차 (아직 출발 전)
+        val atHome = open(clock, InMemoryTripStore(), saved = heartbeat(clock.now() - min, continuous = 0.0, park = ParkState(clock.now() - 5 * min, false), tripStart = clock.now() - 5 * min - 30_000))
+        assertFalse(atHome.moved)
+        // 달리던 중
+        assertTrue(open(clock, InMemoryTripStore(), saved = heartbeat(clock.now() - 10_000, continuous = 30.0)).moved)
+    }
 
     // ------------------------------------------------------------ 시작
 

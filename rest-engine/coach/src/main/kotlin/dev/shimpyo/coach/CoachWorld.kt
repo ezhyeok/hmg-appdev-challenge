@@ -19,6 +19,16 @@ import kotlin.math.roundToInt
  *
  * 세계는 값이다. 코치 액터(WorldSwitch)가 세계와 그 엔진·여정을 한 묶음(ActiveWorld)으로 틱 사이에 바꿔 끼운다.
  */
+/** 일상 정차 후보를 넣는 방식 ([CoachWorld.nearbyMode]) */
+enum class NearbyMode {
+    /** 신호로 가린다: 고속도로 차로 위, 제한속도 70 이상인 길, 시속 80 이상이면 넣지 않는다 (실제 세계) */
+    SIGNALS,
+    /** 늘 넣는다 (도심 시연) */
+    ALWAYS,
+    /** 넣지 않는다 (고속도로 시연) */
+    NEVER,
+}
+
 sealed class CoachWorld {
     /** 시연 이름. 실제면 null (CoachUiState.demo) */
     abstract val name: String?
@@ -35,8 +45,11 @@ sealed class CoachWorld {
     abstract val persistsTrip: Boolean
     /** 위치 SDK가 멈췄을 때 내비 현재 위치로 보충할지 */
     abstract val usesNaviLocationFallback: Boolean
-    /** 내비가 알려 주는 지금 도로의 제한속도를 쓸지 (NearbyStops). 시연 위치는 내비가 보는 실제 도로와 다르므로 쓰지 않는다 */
-    abstract val usesNaviRoadLimit: Boolean
+    /**
+     * 차 가까이의 일상 정차 후보(NearbyStops)를 어떻게 넣을지. 실제 세계는 신호로 가린다(고속도로 차로 위, 내비 제한속도, 차속).
+     * 시연은 장면이 정한다: 도심 장면은 늘, 고속도로 장면은 넣지 않는다 (시연 위치·차속·내비 제한속도는 실제 도로와 맞지 않는다)
+     */
+    abstract val nearbyMode: NearbyMode
 
     /** 이 세계의 탑승자. 질문·음성 해석·화면이 모두 이것을 쓴다 (구조 리뷰 D9: 경로마다 출처가 달랐다) */
     abstract fun occupants(settings: SettingsPort): List<Occupant>
@@ -86,13 +99,20 @@ sealed class CoachWorld {
      * P에서는 엔진이 질문을 내지 않으므로 이 입력의 출력은 버려도 된다.
      */
     fun newEngine(factory: EngineFactory, settings: SettingsPort, memory: PersonalMemory, anchor: TripAnchor, park: ParkState? = null): CoachEngine {
-        val engine = factory.create(profile(settings, anchor), engineMemory(memory), engineConfig)
+        val engine = factory.create(profile(settings, anchor).copy(tripMoved = movedBefore(anchor, park)), engineMemory(memory), engineConfig)
         if (park != null) {
             val at = maxOf(park.since, anchor.tripStart)
             if (at <= clock.now()) runCatching { engine.update(CoachInput(now = at, gear = Gear.PARK, doorOpened = park.doorSeen)) }
         }
         return engine
     }
+
+    /**
+     * 새 엔진에게 이 여정이 이미 움직였다고 알릴지 (TripProfile.tripMoved): 연속 주행이 남아 있거나, 되돌린 정차가 여정 시작 뒤
+     * 타는 중의 범위(CoachConfig.boardingWindowMin)를 지나 시작됐다. 휴게소에서 재시작한 엔진이 그 정차를 출발 전으로 보지 않게 한다
+     */
+    private fun movedBefore(anchor: TripAnchor, park: ParkState?): Boolean =
+        anchor.continuousDrivingMin > 0.0 || (park != null && !anchor.boardingAt(park.since))
 
     /**
      * 엔진이 서 있다고 아는 정차([newEngine]의 park, 또는 시연 동안 옆에 둔 실제 엔진의 정차)가 [endedAt]에 끝났다고 알린다.
@@ -117,7 +137,7 @@ sealed class CoachWorld {
         override val persistsHistory: Boolean get() = true
         override val persistsTrip: Boolean get() = true
         override val usesNaviLocationFallback: Boolean get() = true
-        override val usesNaviRoadLimit: Boolean get() = true
+        override val nearbyMode: NearbyMode get() = NearbyMode.SIGNALS
         override fun occupants(settings: SettingsPort): List<Occupant> = settings.occupants
         override fun engineMemory(loaded: PersonalMemory): PersonalMemory = loaded
     }
@@ -136,7 +156,7 @@ sealed class CoachWorld {
         override val persistsHistory: Boolean get() = false
         override val persistsTrip: Boolean get() = false
         override val usesNaviLocationFallback: Boolean get() = false
-        override val usesNaviRoadLimit: Boolean get() = false
+        override val nearbyMode: NearbyMode get() = if (run.scenario.city) NearbyMode.ALWAYS else NearbyMode.NEVER
         override fun occupants(settings: SettingsPort): List<Occupant> = occupantsOverride ?: run.scenario.occupants
         override fun position(real: Fix?): Fix = run.position()
         override fun apply(input: CoachInput): CoachInput = run.apply(input)

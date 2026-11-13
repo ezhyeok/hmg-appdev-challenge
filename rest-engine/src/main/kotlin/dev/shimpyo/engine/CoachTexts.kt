@@ -268,17 +268,25 @@ open class CoachTexts {
     // ---------------- 출발 전 한마디 ----------------
 
     /**
-     * 서 있고 목적지가 있을 때. [gaugeMin]: 화장실 게이지(가장 급한 사람이 필요할 확률 50%까지), [who]: 그 사람 (혼자면 null).
-     * 판단은 더 이른 30% 마감으로 했으므로 게이지가 도착보다 길 수도 있다: 그때는 사람·분을 말하지 않는다
+     * 서 있고 목적지가 있을 때 (CoachEngine.departureCheck). [gaugeMin]: 화장실 게이지(가장 먼저 필요해지는 사람이 필요할 확률 50%까지,
+     * 엔진은 도착까지보다 짧을 때만 묻는다), [who]: 그 사람의 이름(혼자면 null), [type]: 그 사람의 유형.
+     * 게이지가 [DEPARTURE_NOW_MIN]분 아래면 "0분쯤 뒤"가 아니라 "지금"이라고 한다. 영아는 화장실이 아니라 수유·기저귀(카시트 시간),
+     * 반려견은 산책이다 (2026-11-13 감사: "아기는 1시간쯤 뒤 화장실을 찾을 것 같아요")
      */
-    open fun departureCheck(tripMin: Int, gaugeMin: Int?, who: String?): String {
+    open fun departureCheck(tripMin: Int, gaugeMin: Int, who: String?, type: OccupantType? = null): String {
         val trip = duration(tripMin)
         val head = "도착까지 약 $trip${copula(trip)}."
-        return when {
-            gaugeMin != null && gaugeMin < tripMin && who != null ->
-                "$head $who${topic(who)} ${duration(gaugeMin)}쯤 뒤 화장실을 찾을 것 같아요. 출발 전에 다녀오세요"
-            gaugeMin != null && gaugeMin < tripMin -> "$head ${duration(gaugeMin)}쯤 뒤 화장실이 필요해질 것 같아요. 출발 전에 다녀오세요"
-            else -> "$head 가는 길에 화장실이 필요할 수 있어요. 출발 전에 다녀오세요"
+        val now = gaugeMin < DEPARTURE_NOW_MIN
+        val whenText = if (now) "지금" else "${duration(gaugeMin)}쯤 뒤"
+        val subject = who?.let { "$it${topic(it)} " }.orEmpty()
+        return when (type) {
+            OccupantType.INFANT -> "$head $subject$whenText 수유나 기저귀 갈기가 필요할 수 있어요. 출발 전에 챙기세요"
+            OccupantType.DOG -> "$head $subject$whenText 산책이 필요할 수 있어요. 출발 전에 다녀오세요"
+            else -> when {
+                now -> "$head ${subject}지금 화장실이 필요할 수 있어요. 출발 전에 다녀오세요"
+                who != null -> "$head $who${topic(who)} ${duration(gaugeMin)}쯤 뒤 화장실을 찾을 것 같아요. 출발 전에 다녀오세요"
+                else -> "$head ${duration(gaugeMin)}쯤 뒤 화장실이 필요해질 것 같아요. 출발 전에 다녀오세요"
+            }
         }
     }
     open fun reasonDepartureTrip(tripMin: Int): String = "도착까지 ${duration(tripMin)}"
@@ -345,5 +353,10 @@ open class CoachTexts {
         if (c in '가'..'힣') return (c.code - 0xAC00) % 28 != 0
         if (c.isDigit()) return c in "013678" // 영, 일, 삼, 육, 칠, 팔
         return c.lowercaseChar() in "ln" // 영문은 대략: ~l(을), ~n(은). m은 '미터'로 읽으니 받침 없음
+    }
+
+    companion object {
+        /** 출발 전 한마디에서 게이지가 이보다 짧으면 분 대신 "지금"이라고 한다 */
+        const val DEPARTURE_NOW_MIN = 5
     }
 }

@@ -197,6 +197,9 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
             else -> null
         }
     }
+
+    /** onCurrentRoadSpeedLimit (매초). 코치가 도시고속도로처럼 길가 화장실에 갈 수 없는 길을 가리는 데 쓴다 (NearbyStops) */
+    override val roadSpeedLimits: Flow<Int> = navi.events.mapNotNull { (it as? NaviEvent.SpeedLimit)?.kph }
 }
 
 /**

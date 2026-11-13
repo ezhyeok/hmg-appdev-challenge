@@ -29,12 +29,18 @@ data class ParkedStop(val start: Long, val end: Long, val doorOpened: Boolean)
  *   순서에 따라 10분 정차 / 40분 정차로 갈렸다 (서비스 닫힘 검증 N2). 판정 결과는 여정·엔진도 함께 쓴다 ([takeRestoredEnd], N3).
  *   떠난 것으로 판정해도 다시 대기 창은 마지막으로 본 때부터 열려 있다: 보지 못한 사이는 차속을 모르는 것으로 센다
  *
+ * - 타는 중 (엔진 StopTracker와 같다, 2026-11-13 감사): 여정을 시작하며 선 정차(onTick·restore의 boarding)에서 연 문은 타고 내리는
+ *   것이라 화장실 정차의 문으로 세지 않는다. 출발 전 한마디에 '응' 한 뒤([intendRestroom])에 연 문만 센다.
+ *
  * 엔진과 같은 순서에 같은 판정을 내는지는 StopRulesCrossCheckTest가 지킨다.
  */
 class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinParkedMin * 60_000L) {
     /** 지금 P인 정차 */
     private var since: Long? = null
     private var doorAt: Long? = null
+    /** 지금 정차가 타는 중의 정차인지, 그 정차에서 화장실에 다녀오겠다고 한 때 */
+    private var boarding = false
+    private var intentAt: Long? = null
     /** 이번 정차에서 선 시간 (틱 사이 시간의 합) */
     private var parkedMs = 0L
 
@@ -42,7 +48,10 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
     private var movedM = 0.0
 
     /** P에서 나와 다시 대기를 기다리는 정차. [movedM]: 그 정차를 시작한 뒤 움직인 거리 (앞선 다시 대기의 것 포함) */
-    private class Pending(val since: Long, val doorAt: Long?, val parkedMs: Long, val leftAt: Long, var movedM: Double) {
+    private class Pending(
+        val since: Long, val doorAt: Long?, val parkedMs: Long, val leftAt: Long, var movedM: Double,
+        val boarding: Boolean = false, val intentAt: Long? = null,
+    ) {
         var gapMs = 0L
         var maxKph = 0f
 
@@ -81,22 +90,33 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
     /** 지금 P면 그 정차, 아니면 null (다시 대기를 기다리는 동안에도 null: 차는 P가 아니다) */
     val parkState: ParkState? get() = since?.let { ParkState(it, doorAt != null) }
 
-    /** [doorOpened]: 지난 틱 이후 문이 열린 적이 있는지 */
-    fun onTick(t: Long, gear: Gear, speedKph: Float?, doorOpened: Boolean): ParkedStop? {
+    /** 이 문 열림을 화장실 정차의 문으로 세는지: 타는 중의 정차면 화장실에 다녀오겠다고 한 뒤의 것만 */
+    private fun counts(at: Long): Boolean = !boarding || (intentAt?.let { at >= it } ?: false)
+
+    /** 출발 전 한마디에 '응': 지금 정차에서 이 뒤에 연 문은 화장실에 다녀온 것이다 */
+    fun intendRestroom(t: Long) {
+        if (since != null && intentAt == null) intentAt = t
+    }
+
+    /**
+     * [doorOpened]: 지난 틱 이후 문이 열린 적이 있는지. [boardingIfNew]: 이 틱에 새 정차가 시작되면 그것이 타는 중의 정차인지
+     * (여정을 시작하고 CoachConfig.boardingWindowMin 안, 코어가 여정 기준점으로 정한다)
+     */
+    fun onTick(t: Long, gear: Gear, speedKph: Float?, doorOpened: Boolean, boardingIfNew: Boolean = false): ParkedStop? {
         restoredLastSeen?.let { lastSeen ->
             val moving = speedKph != null && speedKph > MOVING_KPH
             if (gear == Gear.UNKNOWN && !moving && t - restoredAt < RESTORE_WAIT_MS) {
                 // 기어를 아직 모른다: 서 있는지 떠났는지 정하지 않는다 (선 시간도 더하지 않는다). 문 열림은 이 정차의 것으로 적어 둔다
-                if (doorOpened && doorAt == null) doorAt = t
+                if (doorOpened && doorAt == null && counts(t)) doorAt = t
                 return null
             }
             restoredLastSeen = null
             if (gear != Gear.PARK) {
                 // 이미 떠나 있다 (기어 D·R·N, 기어는 모르지만 움직인다, 끝내 기어를 모른다): 앱이 꺼진 사이(또는 시연 중) 떠났다.
                 // 그 사이는 정차로 세지 않고 마지막으로 본 때에 끝낸다
-                if (doorOpened && doorAt == null) doorAt = lastSeen
+                if (doorOpened && doorAt == null && counts(lastSeen)) doorAt = lastSeen
                 // 다시 대기 창은 마지막으로 본 때부터다. 보지 못한 사이의 차속은 모른다 (엔진도 그렇게 센다: CoachWorld.endPark)
-                val p = Pending(since!!, doorAt, parkedMs, lastSeen, movedM)
+                val p = Pending(since!!, doorAt, parkedMs, lastSeen, movedM, boarding, intentAt)
                 p.moved(maxOf(0L, t - lastSeen), null)
                 speedKph?.let { p.maxKph = it }
                 since = null
@@ -130,9 +150,9 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
 
         if (wasParked) {
             parkedMs += dt
-            if (doorOpened && doorAt == null) doorAt = t
+            if (doorOpened && doorAt == null && counts(t)) doorAt = t
             if (!nowParked) {
-                pending = Pending(since!!, doorAt, parkedMs, t, movedM)
+                pending = Pending(since!!, doorAt, parkedMs, t, movedM, boarding, intentAt)
                 since = null
                 doorAt = null
             }
@@ -147,14 +167,18 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
                 doorAt = p.doorAt
                 parkedMs = p.parkedMs + p.gapMs
                 movedM = p.movedM
+                boarding = p.boarding
+                intentAt = p.intentAt
             } else {
                 if (p != null) done = finished(p)
                 since = t
                 doorAt = null
                 parkedMs = 0L
                 movedM = 0.0
+                boarding = boardingIfNew
+                intentAt = null
             }
-            if (doorOpened && doorAt == null) doorAt = t
+            if (doorOpened && doorAt == null && counts(t)) doorAt = t
             return done
         } else {
             pending?.moved(dt, prevKph)
@@ -185,8 +209,10 @@ class StopDetector(private val minStopMs: Long = CoachConfig().restroomStopMinPa
      * 그래서 시연 중 Virtual Console로 D를 넣고 시연을 꺼도 시연 시간만큼의 가짜 실제 정차가 생기지 않는다.
      * 미래 시각(시연 시각이 저장된 경우 등)은 정차 없음으로 본다. doorSeen이면 문 열림을 세운 때로 본다(문 시각은 저장하지 않는다).
      */
-    fun restore(state: ParkState?, now: Long, lastSeenMs: Long = now) {
+    fun restore(state: ParkState?, now: Long, lastSeenMs: Long = now, boarding: Boolean = false) {
         pending = null
+        this.boarding = boarding
+        intentAt = null
         lastT = now
         ticked = true
         lastKph = null

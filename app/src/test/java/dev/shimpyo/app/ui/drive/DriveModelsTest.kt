@@ -183,6 +183,30 @@ class DriveModelsTest {
     }
 
     @Test
+    fun theCityNearbyQuestionSaysNearOnceAndTheNextCardKeepsTheChip() {
+        // 일상 길(엔진 CityNearbyTest): 게이지가 NOW인 도심에서 600m 앞 공중화장실을 묻는다. 맥락 줄이 "가까운 화장실"이므로
+        // 칩 "가까운 화장실"을 또 붙이지 않는다. 문장이 바뀌어도 이유 코드로 맥락을 정한다
+        val park = stop("park", "정자공원 공중화장실", 0.6).copy(kind = StopKind.PUBLIC_RESTROOM, routeDistanceM = null, straightDistanceM = 600.0)
+        val nearby = Reason("NEXT_NEARBY_RESTROOM", "가까운 화장실이에요")
+        val p = Prompt("n", PromptKind.LAST_CHANCE, "화장실 여유가 거의 없어요. 600m 앞 정자공원 공중화장실에 들를까요?", park, Long.MAX_VALUE)
+        val asking = stopCard(running.copy(prompt = p, promptReasons = listOf(nearby), next = rec(park, nearby)), driving = true)
+        assertEquals("가까운 화장실", asking.context)
+        assertEquals("정자공원 공중화장실", asking.title)
+        assertFalse("맥락 줄과 같은 칩: ${asking.chips}", asking.chips.contains("가까운 화장실"))
+        assertEquals("가까운 화장실", restroomQuestionContext(listOf("NEXT_NEARBY_RESTROOM"), "들를까요?"))
+
+        // 질문이 없을 때의 '다음 화장실' 카드: 길안내 중이면 맥락 줄이 "다음 화장실"이라 칩이 왜 이곳인지 말한다
+        val next = stopCard(running.copy(guiding = true, next = rec(park, nearby)), driving = true)
+        assertEquals("다음 화장실", next.context)
+        assertEquals("정자공원 공중화장실", next.title)
+        assertTrue("다음 화장실 카드의 칩: ${next.chips}", next.chips.contains("가까운 화장실"))
+        // 길안내가 없으면 맥락 줄이 이미 "진행 방향 가까운 화장실"이다: 칩으로 되풀이하지 않는다
+        val unguided = stopCard(running.copy(next = rec(park, nearby)), driving = true)
+        assertEquals("진행 방향 가까운 화장실", unguided.context)
+        assertFalse("같은 말 두 번: ${unguided.chips}", unguided.chips.contains("가까운 화장실"))
+    }
+
+    @Test
     fun checkInLabelFollowsItsReason() {
         // 연속 운전 시간으로 묻는 상태 확인에 '운전 패턴 변화'라고 붙었다 (2026-11-11 에뮬레이터)
         fun label(speech: String) = stopCard(running.copy(prompt = Prompt("c", PromptKind.CHECK_IN, speech, expiresAt = Long.MAX_VALUE)), driving = true).context

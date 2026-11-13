@@ -29,6 +29,31 @@ class StopDetectorTest {
     }
 
     @Test
+    fun aBoardingStopIgnoresDoorsUntilTheDepartureIsAccepted() {
+        // 타는 중 (2026-11-13 감사, 엔진 StopTracker와 같은 규칙): 탈 때 연 문은 화장실 정차의 문이 아니다
+        val d = StopDetector()
+        d.onTick(t0, Gear.PARK, 0f, doorOpened = false, boardingIfNew = true)
+        d.onTick(t0 + 30_000, Gear.PARK, 0f, doorOpened = true)
+        assertFalse("탈 때의 문", d.parkState!!.doorSeen)
+        assertFalse(d.onTick(t0 + 5 * min, Gear.DRIVE, FAST, false)!!.doorOpened)
+        // 다음 정차: '응' 한 뒤에 연 문은 센다. 다시 대기(옮겨 대기)를 거쳐도 그 정차는 타는 중이다
+        val e = StopDetector()
+        e.onTick(t0, Gear.PARK, 0f, false, boardingIfNew = true)
+        e.onTick(t0 + min, Gear.DRIVE, 5f, false)
+        e.onTick(t0 + min + 20_000, Gear.PARK, 0f, false, boardingIfNew = false)
+        e.onTick(t0 + 2 * min, Gear.PARK, 0f, doorOpened = true)
+        assertFalse("다시 대기도 같은 타는 중의 정차", e.parkState!!.doorSeen)
+        e.intendRestroom(t0 + 3 * min)
+        e.onTick(t0 + 4 * min, Gear.PARK, 0f, doorOpened = true)
+        assertTrue("'응' 뒤의 문", e.parkState!!.doorSeen)
+        // 되돌린 정차도 타는 중이면 문을 세지 않는다
+        val r = StopDetector()
+        r.restore(ParkState(t0, doorSeen = false), t0 + min, boarding = true)
+        r.onTick(t0 + 2 * min, Gear.PARK, 0f, doorOpened = true)
+        assertFalse(r.parkState!!.doorSeen)
+    }
+
+    @Test
     fun exactlyThreeMinutesCountsAndJustUnderDoesNot() {
         val d = StopDetector()
         d.onTick(t0, Gear.PARK, 0f, false)

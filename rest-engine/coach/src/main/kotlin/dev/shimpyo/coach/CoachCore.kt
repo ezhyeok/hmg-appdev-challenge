@@ -6,6 +6,7 @@ import dev.shimpyo.engine.CabinAction
 import dev.shimpyo.engine.CabinState
 import dev.shimpyo.engine.CoachInput
 import dev.shimpyo.engine.CoachOutput
+import dev.shimpyo.engine.Gear
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.PersonalMemory
 import dev.shimpyo.engine.PitStopPlan
@@ -171,7 +172,10 @@ class CoachCore(private val d: CoachDeps) {
         val now = a.clock.now()
         recorder.load(StopHistory.sanitize(loaded.history, now))
         // 정차 중 재시작: 마지막 맥박 때까지는 서 있었다 (StopDetector.restore)
-        recorder.restore(a.session.restoredPark, now, lastSeenMs = loaded.heartbeat?.savedAt ?: now)
+        recorder.restore(
+            a.session.restoredPark, now, lastSeenMs = loaded.heartbeat?.savedAt ?: now,
+            boarding = a.session.restoredPark != null && !a.session.moved,
+        )
         memorySaver.loaded(loaded.memory)
         enterWorld(a)
         crew.enforceConsent()
@@ -204,7 +208,7 @@ class CoachCore(private val d: CoachDeps) {
                 desk.askEnded(m.key)
                 // 카드에 한 말은 대답 하나다 (그 카드가 아직 떠 있으면 그 장소 이름을 넘겨, 장소를 가리킨 말을 새 요청으로 읽지 않게 한다)
                 val card = machine.current?.takeIf { it.key == m.key }
-                val reply = parser.replyTo(m.text, crew.occupants, card?.prompt?.stop?.name)
+                val reply = parser.replyTo(m.text, crew.occupants, card?.prompt?.stop?.name, card?.prompt?.kind)
                 onPromptEvent(PromptEvent.Heard(m.key, reply.answer, reply.other))
             }
             is Msg.Listened -> if (current(m.gen)) onListened(m.text)
@@ -265,7 +269,8 @@ class CoachCore(private val d: CoachDeps) {
         val heading = travel.update(real, speed, gear)
         val (samples, door) = d.hub.drain(t)
 
-        recorder.onTick(t, gear, speed, door, pos, a.world.persistsHistory)?.let { r ->
+        // 이번 여정에서 아직 움직이지 않았을 때의 정차는 타는 중이다: 그때 연 문은 화장실 정차가 아니다 (엔진과 같은 규칙)
+        recorder.onTick(t, gear, speed, door, pos, a.world.persistsHistory, boardingIfNew = !a.session.moved)?.let { r ->
             worlds.onStop(r.log, t)
             restoredAccept = null
             if (r.log.restroom) crew.onRestroomStop()
@@ -284,7 +289,7 @@ class CoachCore(private val d: CoachDeps) {
                 log.i("restored park ended ${(t - endedAt) / 1000}s ago")
                 worlds.restoredParkEnded(endedAt)
             }
-            worlds.onTick(t, recorder.parkState)?.let { change ->
+            worlds.onTick(t, recorder.parkState, moving = gear != Gear.PARK && (speed ?: 0f) > StopDetector.MOVING_KPH)?.let { change ->
                 log.i("new trip")
                 applyChange(change)
                 a = worlds.active
@@ -313,7 +318,7 @@ class CoachCore(private val d: CoachDeps) {
                 // 일상 길의 가까운 화장실 (NearbyStops). 고속도로 차로 위·제한속도 70 이상인 길·시속 80 이상이면 비운다
                 nearby = nearbyStops.current(
                     search, search?.heading, highwayRoute = navi.guiding && ahead.isNotEmpty(), speedKph = speed,
-                    roadLimitKph = if (a.world.usesNaviRoadLimit) d.tracker.roadLimit.value?.fresh(el) else null, now = t, elapsedMs = el,
+                    roadLimitKph = d.tracker.roadLimit.value?.fresh(el), now = t, elapsedMs = el, mode = a.world.nearbyMode,
                 ),
             ),
         )
@@ -446,6 +451,7 @@ class CoachCore(private val d: CoachDeps) {
                 } catch (x: Exception) {
                     log.w("onPromptResult failed: ${x.message}")
                 }
+                PromptEffect.RestroomIntended -> recorder.intendRestroom(worlds.active.clock.now())
                 is PromptEffect.StartGoTo -> startGoTo(e)
                 is PromptEffect.FreshAir -> startFreshAir(e.announce)
                 is PromptEffect.Forward -> dispatchIntent(e.intent)
@@ -530,7 +536,8 @@ class CoachCore(private val d: CoachDeps) {
     /** 재시작 전에 들르기로 한 곳이 지금 후보에 보이면 엔진에 다시 알린다 (한 번). 기다리는 시간이 지나면 잊는다 */
     private fun restoreAccepted(a: ActiveWorld, input: CoachInput, el: Long) {
         val id = restoredAccept ?: return
-        val stop = input.candidates.firstOrNull { it.id == id }
+        // 경로 후보, 없으면 차 가까이의 일상 후보 (도심에서 고른 공중화장실은 경로 후보에 없다: 2026-11-13 감사 13)
+        val stop = input.candidates.firstOrNull { it.id == id } ?: input.nearby.firstOrNull { it.id == id }
         if (stop == null) {
             if (el >= restoredAcceptUntilMs) restoredAccept = null
             return
@@ -587,6 +594,8 @@ class CoachCore(private val d: CoachDeps) {
                     urgentOpened(urgent.openByVoice(d.elapsed.elapsedMs()))
                 }
             else -> {
+                // "방금 화장실 다녀왔어": 엔진(다음 틱)과 함께 여정 기준점도 옮겨 저장한다 (재시작해도 남는다)
+                if (intent is VoiceIntent.RestroomDone) worlds.active.session.onRestroomDone(intent.occupantId, worlds.active.clock.now())
                 if (pendingIntents.size >= MAX_PENDING_INTENTS) pendingIntents.removeFirst()
                 pendingIntents.addLast(intent)
             }
@@ -660,7 +669,10 @@ class CoachCore(private val d: CoachDeps) {
                 resetPrompts()
                 val a = change.active
                 val now = a.clock.now()
-                recorder.onWorldChanged(now, change.restorePark, lastSeenMs ?: now)
+                recorder.onWorldChanged(
+                    now, change.restorePark, lastSeenMs ?: now,
+                    boarding = change.restorePark != null && !a.session.moved,
+                )
                 urgent.reset()
                 pin.reset()
                 plans.worldChanged()

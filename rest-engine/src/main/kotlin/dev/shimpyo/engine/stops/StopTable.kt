@@ -105,6 +105,17 @@ class StopTable private constructor(
         return h.openAt(KoreanCalendar.dayType(t.toLocalDate()), t.hour * 60 + t.minute)
     }
 
+    /**
+     * 일상 정차 후보로 쓸 수 있는 행인지: 화장실이 있고, 차를 세울 수 있고, 지금 닫히지 않았다 (모르면 쓸 수 있다).
+     * StopCandidate를 만들기 전에 거르는 데 쓴다 (도심에서는 가까운 화장실 대부분이 주차 불가라, 자른 뒤 거르면 남는 곳이 없었다)
+     */
+    fun everydayUsable(i: Int, nowMs: Long): Boolean {
+        val f = flags[i]
+        if (!(f has F_RESTROOM) || !(f has F_PARKABLE)) return false
+        val open = if (f has F_OPEN_KNOWN) f has F_OPEN_NOW else openNow(i, nowMs)
+        return open != false
+    }
+
     /** i번째 행의 정차 후보 (질의 결과로 나갈 때만 만든다) */
     fun candidate(i: Int): StopCandidate {
         val f = flags[i]

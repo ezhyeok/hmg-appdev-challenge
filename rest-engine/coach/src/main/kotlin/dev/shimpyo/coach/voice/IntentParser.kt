@@ -2,6 +2,7 @@ package dev.shimpyo.coach.voice
 
 import dev.shimpyo.coach.StopNames
 import dev.shimpyo.engine.Occupant
+import dev.shimpyo.engine.PromptKind
 import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.Purpose
 import dev.shimpyo.engine.StopKind
@@ -66,8 +67,9 @@ class IntentParser {
      * - 거절하거나 대답이 아니면 분명한 요청만 전한다. 휴게소·화장실이라는 낱말만 있는 말은 카드를 되받은 것이고,
      *   "다음 휴게소에서", "나중에"는 지금 할 일이 아니고, 카드의 정차 이름을 댄 휴식 요청은 그 정차 이야기다.
      */
-    fun replyTo(text: String?, occupants: List<Occupant>, cardStopName: String?): CardReply {
+    fun replyTo(text: String?, occupants: List<Occupant>, cardStopName: String?, cardKind: PromptKind? = null): CardReply {
         val t = flat(text) ?: return CardReply(YesNo.UNKNOWN, null)
+        if (cardKind == PromptKind.DEPARTURE) departureReply(t, text, occupants)?.let { return it }
         val answer = answer(t, asked(text), stopKey = cardStopName?.let(StopNames::key))
         val request = request(t, occupants) ?: return CardReply(answer, null)
         val forward = when (answer) {
@@ -272,6 +274,24 @@ class IntentParser {
     /** t[i]의 '안'이 "미안"처럼 다른 낱말의 끝인지. "미안 급해"는 급하다는 말이다 */
     private fun endsAnotherWord(t: String, i: Int): Boolean = ENDS_IN_AN.any { i + 1 >= it.length && t.startsWith(it, i + 1 - it.length) }
 
+    /**
+     * 출발 전 한마디("출발 전에 다녀오세요")에 한 대답 (2026-11-13 감사: 버튼 이름인 "다녀올게요"도 못 알아들었고, "화장실 다녀올게"는
+     * 화장실 요청으로 넘어가 가까운 화장실을 묻고 가짜 관측을 남겼다).
+     * - "다녀왔어", "이미 갔다 왔어": 거절 + [VoiceIntent.RestroomDone] (화장실 시계를 지금으로. 누구를 말했으면 그 사람)
+     * - "다녀올게", "갔다 올게", "화장실 보내고 올게": 수락. 화장실 요청으로 넘기지 않는다 (그 요청이 바로 이 카드다)
+     * 그 밖은 null (보통 대답 규칙으로)
+     */
+    private fun departureReply(t: String, text: String?, occupants: List<Occupant>): CardReply? {
+        if (asked(text) || HOW_LONG.containsMatchIn(t)) return null
+        if (ALREADY_WENT.containsMatchIn(t)) {
+            val w = who(t, occupants)
+            return CardReply(YesNo.NO, VoiceIntent.RestroomDone(w.occupant?.id))
+        }
+        if (refused(t)) return null
+        if (WILL_GO.containsMatchIn(t)) return CardReply(YesNo.YES, null)
+        return null
+    }
+
     // ------------------------------------------------------------ 누구
 
     /** [type]: 말에 나온 탑승자 유형 (아무도 가리키지 않았으면 null). [occupant]: 그 말이 가리키는 설정된 탑승자 */
@@ -391,6 +411,12 @@ class IntentParser {
                 "(갔다왔|다녀왔|갔어|갔었|갔는데|했어|했는데|했다|했습니다|시켰|갈았|갈아줬|갈아놨|먹였|먹었|넣었|끝났|들렀어|들렀는데)" + // 화장실 갔다 왔어, 산책했어
                 "|^(었|였)(어|다|는데|지|고|습니다|네|거든|잖아|잖)",                            // 밥 먹'었어', 먹'었잖아'
         )
+
+        // ---- 출발 전 한마디의 대답
+        /** 이미 다녀왔다 ("다녀왔어", "갔다 왔어", "이미 갔어", "방금 화장실 다녀왔어요") */
+        val ALREADY_WENT = Regex("(다녀왔|갔다왔|(이미|방금|아까|벌써)(화장실)?(갔|다녀|볼일봤|쌌))")
+        /** 지금 다녀오겠다 ("다녀올게요", "갔다 올게", "다녀와서 출발할게", "화장실 보내고 올게", "데리고 다녀올게", "다녀오자") */
+        val WILL_GO = Regex("(다녀올|다녀오자|다녀오겠|다녀와서|갔다올|갔다오자|갔다오겠|갔다와서|보내고올|보낼게|데려갔다올|데리고다녀올|데리고갔다올|다녀오라고할)")
 
         // ---- 되묻기
         val HOW_LONG = Regex(

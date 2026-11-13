@@ -43,11 +43,14 @@ class StopRecorder(
         saved = list
     }
 
-    /** [pos]: 지금 세계의 위치 (시연이면 시연 위치). [persist]: 지금 세계가 기록을 저장하는지 */
-    fun onTick(t: Long, gear: Gear, speedKph: Float?, doorOpened: Boolean, pos: Fix?, persist: Boolean): Recorded? {
+    /**
+     * [pos]: 지금 세계의 위치 (시연이면 시연 위치). [persist]: 지금 세계가 기록을 저장하는지.
+     * [boardingIfNew]: 이 틱에 새 정차가 시작되면 타는 중의 정차인지 (StopDetector, 코어가 여정 기준점으로 정한다)
+     */
+    fun onTick(t: Long, gear: Gear, speedKph: Float?, doorOpened: Boolean, pos: Fix?, persist: Boolean, boardingIfNew: Boolean = false): Recorded? {
         val before = parkedAt
         val sinceBefore = detector.parkState?.since
-        val stop = detector.onTick(t, gear, speedKph, doorOpened)
+        val stop = detector.onTick(t, gear, speedKph, doorOpened, boardingIfNew)
         val now = detector.parkState
         when {
             // 새로 세웠다 (끝난 정차와 같은 틱일 수 있다): 이번 위치부터 다시 본다
@@ -75,8 +78,8 @@ class StopRecorder(
      * 세계(시연·실제)가 바뀌었다 (WorldChange.Kind.WORLD). [now]는 새 세계의 코치 시각, [restorePark]는 WorldChange.restorePark.
      * 시연을 끌 때는 [lastSeenMs]에 시연을 켠 실제 시각을 넘긴다 (StopDetector.restore). 저장하지 않은 (시연) 기록은 버린다
      */
-    fun onWorldChanged(now: Long, restorePark: ParkState?, lastSeenMs: Long = now) {
-        detector.restore(restorePark, now, lastSeenMs)
+    fun onWorldChanged(now: Long, restorePark: ParkState?, lastSeenMs: Long = now, boarding: Boolean = false) {
+        detector.restore(restorePark, now, lastSeenMs, boarding)
         unsaved = emptyList()
         // 시연 위치(휴게소)의 이름이 실제 정차에 붙지 않게
         parkedAt = null
@@ -89,8 +92,11 @@ class StopRecorder(
         unsaved = emptyList()
     }
 
-    /** 앱 시작: TripSession.restoredPark를 첫 틱 전에 끼운다. [lastSeenMs]: 마지막 맥박을 쓴 때 */
-    fun restore(state: ParkState?, now: Long, lastSeenMs: Long = now) = detector.restore(state, now, lastSeenMs)
+    /** 앱 시작: TripSession.restoredPark를 첫 틱 전에 끼운다. [lastSeenMs]: 마지막 맥박을 쓴 때. [boarding]: 그 정차가 타는 중의 정차인지 */
+    fun restore(state: ParkState?, now: Long, lastSeenMs: Long = now, boarding: Boolean = false) = detector.restore(state, now, lastSeenMs, boarding)
+
+    /** 출발 전 한마디에 '응' (StopDetector.intendRestroom) */
+    fun intendRestroom(t: Long) = detector.intendRestroom(t)
 
     private fun placeName(at: Fix, now: Long): String? =
         stops.near(at.lat, at.lon, null, PLACE_RADIUS_M, CoreRules.PARKABLE_KINDS, now = now, limit = 1).firstOrNull()?.name

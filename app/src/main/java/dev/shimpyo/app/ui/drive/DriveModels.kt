@@ -248,7 +248,7 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     }
     val chips = buildList {
         // 맥락 줄이 이미 말한 이유(요청하신 화장실 등)는 칩으로 되풀이하지 않는다
-        reasons.forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.let(::add) }
+        reasons.forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.takeIf { it !in context }?.let(::add) }
         if (restroomKind) {
             Labels.companionChip(state.occupants.firstOrNull { it.id == state.restroom?.drivenBy })?.let(::add)
         } else if (prompt.kind != PromptKind.INFO) {
@@ -277,7 +277,10 @@ private const val CONTEXT_NEAR = "가까운 화장실"
 private const val CONTEXT_REQUESTED_RESTROOM = "요청하신 화장실"
 private const val CONTEXT_REQUESTED_CARE = "요청하신 곳"
 
-/** 맥락 줄이 뜻을 말해 주는 이유 코드: 같은 말을 칩으로 되풀이하지 않는다 */
+/**
+ * 맥락 줄이 뜻을 말해 주는 이유 코드: 같은 말을 칩으로 되풀이하지 않는다. 그 밖에도 칩 문구가 맥락 줄에 이미 있으면 붙이지 않는다
+ * (도심 가까운 화장실을 묻는 카드의 맥락 줄 "가까운 화장실", 길안내 없을 때 '다음 화장실' 카드의 "진행 방향 가까운 화장실")
+ */
 private val CONTEXT_LINE_CODES = setOf("NEXT_ACCEPTED", "NEXT_REQUESTED_RESTROOM", "NEXT_REQUESTED_CARE")
 
 /**
@@ -289,7 +292,7 @@ private val CONTEXT_LINE_CODES = setOf("NEXT_ACCEPTED", "NEXT_REQUESTED_RESTROOM
  * 2. 없으면 엔진의 마지막 기회 문장인지 본다: 게이지가 NOW일 때 엔진은 "정체 전 마지막 화장실이에요"라고 물으면서 이유는
  *    NEXT_NEAREST_RESTROOM 하나만 줬다(UI-6). 말한 문장과 맥락 줄이 어긋나지 않게 문장이 요청·가까운 곳 코드보다 먼저다.
  * 3. 그 밖의 LAST_CHANCE_* 이유만 있으면(여럿이 타서 앞당긴 것 등) 마지막 기회.
- * 4. 요청에 답한 곳(NEXT_REQUESTED_*), 가까운 곳(NEXT_NEAREST_RESTROOM) 코드.
+ * 4. 요청에 답한 곳(NEXT_REQUESTED_*), 가까운 곳(NEXT_NEAREST_RESTROOM, 도심 일상 후보 NEXT_NEARBY_RESTROOM) 코드.
  * 5. 이유가 없으면 나머지 세 문장으로. 아는 문장이 아니면 '다음 화장실': 마지막 기회라고 하지 않는다.
  */
 internal fun restroomQuestionContext(codes: List<String>, speech: String): String = when {
@@ -301,7 +304,7 @@ internal fun restroomQuestionContext(codes: List<String>, speech: String): Strin
     codes.any { it.startsWith("LAST_CHANCE_") } -> CONTEXT_GAP
     "NEXT_REQUESTED_RESTROOM" in codes -> CONTEXT_REQUESTED_RESTROOM
     "NEXT_REQUESTED_CARE" in codes -> CONTEXT_REQUESTED_CARE
-    "NEXT_NEAREST_RESTROOM" in codes -> CONTEXT_NEAR
+    "NEXT_NEAREST_RESTROOM" in codes || "NEXT_NEARBY_RESTROOM" in codes -> CONTEXT_NEAR
     speech.contains("여유가 거의 없어요") -> CONTEXT_NEAR
     speech.startsWith("다음 화장실은") -> CONTEXT_REQUESTED_RESTROOM
     speech.contains("쉬어 갈 수 있어요") -> CONTEXT_REQUESTED_CARE
@@ -416,7 +419,7 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
     val drivenBy = state.occupants.firstOrNull { it.id == state.restroom?.drivenBy }
     val chips = buildList {
         // 들르기로 한 곳·요청하신 곳은 맥락 줄이 이미 말한다: 같은 말을 칩으로 되풀이하지 않는다
-        next.reasons.forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.let(::add) }
+        next.reasons.forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.takeIf { it !in context }?.let(::add) }
         if (restroom) Labels.companionChip(drivenBy)?.let(::add)
         if (Purpose.REST in next.purposes) state.fatigue?.reasons?.let(::fatigueReason)?.let(::add)
     }.distinct().take(maxChips)

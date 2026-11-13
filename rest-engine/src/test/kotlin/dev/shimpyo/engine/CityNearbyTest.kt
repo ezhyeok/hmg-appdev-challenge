@@ -3,7 +3,9 @@ package dev.shimpyo.engine
 import kotlin.random.Random
 import kotlin.test.Test
 import kotlin.test.assertEquals
+import kotlin.test.assertNotEquals
 import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -89,5 +91,145 @@ class CityNearbyTest {
     fun withNothingNearbyNothingChanges() {
         val e = engine(restroomMinAgo = 40)
         assertEquals(null, drive(e, start, emptyList()).next, "가까운 후보도 경로 후보도 없으면 추천도 없다 (예전과 같다)")
+    }
+
+    // ---------------------------------------------------------------- 2026-11-13 감사
+
+    /** 아이가 지금 가야 하는 엔진 (110분 전 화장실) */
+    private fun nowEngine(occupants: List<Occupant> = listOf(adult("driver"), child("kid", 7))) = CoachEngine(
+        profile = TripProfile(occupants, tripStart = start - 30 * MIN, lastRestroomAt = occupants.associate { it.id to start - 110 * MIN }),
+        random = Random(7),
+    )
+
+    private fun firstPrompt(e: CoachEngine, fromS: Int, toS: Int, input: (Long) -> CoachInput): Prompt? {
+        for (s in fromS..toS) e.update(input(start + s * SEC)).prompt?.let { return it }
+        return null
+    }
+
+    @Test
+    fun aNearbyNowQuestionStaysUpForItsLifetimeAndIsNotRepeated() {
+        // 감사 1: 질문이 한 틱 만에 사라지고 30초마다 새 id로 다시 떴다 (질문 장소를 경로 후보에서만 찾았다)
+        val e = nowEngine()
+        fun tick(sec: Int) = e.update(CoachInput(now = start + sec * SEC, gear = Gear.DRIVE, speedKph = 30f, nearby = listOf(park, gas))).prompt
+        var askedAt = -1
+        var id: String? = null
+        for (sec in 0..40) {
+            val p = tick(sec)
+            if (p != null) { askedAt = sec; id = p.id; break }
+        }
+        assertTrue(askedAt >= 0, "지금 필요하면 묻는다")
+        var last = askedAt
+        for (sec in askedAt + 1..askedAt + 60) {
+            if (tick(sec)?.id != id) break
+            last = sec
+        }
+        assertTrue(last - askedAt >= 40, "질문 수명(45초) 동안 떠 있다: ${last - askedAt}초")
+        for (sec in last + 1..last + 600 step 5) {
+            val q = tick(sec)
+            assertTrue(q == null || q.stop?.id != "park", "대답 없이 내려간 뒤 같은 곳을 곧바로 다시 묻지 않는다 (${sec}초: ${q?.speech})")
+        }
+    }
+
+    @Test
+    fun aVoicedNeedAnswerInTheCityStaysUp() {
+        val e = engine(restroomMinAgo = 40)
+        drive(e, start, listOf(park, gas))
+        val p = assertNotNull(drive(e, start + 2 * SEC, listOf(park, gas), intent = VoiceIntent.OccupantNeed("kid", Purpose.RESTROOM)).prompt)
+        for (s in 3..30) assertEquals(p.id, drive(e, start + s * SEC, listOf(park, gas)).prompt?.id, "${s}초")
+    }
+
+    @Test
+    fun leavingTheCityOnAHighwayRouteANowChildIsOfferedTheCloseStation() {
+        // 감사 2: 부산 가는 길안내(첫 휴게소 30km), 아직 시내 도로. 아이가 지금 가야 하면 300m 앞 주유소다
+        val e = nowEngine()
+        val route = RouteState(guiding = true, remainDistanceM = 300_000.0, remainTimeS = 4 * 3600.0)
+        val rest = stop("ra", 30_000.0, name = "서울만남의광장휴게소")
+        val station = everyday("gas", 300.0, kind = StopKind.GAS_STATION, name = "분당주유소")
+        val p = assertNotNull(firstPrompt(e, 0, 60) { CoachInput(now = it, gear = Gear.DRIVE, speedKph = 30f, route = route, candidates = listOf(rest), nearby = listOf(station)) })
+        assertEquals("gas", p.stop?.id, p.speech)
+    }
+
+    @Test
+    fun atNowAMuchCloserNearbyStopBeatsAnUnguidedRestArea4kmAway() {
+        // 감사 3A: 길안내 없음, 내비로 잰 휴게소 4.5km, 주유소 300m
+        val e = nowEngine()
+        val rest = stop("ra", 4_500.0, name = "서울만남의광장휴게소")
+        val station = everyday("gas", 300.0, kind = StopKind.GAS_STATION, name = "양재주유소")
+        val p = assertNotNull(firstPrompt(e, 0, 60) { CoachInput(now = it, gear = Gear.DRIVE, speedKph = 30f, candidates = listOf(rest), nearby = listOf(station)) })
+        assertEquals("gas", p.stop?.id, p.speech)
+    }
+
+    @Test
+    fun anEverydayPlaceAmongTheCandidatesIsNotAskedWithTheHighwayTwoKmRule() {
+        // 감사 3B: 급해 결과로 후보에 섞인 2.9km 주유소를 '진입로 2km 밖 가장 가까운 화장실'로 물었다 (300m 공중화장실을 두고)
+        val e = nowEngine()
+        val farGas = everyday("far-gas", 2_900.0, kind = StopKind.GAS_STATION, name = "먼 주유소")
+        val p = assertNotNull(firstPrompt(e, 0, 60) { CoachInput(now = it, gear = Gear.DRIVE, speedKph = 30f, candidates = listOf(farGas), nearby = listOf(everyday("wc", 300.0, name = "역삼 공중화장실"))) })
+        assertEquals("wc", p.stop?.id, p.speech)
+    }
+
+    @Test
+    fun parkedNextToANearbyRestroomTheAnswerIsThatItIsRightHere() {
+        // 감사 6: P, 40m 옆 공중화장실. "다음 화장실은 100m 앞 … 들를까요?"에 '응'이면 서 있는 곳으로 길안내를 걸었다
+        val e = engine(restroomMinAgo = 40)
+        val beside = everyday("beside", 40.0, name = "정자공원 공중화장실")
+        e.update(CoachInput(now = start, gear = Gear.PARK, speedKph = 0f, nearby = listOf(beside, gas)))
+        val p = assertNotNull(e.update(CoachInput(now = start + 2 * SEC, gear = Gear.PARK, speedKph = 0f, nearby = listOf(beside, gas), intent = VoiceIntent.OccupantNeed("kid", Purpose.RESTROOM))).prompt)
+        assertEquals(PromptKind.INFO, p.kind, p.speech)
+        assertNull(p.stop, "내비 명령을 보낼 장소가 없다")
+        assertTrue("정자공원" in p.speech, p.speech)
+    }
+
+    @Test
+    fun aNearbyStopBeyondANearDestinationIsNotOffered() {
+        // 감사 7: 목적지가 800m(3분) 앞인데 2km 밖 화장실을 물었다 (목적지를 지나갔다 돌아온다)
+        val e = nowEngine()
+        val route = RouteState(guiding = true, remainDistanceM = 800.0, remainTimeS = 180.0)
+        val far = everyday("far", 2_000.0, name = "먼 공중화장실")
+        for (s in 0..60) {
+            val out = e.update(CoachInput(now = start + s * SEC, gear = Gear.DRIVE, speedKph = 30f, route = route, nearby = listOf(far)))
+            assertNotEquals("far", out.prompt?.stop?.id, out.prompt?.speech)
+            assertNotEquals("far", out.next?.stop?.id)
+        }
+    }
+
+    @Test
+    fun theRouteCandidateKeepsItsEtaWhileNearbyIsRanked() {
+        // 감사 10: 가까운 후보 순위를 매기며 경로 도착 시간 색인을 덮어써서 휴게소 추천의 도착 시간이 비었다
+        val e = engine(restroomMinAgo = 40)
+        val route = RouteState(guiding = true, remainDistanceM = 100_000.0, remainTimeS = 4_500.0)
+        val rest = stop("ra", 3_000.0, name = "안성휴게소")
+        val out = e.update(CoachInput(now = start, gear = Gear.DRIVE, speedKph = 40f, route = route, candidates = listOf(rest), nearby = listOf(park)))
+        assertEquals("ra", out.next?.stop?.id)
+        assertNotNull(out.next?.stop?.etaS, "경로 후보의 도착 시간")
+    }
+
+    @Test
+    fun aNearbyRecommendationsEtaUsesCitySpeed() {
+        // 600m × 도로 계수 1.3 ÷ 시속 25km = 약 112초 (예전에는 시속 80km로 35초)
+        val out = drive(engine(restroomMinAgo = 40), start, listOf(park, gas))
+        val eta = assertNotNull(out.next?.stop?.etaS)
+        assertTrue(eta in 90.0..140.0, "도심 속도의 도착 시간: $eta")
+    }
+
+    @Test
+    fun aDiaperRequestInTheCityGetsANearbyChangingTable() {
+        // 감사 12: 밤 11시, 영아. 500m 앞 기저귀 교환대 화장실이 있는데 "경로 앞에서 들를 수 있는 곳을 찾지 못했어요"
+        val e = CoachEngine(
+            profile = TripProfile(listOf(adult("driver"), infant("baby")), tripStart = start - 30 * MIN, lastRestroomAt = mapOf("driver" to start - 30 * MIN, "baby" to start - 30 * MIN)),
+            random = Random(7),
+        )
+        val changing = everyday("changing", 500.0, name = "역삼 공중화장실").let { it.copy(facilities = it.facilities.copy(diaperTable = true)) }
+        drive(e, start, listOf(changing))
+        val p = assertNotNull(drive(e, start + 2 * SEC, listOf(changing), intent = VoiceIntent.OccupantNeed("baby", Purpose.FEEDING)).prompt)
+        assertEquals("changing", p.stop?.id, p.speech)
+    }
+
+    @Test
+    fun howLongInTheCityNamesTheNearbyRestroom() {
+        val e = engine(restroomMinAgo = 40)
+        drive(e, start, listOf(park, gas))
+        val p = assertNotNull(drive(e, start + 2 * SEC, listOf(park, gas), intent = VoiceIntent.HowLong).prompt)
+        assertTrue("정자공원" in p.speech, p.speech)
     }
 }

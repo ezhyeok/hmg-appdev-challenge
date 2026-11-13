@@ -23,6 +23,10 @@ import dev.shimpyo.engine.EngineMath.NONE
  * 예전에는 P 2분·시속 15km로 2분을 다섯 번 되풀이하면 한 정차로 이어져 '15분 휴식'이 되고, 그 사이 문이 한 번 열렸으면 화장실
  * 시계까지 돌아갔다(닫힘 검증 2026-11-12). 차속을 모르는 동안은 다시 대기로 볼 수 있는 가장 빠른 속도로 움직였다고 본다(거리의 위 한계):
  * 같은 정차라고 확인할 수 있을 때만 이어 센다.
+ *
+ * 타는 중 (2026-11-13 감사): 여정을 시작하며 선 정차([update]의 boarding)에서 연 문은 타고 내리는 것이라 화장실 정차로 세지 않는다.
+ * 예전에는 시동 뒤 아이가 타며 문을 열고 3분 서 있으면 집 앞이 '화장실 정차'가 되어 게이지가 다시 찼고, 가정한 출발 전 시각부터
+ * 잰 간격을 배웠다. 출발 전 한마디에 '응' 한 뒤([intendRestroom])에 연 문은 화장실에 다녀온 것이다.
  */
 internal class StopTracker(private val config: CoachConfig) {
     /** 한 update에서 생긴 사건. 할당을 줄이려고 같은 객체를 재사용한다 */
@@ -51,6 +55,10 @@ internal class StopTracker(private val config: CoachConfig) {
 
     private var parkStart = NONE
     private var firstDoorAt = NONE
+    /** 이번 정차가 타는 중의 정차인지 (정차를 시작할 때 정한다. 다시 대기는 같은 정차라 그대로) */
+    private var boarding = false
+    /** 타는 중의 정차에서 화장실에 다녀오겠다고 한 때. 그 뒤에 연 문만 센다 */
+    private var restroomIntentAt = NONE
     private var restroomFired = false
     private var restFired = false
     private var mealFired = false
@@ -65,7 +73,8 @@ internal class StopTracker(private val config: CoachConfig) {
     private val restMs get() = config.restMinParkedMin * 60_000L
     private val mealMs get() = config.mealStopMinMin * 60_000L
 
-    fun update(mono: Long, gear: Gear, speedKph: Float?, doorOpened: Boolean): Events {
+    /** [boarding]: 지금 새 정차가 시작되면 그것이 타는 중의 정차인지 (엔진: 이번 여정에서 아직 움직이지 않았다) */
+    fun update(mono: Long, gear: Gear, speedKph: Float?, doorOpened: Boolean, boarding: Boolean = false): Events {
         events.clear()
         val nowParked = when (gear) {
             Gear.PARK -> true
@@ -89,6 +98,9 @@ internal class StopTracker(private val config: CoachConfig) {
             if (!repark) {
                 parkStart = mono
                 firstDoorAt = NONE
+                this.boarding = boarding
+                restroomIntentAt = NONE
+                anyDoorThisSession = false
                 restroomFired = false
                 restFired = false
                 mealFired = false
@@ -96,8 +108,12 @@ internal class StopTracker(private val config: CoachConfig) {
             }
             leftAt = NONE
         }
-        // 정차 중이었거나 막 정차했으면 이번 구간의 문 열림으로 센다 (P에서 D로 바뀌는 update의 문 열림도 포함)
-        if ((parked || nowParked) && doorOpened && firstDoorAt == NONE) firstDoorAt = mono
+        if ((parked || nowParked) && doorOpened) anyDoorThisSession = true
+        // 정차 중이었거나 막 정차했으면 이번 구간의 문 열림으로 센다 (P에서 D로 바뀌는 update의 문 열림도 포함).
+        // 타는 중의 정차는 화장실에 다녀오겠다고 한 뒤의 문만 센다
+        if ((parked || nowParked) && doorOpened && firstDoorAt == NONE && (!this.boarding || (restroomIntentAt != NONE && mono >= restroomIntentAt))) {
+            firstDoorAt = mono
+        }
         if (parked || nowParked) evaluate(mono)
         parked = nowParked
         return events
@@ -105,6 +121,21 @@ internal class StopTracker(private val config: CoachConfig) {
 
     /** 지금(또는 마지막) 정차가 시작된 시각. 다시 대기는 같은 정차라 바뀌지 않는다. 선 적이 없으면 NONE */
     val sessionStart: Long get() = parkStart
+
+    /** 지금(또는 마지막) 정차가 타는 중의 정차인지. 출발하는 update에 늦게 낸 화장실 사건에도 그 정차의 값이다 */
+    val lastSessionBoarding: Boolean get() = boarding
+
+    /** 지금 정차에서 (센) 문이 열렸는지. 타는 중의 정차면 화장실에 다녀오겠다고 한 뒤의 문만 센다 */
+    val doorSeen: Boolean get() = parked && firstDoorAt != NONE
+
+    /** 지금 정차에서 문이 열린 적이 있는지 (타는 중의 문도). 서 있는 동안 내린 사람이 있었는지 본다 */
+    var anyDoorThisSession: Boolean = false
+        private set
+
+    /** 출발 전 한마디에 '응': 지금 정차에서 이 뒤에 연 문은 화장실에 다녀온 것이다 */
+    fun intendRestroom(mono: Long) {
+        if (parked && restroomIntentAt == NONE) restroomIntentAt = mono
+    }
 
     /** 지금 정차한 지 몇 ms인지. 정차 중이 아니면 0 */
     fun parkedForMs(mono: Long): Long = if (parked && parkStart != NONE) maxOf(0L, mono - parkStart) else 0L

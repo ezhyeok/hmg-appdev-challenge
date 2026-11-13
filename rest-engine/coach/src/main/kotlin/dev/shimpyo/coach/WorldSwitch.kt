@@ -207,9 +207,9 @@ class WorldSwitch(
      * 매 틱 (엔진 update 전). [now]는 지금 세계의 시각, [park]는 정차 감지기의 지금 정차.
      * 오래 서 있다 출발해 새 여정이 되면 엔진에 새 프로필을 넘기고 ENGINE 변경을 돌려준다.
      */
-    fun onTick(now: Long, park: ParkState?): WorldChange? {
+    fun onTick(now: Long, park: ParkState?, moving: Boolean = false): WorldChange? {
         val a = active
-        a.session.onTick(now, park) ?: return null
+        a.session.onTick(now, park, moving) ?: return null
         // tripStart가 다른 프로필을 넘기면 엔진이 주행 상태를 새로 시작한다 (CoachEngine.setProfile)
         a.engine.setProfile(a.profile(settings))
         val next = a.with(generation = ++generation)

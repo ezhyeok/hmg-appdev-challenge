@@ -161,7 +161,8 @@ class VoiceCorpusEvalTest {
             VoiceIntent.Sleepy -> "SLEEPY"
             VoiceIntent.Hungry -> "HUNGRY"
             VoiceIntent.HowLong -> "HOWLONG"
-            is VoiceIntent.Accept, is VoiceIntent.Decline -> "NONE"
+            // "방금 다녀왔어"는 출발 전 질문의 대답으로만 나온다 (마이크 말뭉치는 요청이 아닌 말로 센다)
+            is VoiceIntent.Accept, is VoiceIntent.Decline, is VoiceIntent.RestroomDone -> "NONE"
             is VoiceIntent.OccupantNeed -> when (i.purpose) {
                 Purpose.RESTROOM -> "RESTROOM"
                 Purpose.FEEDING -> "FEEDING"

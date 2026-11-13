@@ -67,6 +67,11 @@ internal class PromptPolicy(
         val reasons: List<Reason> = emptyList(),
         val groupDriven: Boolean = false,
         val cooldownOnExpiry: Boolean = true,
+        /**
+         * 진입로까지 거리로 물은 질문인지 (Candidate.distanceM이 있었다). 그런 질문은 지나가는 중(500m 안)이면 내린다. 거리 없이 물은
+         * 도심 질문(일상 후보)은 300m 앞 골목으로 바로 들어갈 수 있어서 거리로 내리지 않고, 장소가 목록에서 빠지면(지나쳤다) 내린다
+         */
+        val byDistance: Boolean = true,
     ) {
         val kind: PromptKind get() = prompt.kind
         var answered: Boolean = false
@@ -99,6 +104,10 @@ internal class PromptPolicy(
 
     /** 마지막 [decide]가 새로 물은 후보 (없으면 null). 엔진이 어떤 사용자 응답을 했는지 알려고 쓴다 */
     var lastIssued: Candidate? = null
+        private set
+
+    /** 마지막 [decide]에서 사용자의 말에 끊긴 엔진 질문의 종류 (없으면 null). 엔진이 '한 번만 묻기' 표시를 되돌리는 데 쓴다 */
+    var lastInterrupted: PromptKind? = null
         private set
 
     private val lastChanceEdges: DoubleArray = run {
@@ -139,10 +148,14 @@ internal class PromptPolicy(
         memory: PersonalMemory,
     ): Prompt? {
         lastIssued = null
+        lastInterrupted = null
         expireIfNeeded(mono, distanceOf)
         // 사용자 응답: 새 말이면 바로, 밀린 응답은 지금 질문이 끝난 뒤에
         for (c in cands) if (c.userInitiated && c.fresh) {
-            active?.let { interrupt(it) }
+            active?.let { a ->
+                if (!a.answered && !a.userInitiated) lastInterrupted = a.kind
+                interrupt(a)
+            }
             return issue(c, null, now, mono).prompt
         }
         if (active == null) for (c in cands) if (c.userInitiated) return issue(c, null, now, mono).prompt
@@ -156,7 +169,8 @@ internal class PromptPolicy(
             val act = active
             // 활성 질문이 있으면 더 급한 질문(마지막 기회, NOW 단계)만 그것을 밀어낼 수 있다. 후보는 우선순위 순이다
             if (act != null && !(urgentKind(c) && rank(c.kind) < rank(act.kind))) break
-            if (c.level != Level.NOW && issuedAtOrAbove(rank(c.kind)) >= config.maxPromptsPerHour) continue
+            // 시간당 상한은 달리는 동안의 말 걸기를 줄이려는 것이다: 서 있을 때만 묻는 출발 전 질문은 세지도 막히지도 않는다
+            if (c.level != Level.NOW && c.kind != PromptKind.DEPARTURE && issuedAtOrAbove(rank(c.kind)) >= config.maxPromptsPerHour) continue
             if (blocked(c, mono, distanceOf)) continue
             var statKey: String? = null
             val e = edgesFor(c.kind)
@@ -253,7 +267,10 @@ internal class PromptPolicy(
     private fun expireIfNeeded(mono: Long, distanceOf: (String) -> Double?) {
         val a = active ?: return
         var expire = mono >= a.expiresMono
-        if (!expire && a.targetId != null &&
+        if (!expire && a.targetId != null && !a.byDistance) {
+            // 거리 없이 물은 도심 질문: 장소가 지금 목록에 없으면(지나쳐 뒤로 빠졌다) 내린다
+            if (distanceOf(a.targetId) == null) expire = true
+        } else if (!expire && a.targetId != null &&
             (a.kind == PromptKind.LAST_CHANCE || a.kind == PromptKind.REST_SUGGESTION)
         ) {
             val d = distanceOf(a.targetId)
@@ -308,8 +325,14 @@ internal class PromptPolicy(
 
     private fun issue(c: Candidate, statKey: String?, now: Long, mono: Long): Issued {
         val ttl = config.promptTtlS * 1000L
-        val p = Prompt(id = ids.next(), kind = c.kind, speech = c.speech, stop = c.stop, expiresAt = now + ttl, userRequested = c.userInitiated)
-        val iss = Issued(p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes, c.reasons, c.groupDriven, c.cooldownOnExpiry)
+        val p = Prompt(
+            id = ids.next(), kind = c.kind, speech = c.speech, stop = c.stop, expiresAt = now + ttl, userRequested = c.userInitiated,
+            reasons = c.reasons,
+        )
+        val iss = Issued(
+            p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes, c.reasons, c.groupDriven, c.cooldownOnExpiry,
+            byDistance = c.distanceM != null || c.stop == null,
+        )
         iss.lastSeenD = c.distanceM ?: Double.NaN
         iss.lastSeenMono = mono
         active = iss
@@ -317,9 +340,11 @@ internal class PromptPolicy(
         recent.addFirst(iss)
         while (recent.size > RECENT_MAX) recent.removeLast()
         if (!c.userInitiated) {
-            val mark = IssueMark(mono, rank(c.kind))
-            issueMarks.addLast(mark)
-            iss.mark = mark
+            if (c.kind != PromptKind.DEPARTURE) {
+                val mark = IssueMark(mono, rank(c.kind))
+                issueMarks.addLast(mark)
+                iss.mark = mark
+            }
             iss.prevCooldown = cooldowns[c.kind]
             val cd = Cooldown(mono, c.stop?.id, c.level, baseCooldownMin(c.kind) * 60_000L)
             cooldowns[c.kind] = cd

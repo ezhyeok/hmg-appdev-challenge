@@ -65,10 +65,12 @@ class DepartureCheckTest {
     fun aRestAreaStopInTheMiddleOfATripDoesNotAskButANewDestinationDoes() {
         // 110분 달려 휴게소에 섰다 (길안내는 그대로). 아이는 지금 가야 하지만 그 안내는 계획 화면이 한다: 여기서는 묻지 않는다
         val e = engine(restroomMinAgo = 110, drivenMin = 110)
-        assertNotEquals(PromptKind.DEPARTURE, parked(e, start, route(200.0, 150)).prompt?.kind)
-        assertNotEquals(PromptKind.DEPARTURE, parked(e, start + 20 * SEC, route(200.0, 150)).prompt?.kind)
-        // 서 있는 동안 새 목적지(남은 거리가 바뀌었다): 이제부터의 길이다
-        assertEquals(PromptKind.DEPARTURE, parked(e, start + 40 * SEC, route(60.0, 70)).prompt?.kind)
+        val busan = RouteDestination("부산역", 35.1151, 129.0422)
+        assertNotEquals(PromptKind.DEPARTURE, parked(e, start, route(200.0, 150).copy(destination = busan), door = true).prompt?.kind)
+        assertNotEquals(PromptKind.DEPARTURE, parked(e, start + 20 * SEC, route(200.0, 150).copy(destination = busan)).prompt?.kind)
+        // 내려서(문) 서 있는 동안 새 목적지를 정했다: 이제부터의 길이다 (화장실 정차로 세는 3분 전)
+        val daejeon = RouteDestination("대전역", 36.3326, 127.4342)
+        assertEquals(PromptKind.DEPARTURE, parked(e, start + 40 * SEC, route(60.0, 70).copy(destination = daejeon)).prompt?.kind)
     }
 
     @Test

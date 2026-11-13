@@ -5,6 +5,7 @@
 - 화장실 게이지와 피로 게이지
 - 정체·화장실 공백 구간 앞에서 '마지막 화장실' 질문 (진입로 2~5km 전에 한 번, "응" 하면 내비 경유지)
 - 급해 모드: 진행 방향, 주차 가능, 지금 영업 중인 화장실
+- 매일의 길에서도: 목적지를 정하고 서 있을 때 도착까지가 화장실 게이지보다 길면 "출발 전에 다녀오세요" 한 번, 시내에서는 차를 세울 수 있는 가까운 공중화장실·주유소·공영주차장을 다음 화장실로 (고속도로·도시고속도로 위에서는 길가 화장실을 내지 않는다)
 - 탑승자 설정(아이, 영아, 임신부, 어르신, 과민성 방광, 과민성 장, 반려견)과 평소 화장실 간격
 - 운전 스타일 변화와 연속 주행 시간으로 휴식 권유, 원하면 외기 전환
 - 기어 P와 문 열림으로 정차 자동 기록, 개인 학습은 기기 안에서만
@@ -32,10 +33,11 @@ adb shell am start -n dev.shimpyo.app/.MainActivity --es demo holiday   # 귀성
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo fatigue   # 오후 졸음 (연속 주행 95분)
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo urgent    # 밤 11시 급해 모드 (영아 동승)
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo stop      # 휴게소 정차: 자동 기록과 피트스톱 계획
+adb shell am start -n dev.shimpyo.app/.MainActivity --es demo departure # 출발 전 (아침 8시 10분 분당, 7살 아이, 목적지까지 1시간 3분)
 adb shell am start -n dev.shimpyo.app/.MainActivity --es demo off       # 시연 끄기 (실제 신호로 돌아간다)
 ```
 
-시연은 기어 D + 차속이 있을 때 질문이 나옵니다(주차 중에는 주행 질문을 거둡니다). 질문 카드가 떠 있는 동안에는 시연 시각과 위치가 함께 4배 느리게 흘러, 카드를 설명하고 누를 시간이 있습니다(가상 속도는 같아서 판단은 바뀌지 않습니다). 시연 중의 정차·학습은 실제 기록에 남지 않습니다.
+시연은 기어 D + 차속이 있을 때 질문이 나옵니다(주차 중에는 주행 질문을 거둡니다). '출발 전' 시연만 기어 P에서 묻습니다(출발하면 거둡니다). 질문 카드가 떠 있는 동안에는 시연 시각과 위치가 함께 4배 느리게 흘러, 카드를 설명하고 누를 시간이 있습니다(가상 속도는 같아서 판단은 바뀌지 않습니다). 시연 중의 정차·학습은 실제 기록에 남지 않습니다.
 
 차량 신호는 Virtual Console 시나리오로 함께 바꿉니다: `tools/vc/vc.sh up` 다음 `tools/vc/vc.sh play tools/vc/shimpyo-fatigue.vc` (Virtual Console HTTP API, 에뮬레이터 8088 포트).
 

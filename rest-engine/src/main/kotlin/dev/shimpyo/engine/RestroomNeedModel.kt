@@ -466,8 +466,9 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
      * 그런 정차 다섯 번에 그 사람의 중앙값이 150 → 119분으로 줄었다 (닫힘 검증 E5b: 한 사람 기준 게이지가 묶음 시각 쪽으로 끌려갔다).
      * 이미 음성으로 관측을 남긴 사람은 다시 남기지 않는다.
      * 남기는 값은 유효 시간 τ다(식사 뒤 96분 → 120분). '연달아 선 정차'를 거르는 최소 간격은 실제 시간으로 본다.
+     * [learn]이 false면 시계만 돌리고 관측을 남기지 않는다 (출발 전 정차: 앞 구간의 시작이 대개 가정한 값이다).
      */
-    fun onRestroomStop(at: Long, memory: PersonalMemory, suggested: Boolean = false, groupDriven: Boolean = false): PersonalMemory {
+    fun onRestroomStop(at: Long, memory: PersonalMemory, suggested: Boolean = false, groupDriven: Boolean = false, learn: Boolean = true): PersonalMemory {
         // 잠든 시간을 정차 시각까지 쌓고 잰다. 다시 대기로 이어진 정차는 at이 지난 update보다 3분까지 앞설 수 있는데, 그 사이
         // 잔 시간(유효 1분 미만)은 나누지 않고 앞 구간에 둔다
         if (accruedMono != NONE && at > accruedMono) accrue(at, wallAt(at))
@@ -478,7 +479,7 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
         val max = config.restroomMemoryMax
         for (t in list) {
             val interval = (at - t.lastRestroom) / 60_000.0
-            if (!t.voiced && interval >= config.restroomMinObservedMin) {
+            if (learn && !t.voiced && interval >= config.restroomMinObservedMin) {
                 val tau = tauMin(t, at)
                 when {
                     t !== driver || groupDriven -> censored = censored.prepend(t.id, tau, max)
@@ -513,6 +514,21 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
         )
         refresh(mem)
         return mem
+    }
+
+    /**
+     * "방금 화장실 다녀왔어": 그 사람(모르면 모두)의 시계를 [at]으로 돌린다. 관측은 남기지 않는다 (앞 구간의 시작을 대개 모른다).
+     * 정차 사건처럼 이후 프로필의 더 이른 값이 이 시각을 되돌리지 않게 stopAt도 옮긴다
+     */
+    fun restroomDone(occupantId: String?, at: Long) {
+        val targets = occupantId?.let { id -> list.filter { it.id == id } }?.ifEmpty { null } ?: list
+        for (t in targets) {
+            if (accruedMono != NONE && at > accruedMono) accrue(at, wallAt(at))
+            if (at > t.lastRestroom) resetClock(t, at)
+            if (at > t.stopAt) t.stopAt = at
+            t.voicedAt = NONE
+        }
+        cached = null
     }
 
     private fun resolve(occupantId: String?, purpose: Purpose, mono: Long): Tracked? {

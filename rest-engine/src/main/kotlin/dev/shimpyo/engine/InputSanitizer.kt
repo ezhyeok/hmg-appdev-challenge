@@ -64,10 +64,22 @@ internal object InputSanitizer {
         val man = nonNegative(r.nextManeuverDistanceM)
         val until = horizon(r.candidatesUntilM)
         val jams = if (r.congestion.all(::validJam)) r.congestion else r.congestion.filter(::validJam)
+        val dest = r.destination?.let(::destination)
         if (rd == r.remainDistanceM && rt == r.remainTimeS && man == r.nextManeuverDistanceM && until == r.candidatesUntilM &&
-            jams === r.congestion
+            jams === r.congestion && dest == r.destination
         ) return r
-        return r.copy(remainDistanceM = rd, remainTimeS = rt, nextManeuverDistanceM = man, candidatesUntilM = until, congestion = jams)
+        return r.copy(remainDistanceM = rd, remainTimeS = rt, nextManeuverDistanceM = man, candidatesUntilM = until, congestion = jams, destination = dest)
+    }
+
+    /** 좌표가 NaN·범위 밖이거나 (0, 0)이면 모르는 것으로, 빈 이름도 모르는 것으로 본다. 둘 다 모르면 목적지를 모른다 */
+    private fun destination(d: RouteDestination): RouteDestination? {
+        val lat = d.lat?.takeIf { it.isFinite() && it in -90.0..90.0 }
+        val lon = d.lon?.takeIf { it.isFinite() && it in -180.0..180.0 }
+        val coords = lat != null && lon != null && !(lat == 0.0 && lon == 0.0)
+        val name = d.name?.takeIf { it.isNotBlank() }
+        if (!coords && name == null) return null
+        val out = RouteDestination(name, if (coords) lat else null, if (coords) lon else null)
+        return if (out == d) d else out
     }
 
     /**

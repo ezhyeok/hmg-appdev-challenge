@@ -60,7 +60,7 @@ class CoachWorldTest {
         assertTrue(real.persistsHistory)
         assertTrue(real.persistsTrip)
         assertTrue(real.usesNaviLocationFallback)
-        assertTrue(real.usesNaviRoadLimit)
+        assertEquals("실제 세계는 신호로 일상 정차 후보를 가린다", NearbyMode.SIGNALS, real.nearbyMode)
     }
 
     @Test
@@ -73,7 +73,7 @@ class CoachWorldTest {
         assertFalse("구조 리뷰 B4: 시연 정차는 stops.json에 쓰지 않는다 (가상 시각 기록)", d.persistsHistory)
         assertFalse(d.persistsTrip)
         assertFalse("구조 리뷰 D3: 시연 중에는 내비 위치로 보충하지 않는다", d.usesNaviLocationFallback)
-        assertFalse("시연 위치는 내비가 보는 실제 도로와 다르다: 그 도로의 제한속도를 쓰지 않는다", d.usesNaviRoadLimit)
+        assertEquals("고속도로 시연은 일상 정차 후보를 넣지 않는다 (시연 위치·차속·내비 제한속도는 실제 도로와 다르다)", NearbyMode.NEVER, d.nearbyMode)
     }
 
     /** PT에서 발표자가 질문 카드를 설명하고 누를 시간 (7.2배속 귀성길에서 카드가 실제 13~25초 만에 지나갔다, 2026-11-13) */

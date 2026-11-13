@@ -45,9 +45,9 @@ class NearbyStopsTest {
     fun theSearchRunsOnlyAfterMovingOrAWhileButDistancesFollowTheCar() {
         val counting = object : StopIndex by index {
             var searches = 0
-            override fun near(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, now: Long, limit: Int): List<StopCandidate> {
+            override fun nearUsable(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, now: Long, limit: Int): List<StopCandidate> {
                 searches++
-                return index.near(lat, lon, heading, radiusM, kinds, now, limit)
+                return index.nearUsable(lat, lon, heading, radiusM, kinds, now, limit)
             }
         }
         val s = NearbyStops(counting)
@@ -112,7 +112,7 @@ class NearbyStopsTest {
                 ) + (1..9).map { row("more$it", 1_200.0 + 100.0 * it) },
         )
         val n = NearbyStops(crowded).current(here, 0f, highwayRoute = false, speedKph = 30f, roadLimitKph = null, now = 0L, elapsedMs = 0L)
-        assertEquals("주차 불가·닫힘·뒤쪽은 빼고 가까운 순 8곳", listOf("ok") + (1..7).map { "more$it" }, n.map { it.id })
+        assertEquals("주차 불가·닫힘·뒤쪽은 빼고 가까운 순", listOf("ok") + (1..9).map { "more$it" }, n.map { it.id })
     }
 
     @Test
@@ -122,5 +122,47 @@ class NearbyStopsTest {
         assertEquals("내비가 5초 넘게 보내지 않았다", null, l.fresh(10_000L + RoadLimit.FRESH_MS + 1))
         assertEquals("0은 모름", null, RoadLimit(0, 10_000L).fresh(10_500L))
         assertEquals("받은 때보다 이른 시각(시계가 뒤로 감)", null, l.fresh(9_000L))
+    }
+
+    @Test
+    fun aPassedStopLeavesBeforeTheNextRefresh() {
+        // 감사 5: 검색 사이(250m·20초)에 지나친 곳이 '진행 방향'으로 남아 "100m 앞 … 들를까요?"라고 물을 수 있었다
+        val s = NearbyStops(index)
+        assertEquals("park", s.current(here, 0f, false, 40f, null, 0L, 0L).first().id)
+        val past = Fix(here.lat + 700.0 / 111_000.0, here.lon, 0f) // 정자공원(600m)을 100m 지나쳤다. 검색은 아직이다(5초)
+        val n = s.current(past, 0f, false, 40f, null, 0L, 5_000L)
+        assertTrue("지나친 곳은 뺀다: ${n.map { it.id }}", n.none { it.id == "park" })
+        // 서 있으면 빼지 않는다 (걸어서 간다)
+        assertTrue(s.current(past, 0f, false, 0f, null, 0L, 6_000L).any { it.id == "park" })
+    }
+
+    @Test
+    fun atAHighwayRestAreaNoVillagePlacesAreOffered() {
+        // 감사 6B: 길안내 중 휴게소 주차장(차로 밖이라 지도 맞춤이 고속도로로 보지 않는다)에 서면 울타리 밖 마을 화장실을 냈다
+        val atRestArea = FakeStopIndex(
+            listOf(StopRow(StopCandidate("ra", "안성휴게소", StopKind.HIGHWAY_REST_AREA, here.lat + 100.0 / 111_000.0, here.lon, Facilities(), parkable = true))) +
+                listOf(row("village", 1_600.0)),
+        )
+        assertTrue(NearbyStops(atRestArea).current(here, 0f, false, 0f, null, 0L, 0L).isEmpty())
+    }
+
+    @Test
+    fun theDemoSceneDecidesNotTheSignals() {
+        // 감사 8: 시연 차속은 Virtual Console 값이고 시연 경로는 직선이다. 도심 장면은 늘, 고속도로 장면은 넣지 않는다
+        val onMotorway = motorway { _, _, _ -> true }
+        assertEquals("도심 시연: 시속 100이어도", 3, NearbyStops(index).current(here, 0f, false, 100f, 80, 0L, 0L, NearbyMode.ALWAYS).size)
+        assertEquals("도심 시연: 지도 맞춤과 관계없이", 3, NearbyStops(onMotorway).current(here, 0f, false, 30f, null, 0L, 0L, NearbyMode.ALWAYS).size)
+        assertTrue("고속도로 시연: 시속 60이어도 넣지 않는다", NearbyStops(index).current(here, 0f, false, 60f, null, 0L, 0L, NearbyMode.NEVER).isEmpty())
+    }
+
+    @Test
+    fun denseDowntownStillHasUsablePlacesOnRealData() {
+        // 감사 4 (실제 stops.bin): 잠실에서 서쪽으로 가면 가장 가까운 48곳이 뒤쪽·닫힘·주차 불가라 목록이 비었다 (3km 안 쓸 곳 45곳)
+        val table = dev.shimpyo.engine.stops.StopTable.decode(java.io.File("../../app/src/main/assets/data/stops.bin").readBytes())
+        val repo = StopRepository { table }.also { kotlinx.coroutines.runBlocking { it.ensureLoaded() } }
+        val weekday14 = java.time.ZonedDateTime.of(2026, 11, 13, 14, 0, 0, 0, java.time.ZoneId.of("Asia/Seoul")).toInstant().toEpochMilli()
+        val n = NearbyStops(repo).current(Fix(37.5133, 127.1001, 270f), 270f, false, 30f, 50, weekday14, 0L)
+        assertTrue("잠실 서행에도 쓸 곳이 있다: ${n.size}", n.size >= 6)
+        assertTrue(n.all { it.parkable && it.facilities.restroom && it.openNow != false })
     }
 }

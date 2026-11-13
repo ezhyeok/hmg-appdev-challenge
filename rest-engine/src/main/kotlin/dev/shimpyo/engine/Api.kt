@@ -39,6 +39,12 @@ data class TripProfile(
      * 0이면 엔진이 시작될 때부터 센다. 예전에는 시연의 '연속 95분'이 출발 시각에만 들어가 피로 게이지가 0분부터 셌다(2026-11-11)
      */
     val continuousDrivingMin: Double = 0.0,
+    /**
+     * 엔진이 시작되기 전에 이 여정에서 차가 이미 움직였는지 (앱 재시작, 세계 전환). 앱은 연속 주행이 남아 있거나 되돌린 정차가 여정
+     * 시작 뒤 한참(TripRules) 지나 시작됐으면 true로 준다. 출발 전 한마디가 여정 중간의 정차를 출발 전으로 보지 않게 한다
+     * (2026-11-13 감사: 휴게소에서 재시작하면 "출발 전에 다녀오세요"라고 했다). 연속 주행이 0보다 크면 이 값과 관계없이 움직인 것이다
+     */
+    val tripMoved: Boolean = false,
 )
 
 // ---------- 정차 후보 ----------
@@ -136,7 +142,33 @@ data class RouteState(
      * '이후 2시간 34분 공백' 같은 틀린 마지막 기회가 나왔다(2026-11-11 에뮬레이터, CandidateHorizonTest가 지킨다)
      */
     val candidatesUntilM: Double? = null,
+    /** 길안내 목적지 (이름·좌표). 서 있는 동안 새 목적지를 정했는지 가리는 데 쓴다(출발 전 한마디). 모르면 null */
+    val destination: RouteDestination? = null,
 )
+
+/** 길안내 목적지. 좌표를 모르면 lat·lon이 null */
+data class RouteDestination(val name: String?, val lat: Double?, val lon: Double?) {
+    /**
+     * 같은 목적지인지: 둘 다 좌표를 알면 [SAME_M] 안, 아니면 이름이 같으면 (앞뒤 공백 무시). 둘 다 모르면 같다고 보지 않는다.
+     * 재탐색·경유지 추가는 목적지를 바꾸지 않는다: 남은 거리가 뛰어도 같은 목적지다
+     */
+    fun sameAs(o: RouteDestination): Boolean {
+        val a1 = lat; val o1 = lon; val a2 = o.lat; val o2 = o.lon
+        if (a1 != null && o1 != null && a2 != null && o2 != null) {
+            val dLat = (a1 - a2) * M_PER_DEG
+            val dLon = (o1 - o2) * M_PER_DEG * kotlin.math.cos(Math.toRadians((a1 + a2) / 2))
+            return dLat * dLat + dLon * dLon <= SAME_M * SAME_M
+        }
+        val n1 = name?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        val n2 = o.name?.trim()?.takeIf { it.isNotEmpty() } ?: return false
+        return n1 == n2
+    }
+
+    private companion object {
+        const val SAME_M = 100.0
+        const val M_PER_DEG = 111_320.0
+    }
+}
 
 // ---------- 음성 의도 ----------
 
@@ -157,6 +189,11 @@ sealed interface VoiceIntent {
     data class Decline(val promptId: String) : VoiceIntent
     /** "아이가 화장실 가고 싶대" 같은 탑승자 요청. 누구인지 모르면 occupantId = null */
     data class OccupantNeed(val occupantId: String?, val purpose: Purpose) : VoiceIntent
+    /**
+     * "(아이) 방금 화장실 다녀왔어" (출발 전 질문의 대답 등). 그 사람의 화장실 시계를 지금으로 돌린다. 누구인지 모르면 모두.
+     * 관측으로 배우지 않는다: 앞 구간의 시작(출발 전 마지막 화장실)이 대개 가정한 값이다
+     */
+    data class RestroomDone(val occupantId: String?) : VoiceIntent
 }
 
 // ---------- 엔진 입력 ----------
@@ -243,6 +280,8 @@ data class Prompt(
      * 앱이 '달리는 동안에만 뜻이 있는 질문'을 거둘 때 이 값이 true인 것은 남겨야 그 답이 보인다
      */
     val userRequested: Boolean = false,
+    /** 이 질문을 낸 까닭 (엔진이 물을 때 정한 것). 장소가 없는 질문(출발 전 한마디)은 화면이 이것으로 칩을 만든다 */
+    val reasons: List<Reason> = emptyList(),
 )
 
 enum class CabinAction { FRESH_AIR, COOL_DOWN }

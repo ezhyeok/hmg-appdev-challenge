@@ -155,6 +155,35 @@ class StopRepository(
         return out
     }
 
+    override fun nearUsable(
+        lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, now: Long, limit: Int,
+    ): List<StopCandidate> {
+        val l = state ?: return emptyList()
+        val t = l.table
+        val h = heading?.toDouble()
+        val hits = ArrayList<Hit>()
+        indexFor(l, kinds).forEachIn(lat, lon, radiusM) { i ->
+            if (t.kind(i) !in kinds || !t.everydayUsable(i, now)) return@forEachIn
+            val d = Geo.distanceM(lat, lon, t.lat(i), t.lon(i))
+            if (d > radiusM) return@forEachIn
+            if (h != null) {
+                val b = Geo.bearingDeg(lat, lon, t.lat(i), t.lon(i))
+                // 진행 방향 뒤쪽은 뺀다 (바로 옆 [BEHIND_FREE_M] 안은 방위가 흔들려 두고, 매 틱 NearbyStops가 다시 본다)
+                if (d > BEHIND_FREE_M && Geo.angleDiff(b, h) > BEHIND_DEG) return@forEachIn
+            }
+            hits += Hit(i, d, behind = false, onRoad = false)
+        }
+        hits.sortBy { it.distanceM }
+        val n = minOf(limit, hits.size)
+        val out = ArrayList<StopCandidate>(n)
+        for (k in 0 until n) {
+            val hit = hits[k]
+            val c = t.candidate(hit.row)
+            out += c.copy(straightDistanceM = hit.distanceM, directionOk = if (heading == null) null else true, openNow = c.openNow ?: t.openNow(hit.row, now))
+        }
+        return out
+    }
+
     private class Hit(val row: Int, val distanceM: Double, val behind: Boolean, val onRoad: Boolean)
 
     /**
@@ -195,7 +224,7 @@ class StopRepository(
         return chosen.sortedBy { it.distanceM }.map { t.candidate(it.row).copy(straightDistanceM = it.distanceM) }
     }
 
-    fun byId(id: String): StopCandidate? {
+    override fun byId(id: String): StopCandidate? {
         val t = state?.table ?: return null
         val map = ids ?: HashMap<String, Int>(t.size * 2).also { m -> for (i in 0 until t.size) m[t.id(i)] = i; ids = m }
         return map[id]?.let(t::candidate)
@@ -255,6 +284,9 @@ class StopRepository(
         private const val M_PER_DEG = 111_195.0
         /** 이 거리 안은 방위가 흔들리므로 진행 방향 원뿔 대신 앞뒤만 본다 */
         const val CONE_FREE_M = 300.0
+        /** 일상 정차 후보([nearUsable]): 이 거리 밖에서 진행 방향과 [BEHIND_DEG] 넘게 다르면 뒤쪽이다 (급해 모드 near와 같은 각도) */
+        const val BEHIND_FREE_M = 50.0
+        const val BEHIND_DEG = 100.0
         /** 시설 점 좌표 오차(한국도로공사↔OSM 중앙값 40m대, p90 100~170m)를 넘겨 뒤에 있으면 지나친 것으로 본다 */
         const val BEHIND_TOLERANCE_M = 50.0
         /** 고속도로 차로 위가 아닌 차가 이 안에 있으면 그 시설 안(주차장·진입로)으로 본다 */

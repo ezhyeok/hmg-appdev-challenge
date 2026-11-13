@@ -2,6 +2,7 @@ package dev.shimpyo.coach.voice
 
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
+import dev.shimpyo.engine.PromptKind
 import dev.shimpyo.engine.Purpose
 import dev.shimpyo.engine.VoiceIntent
 import org.junit.Assert.assertEquals
@@ -61,6 +62,31 @@ class IntentParserTest {
     fun whatTheEmulatorSttActuallyReturnedIsUnderstood() {
         table("카드 대답", listOf("응" to YesNo.YES, "네 들을게요" to YesNo.YES, "아니" to YesNo.NO)) { parser.yesNo(it) }
         parsing("급해 요청", family, "화장실 급" to urgent, "화장실이 급" to urgent, "화장실 안 급" to null, "응급" to null)
+    }
+
+    // ------------------------------------------------------------ 출발 전 한마디 카드 (2026-11-13 감사)
+
+    @Test
+    fun departureCardReplies() {
+        // 버튼 이름인 "다녀올게요"도 못 알아들었고, "화장실 다녀올게"는 화장실 요청으로 넘어가 가까운 화장실을 다시 물었다
+        fun reply(said: String) = parser.replyTo(said, withKid, cardStopName = null, cardKind = PromptKind.DEPARTURE)
+        table(
+            "출발 전 카드", listOf(
+                "다녀올게요" to CardReply(YesNo.YES, null),
+                "갔다 올게" to CardReply(YesNo.YES, null),
+                "다녀와서 출발할게" to CardReply(YesNo.YES, null),
+                "화장실 다녀올게" to CardReply(YesNo.YES, null),
+                "아이 화장실 보내고 올게" to CardReply(YesNo.YES, null),
+                "응" to CardReply(YesNo.YES, null),
+                "이미 다녀왔어" to CardReply(YesNo.NO, VoiceIntent.RestroomDone(null)),
+                "방금 화장실 다녀왔어요" to CardReply(YesNo.NO, VoiceIntent.RestroomDone(null)),
+                "아이는 아까 갔다 왔어" to CardReply(YesNo.NO, VoiceIntent.RestroomDone("kid")),
+                "아니 괜찮아" to CardReply(YesNo.NO, null),
+                "다녀왔어?" to CardReply(YesNo.UNKNOWN, null),
+            ),
+        ) { reply(it!!) }
+        // 다른 카드에서는 출발 전 규칙을 쓰지 않는다 ("이미 다녀왔어"가 경유지 카드의 화장실 시계를 돌리지 않는다)
+        assertEquals(null, parser.replyTo("이미 다녀왔어", withKid, cardStopName = "옥산휴게소", cardKind = PromptKind.LAST_CHANCE).other)
     }
 
     // ------------------------------------------------------------ 급해

@@ -47,6 +47,12 @@ class DemoScenario internal constructor(
     val timeScale: Double = 1.0,
     /** 화면에 보일 목적지 이름 (가상 경로라 실제 내비의 목적지가 아니다). 도심 주행처럼 없으면 null */
     val destinationName: String? = null,
+    /**
+     * 도심(일상 길) 장면인지. 그러면 차 가까이의 일상 정차 후보(NearbyStops)를 늘 넣고, 아니면(고속도로 장면) 넣지 않는다.
+     * 시연 경로는 시설 점을 잇는 직선이라 지도 맞춤이 고속도로 위로 보지 못하고, 차속은 Virtual Console 값이라 장면과 맞지 않는다
+     * (2026-11-13 감사: 귀성길 시연에서 시속 60이면 98m 옆 마을 주유소를 다음 화장실로 냈다)
+     */
+    val city: Boolean = false,
 ) {
     /** 경로 위 정체 한 구간: 경로 시작점 기준 시작 거리(m), 길이(m), 지나는 데 걸리는 시간(초) */
     data class Jam(val startM: Double, val lengthM: Double, val durationS: Double)
@@ -322,6 +328,7 @@ private object DemoScenarios {
         drivenMin = 20,
         congestion = emptyList(),
         routeTotalM = 12_000.0,
+        city = true,
     )
 
     /**
@@ -339,6 +346,7 @@ private object DemoScenarios {
         congestion = listOf(DemoScenario.Jam(startM = 15_000.0, lengthM = 12_000.0, durationS = 40 * 60.0)),
         routeTotalM = 46_000.0,
         destinationName = "고양 킨텍스",
+        city = true,
     )
 
     fun stop(): DemoScenario = DemoScenario(
