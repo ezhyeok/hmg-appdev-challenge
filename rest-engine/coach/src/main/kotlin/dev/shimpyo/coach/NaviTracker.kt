@@ -1,5 +1,6 @@
 package dev.shimpyo.coach
 
+import dev.shimpyo.engine.RouteDestination
 import dev.shimpyo.engine.RouteState
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.TimeoutCancellationException
@@ -285,6 +286,8 @@ class NaviTracker(
         remainDistanceM = remain,
         remainTimeS = dest.remainTimeS.takeIf { it.isFinite() && it >= 0.0 },
         congestion = congestion.update(status.congestion, remain, odoAt),
+        // 엔진이 '서 있는 동안 새 목적지를 정했는지'를 목적지로 가린다 (재탐색은 같은 목적지, 출발 전 한마디). 좌표 (0, 0)·NaN은 엔진이 모름으로 본다
+        destination = RouteDestination(dest.name, dest.lat, dest.lon),
     )
 
     /** 목적지가 바뀌었는지. 좌표를 알면 좌표로(100m 넘게), 모르면 이름으로 */

@@ -99,6 +99,7 @@
 - **앱이 화면에 떠 있다가 죽으면** 시스템이 화면을 닫고 태스크를 지운 뒤 START_STICKY 서비스를 다시 만드는데, 다시 만든 서비스에는 `onStartCommand` 없이 `onTaskRemoved`만 온다(2026-11-12 `am crash`). `PleosForegroundService`는 `onTaskRemoved`에서도 시작한다. 화면 없이 서비스만 돌다 죽으면(`kill -9`) `onStartCommand(null)`이 오고 `startForeground`도 허용됐다(`tools/laptop/restart-check.sh`)
 - 서비스가 끝나는 순서(리스너 해제 → SDK release → 여정 파일 마지막 저장)는 기기에서만 볼 수 있다: `tools/laptop/shutdown-check.sh`(debug 빌드). 이 이미지에서 `am stopservice`는 exported가 아닌 서비스에 닿지 않아(`Error stopping service`) `SdkProbe stop-self`로 끝낸다
 - 개발용 점검(`KitSelfTest`, `SdkVerify`, `SdkProbe`)은 debug 빌드에만 있다(`app/src/debug`). 제출용(release)이 받는 인텐트 옵션은 `--es demo` 하나다(`DevHooks`, `LaunchExtras`). 제출용 APK를 만들면 `tools/laptop/devhooks-check.sh`를 돌린다(2026-11-12: 예전 release는 `--ez selftest true`로 좌석·창문을 움직였다)
+- `onCurrentRoadSpeedLimit`(NaviHelper)는 리스너를 건 뒤 매초 온다. 에뮬레이터 내비는 판교에 서 있어 값이 늘 0(모름)이다(sdk-probe 2026-11-10 로그). 앱은 0을 모름으로 보고, 실차에서 70 이상이면 도시고속도로·자동차전용도로로 보아 길가 화장실(일상 정차 후보)을 내지 않는다(`NaviTracker.roadLimit`, `NearbyStops`). 시연은 이 값을 쓰지 않는다(`CoachWorld.nearbyMode`)
 - NaviHelper에는 POI 검색 API가 없다. 목적지·경유지의 좌표와 poiId는 앱이 외부에서 구해야 한다. 요청은 Pleos 내비 앱으로 전달되고, 어떤 이벤트가 오는지는 내비 앱 구현에 따라 다르다
 - 에뮬레이터에서 재현할 수 있는 차량 상태는 `docs/contest/02_Pleos_개발가이드/pleos-connect/app-test-guide/virtual-console-guide.md`의 카드 목록이 기준이다
 - Virtual Console은 에뮬레이터 8088 포트의 HTTP API로도 조작할 수 있다 (`adb forward tcp:8088 tcp:8088`). 시연 시나리오를 스크립트로 재생할 수 있다

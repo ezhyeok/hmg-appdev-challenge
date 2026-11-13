@@ -692,6 +692,20 @@ class NaviTrackerTest {
         assertEquals(14_000L, r.navi.times("routeStatus").first())
     }
 
+    // ------------------------------------------------------------ 목적지 (출발 전 한마디, 2026-11-13 감사)
+
+    @Test
+    fun theRouteCarriesItsDestinationSoARerouteIsNotANewOne() = runTest {
+        val r = Rig(this)
+        r.guide()
+        r.start()
+        advanceTimeBy(2_000)
+        val d = checkNotNull(r.snap.route?.destination) { "경로 상태에 목적지가 실린다" }
+        assertEquals("서울역", d.name)
+        assertEquals(37.5547, d.lat!!, 1e-6)
+        assertTrue("liveRoute도 목적지를 그대로 넘긴다", r.snap.liveRoute(r.odo.meters)?.destination == d)
+    }
+
     // ------------------------------------------------------------ 지금 도로의 제한속도 (NearbyStops, 2026-11-13)
 
     @Test
