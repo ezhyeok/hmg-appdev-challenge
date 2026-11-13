@@ -50,6 +50,19 @@ class IntentParserTest {
     private fun parsing(name: String, people: List<Occupant>, vararg rows: Pair<String?, VoiceIntent?>, prompt: String? = null) =
         table(name, rows.toList()) { parser.parse(it, people, activePromptId = prompt) }
 
+    // ------------------------------------------------------------ 에뮬레이터 STT가 실제로 들은 말
+
+    /**
+     * 2026-11-13 에뮬레이터: Windows 한국어 음성(Heami)으로 만든 녹음을 sendAudio로 넣어 Pleos STT(ON_DEVICE)가 돌려준 문장
+     * (tools/laptop/stt-pcm-check.sh). 들은 말이 원문과 조금 다르다: "네, 들를게요" → "네 들을게요", "아니, 괜찮아" → "아니",
+     * "화장실 급해" → "화장실 급". 그래도 카드 대답과 급해 요청은 같은 뜻으로 읽어야 한다
+     */
+    @Test
+    fun whatTheEmulatorSttActuallyReturnedIsUnderstood() {
+        table("카드 대답", listOf("응" to YesNo.YES, "네 들을게요" to YesNo.YES, "아니" to YesNo.NO)) { parser.yesNo(it) }
+        parsing("급해 요청", family, "화장실 급" to urgent, "화장실이 급" to urgent, "화장실 안 급" to null, "응급" to null)
+    }
+
     // ------------------------------------------------------------ 급해
 
     @Test

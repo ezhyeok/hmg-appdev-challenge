@@ -40,6 +40,9 @@ import ai.pleos.playground.tts.constant.ErrorType as TtsErrorType
  * - `route:<위도>,<경도>:<이름>` / `route-cancel`: 길안내 시작 / 끝
  * - `tts:<stop-mid|stop-idle|stop-then-speak|stop-early>`: 말하기를 끊어 보고 이벤트 순서를 본다
  * - `stt:<stop-then-request>`: 듣기를 끊고 곧바로 다시 듣는다
+ * - `stt-pcm:<파일>`: 녹음한 음성을 마이크 대신 넣어 인식한다 (SttKit.recognizePcm = sendAudio + completeAudioSend, ON_DEVICE).
+ *   파일은 앱 내부 저장소 files/에 둔다 (tools/laptop/stt-pcm-check.sh가 Windows 한국어 음성으로 만들어 넣는다).
+ *   에뮬레이터를 오디오 없이(-no-audio) 띄우므로 인식 결과는 이 길로만 확인할 수 있다
  * - `stop-self`: 서비스가 스스로 끝낸다 (stopSelf → onDestroy). 끝나는 순서와 마지막 저장을 본다. 이 이미지에서는
  *   `am stopservice`가 exported가 아닌 서비스에 닿지 않는다
  * - `veh-read`: 차량 신호 몇 개를 읽는다 (서비스가 죽었을 때 무엇이 오는지)
@@ -69,6 +72,7 @@ class SdkProbe(
                 "route-cancel" -> log(name, "cancelled=${connectedNavi().cancelRoute()}")
                 "tts" -> ttsProbe(name, parts.getOrElse(1) { "stop-mid" })
                 "stt" -> sttProbe(name)
+                "stt-pcm" -> sttPcmProbe(name, parts.getOrElse(1) { "eung.wav" })
                 "stop-self" -> stopSelf(name)
                 "veh-read" -> vehicleRead(name)
                 "veh-reconnect" -> {
@@ -262,6 +266,39 @@ class SdkProbe(
             } finally {
                 raw.removeListener(listener)
             }
+        }
+    }
+
+    private suspend fun sttPcmProbe(name: String, file: String) {
+        val bytes = withContext(Dispatchers.IO) { runCatching { java.io.File(service.filesDir, file).readBytes() }.getOrNull() }
+        if (bytes == null) {
+            log(name, "no file ${service.filesDir}/$file")
+            return
+        }
+        val pcm = WavPcm.pcm16kMono(bytes)
+        if (pcm == null) {
+            log(name, "not 16kHz 16-bit mono PCM: $file (${bytes.size} bytes)")
+            return
+        }
+        val kit = stt().also { it.connect() }
+        val raw = kit.raw
+        val listener = object : ResultListener {
+            override fun onReady() = log(name, "t=${ms()} event Ready")
+            override fun onStartedRecognition() = log(name, "t=${ms()} event Started")
+            override fun onUpdated(stt: String, completed: Boolean) = log(name, "t=${ms()} event Updated '$stt' completed=$completed")
+            override fun onEndedRecognition() = log(name, "t=${ms()} event Ended")
+            override fun onError(errorType: SttErrorType) = log(name, "t=${ms()} event Error $errorType")
+            override fun onUpdatedEpdData(on: Long, off: Long) = Unit
+            override fun onUpdatedRms(rms: Double) = Unit
+        }
+        raw.addListener(listener)
+        try {
+            val started = SystemClock.elapsedRealtime()
+            log(name, "t=${ms()} send ${pcm.size} bytes (${pcm.size / 32} ms of audio)")
+            val text = runCatching { kit.recognizePcm(pcm) }
+            log(name, "result '${text.getOrNull()}' error=${text.exceptionOrNull()?.message} (${SystemClock.elapsedRealtime() - started} ms)")
+        } finally {
+            raw.removeListener(listener)
         }
     }
 
