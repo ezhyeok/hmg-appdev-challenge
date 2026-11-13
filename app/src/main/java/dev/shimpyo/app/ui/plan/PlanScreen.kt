@@ -152,7 +152,8 @@ data class PlanNote(val text: String, val warning: Boolean)
 /**
  * 요약 첫 줄은 엔진의 계획 메모(PitStopPlan.notes 코드)를 따른다. 정차가 없다고 "쉬지 않고 가도 돼요"라고 하지 않는다:
  * 후보가 없을 수도(PLAN_NO_CANDIDATES), 앞 일부만 계획했을 수도(PLAN_PARTIAL, PLAN_NO_DESTINATION) 있다 (UI 감사 #5).
- * 첫 줄로 쓴 메모는 아래 목록에서 뺀다. PLAN_NOW·PLAN_GAP·PLAN_FUEL_SHORT는 경고로 보인다.
+ * 첫 줄로 쓴 메모는 아래 목록에서 뺀다. PLAN_NOW·PLAN_HERE_NOW·PLAN_GAP·PLAN_FUEL_SHORT는 경고로 보인다.
+ * PLAN_HERE_NOW: 서 있는 곳에서 쉬고 출발해야 한다. 계획의 정차는 출발 뒤의 곳이라 '그다음 정차'로 센다 (엔진 PlanFromHereTest).
  */
 fun planSummary(state: CoachUiState): PlanSummary {
     val plan = state.plan
@@ -166,6 +167,7 @@ fun planSummary(state: CoachUiState): PlanSummary {
     val partial = "PLAN_PARTIAL" in codes || "PLAN_NO_DESTINATION" in codes
     var used: String? = null
     val (headline, detail) = when {
+        "PLAN_HERE_NOW" in codes -> "여기서 쉬고 출발하세요" to count?.let { "그다음 $it" }
         "PLAN_NOW" in codes -> "지금 쉬어야 해요" to count
         live.isNotEmpty() -> count!! to null
         plan.stops.isNotEmpty() -> "지금 경로에 남은 계획 정차가 없어요" to "다시 계산해 주세요"
@@ -183,7 +185,7 @@ fun planSummary(state: CoachUiState): PlanSummary {
     return PlanSummary(headline, detail, notes)
 }
 
-private val WARNING_NOTES = setOf("PLAN_NOW", "PLAN_GAP", "PLAN_FUEL_SHORT")
+private val WARNING_NOTES = setOf("PLAN_NOW", "PLAN_HERE_NOW", "PLAN_GAP", "PLAN_FUEL_SHORT")
 
 /** 특정 정차 이름을 담는 메모 (CoachTexts.planNow/planMeal/planFuel) */
 private val STOP_NOTES = setOf("PLAN_NOW", "PLAN_MEAL", "PLAN_FUEL")

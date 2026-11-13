@@ -537,20 +537,89 @@ class CoachEngine(
                 { it.facilities.petArea }, PitStopPlanner.PET_MISMATCH_PENALTY,
             )
         }
+        val restroomFullS = (needs.soloDeadlineMin(mono, p, fromReset = true) ?: Double.POSITIVE_INFINITY) * 60.0
+        val fatigueFullS = { wall: Long ->
+            val awake = if (fatigue.wakeMono == NONE) 0.0 else awakeNow + (wall - input.now) / 3_600_000.0
+            fatigue.fullRhythmWallMin(wall, awake, sleep) * 60.0
+        }
+        val drivenNowS = fatigue.drivingMin * 60.0
+        val restLabelS = config.fatigueWatchMin * 60.0
+        // 서 있는 곳에 화장실이 있으면 그곳에서 쉬고 출발한다고 보고 그 뒤를 계획한다 (PlanFromHereTest). 예전에는 서 있는 곳이 경로 거리
+        // 0이라 계획 후보에서 빠져, 안성휴게소에 서서 아이가 지금 가야 하는데 "연곡졸음쉼터에 바로 들르세요"라고 했다 (2026-11-13 에뮬레이터)
+        val here = if (input.gear == Gear.PARK) parkedPlace(input.candidates, restroom = true) else null
+        if (here != null) {
+            return planFromHere(
+                here, opps, ctx, input, care, restroomFirstS, fatigueFirstS, restroomFullS, fatigueFullS, drivenNowS, restLabelS,
+                input.rangeKm?.let { it * 1000.0 }, fe.sleepyCurveMin * 60.0,
+            )
+        }
         val n = PitStopPlanner.Needs(
             firstLegMaxS = minOf(restroomFirstS, fatigueFirstS),
-            restroomFullS = (needs.soloDeadlineMin(mono, p, fromReset = true) ?: Double.POSITIVE_INFINITY) * 60.0,
-            fatigueFullS = { wall ->
-                val awake = if (fatigue.wakeMono == NONE) 0.0 else awakeNow + (wall - input.now) / 3_600_000.0
-                fatigue.fullRhythmWallMin(wall, awake, sleep) * 60.0
-            },
-            drivenNowS = fatigue.drivingMin * 60.0,
-            restLabelS = config.fatigueWatchMin * 60.0,
+            restroomFullS = restroomFullS,
+            fatigueFullS = fatigueFullS,
+            drivenNowS = drivenNowS,
+            restLabelS = restLabelS,
             care = care,
             rangeM = input.rangeKm?.let { it * 1000.0 },
             sleepyCurveS = fe.sleepyCurveMin * 60.0,
         )
         return planner.plan(opps, ctx, n, input.now, local)
+    }
+
+    /**
+     * 서 있는 곳([here], 화장실이 있는 곳)에서 쉬고 출발하는 계획. 그곳에서 할 일(목적)은 계획기가 정차에 붙이는 규칙과 같다:
+     * 화장실은 늘(서면 모두 다녀온다고 보는 정차 기록 규칙), 휴식은 연속 주행이 휴식 표시 기준([CoachConfig.fatigueWatchMin])을
+     * 넘었을 때, 식사는 음식이 있고 식사 시간일 때, 영아·반려견은 필요가 절반을 넘었고 시설이 맞을 때. 출발 시각은 그 정차 시간 뒤다.
+     * 출발 뒤 첫 구간은 화장실을 막 다녀온 상한, 쉬었으면 피로도 처음부터 센다. 서 있는 곳은 계획 정차에 넣지 않는다(이미 그곳이다).
+     * 메모: 지금 필요가 다음 후보에 닿기 전에 오면 PLAN_HERE_NOW(경고), 아니면 PLAN_HERE(그곳에서 다녀온다고 보고 세운 계획)
+     */
+    private fun planFromHere(
+        here: StopCandidate,
+        opps: List<Opportunity>,
+        ctx: RouteContext,
+        input: CoachInput,
+        care: List<PitStopPlanner.Care>,
+        restroomFirstS: Double,
+        fatigueFirstS: Double,
+        restroomFullS: Double,
+        fatigueFullS: (Long) -> Double,
+        drivenNowS: Double,
+        restLabelS: Double,
+        rangeM: Double?,
+        sleepyCurveS: Double,
+    ): PitStopPlan {
+        val purposes = java.util.EnumSet.of(Purpose.RESTROOM)
+        val restHere = drivenNowS >= restLabelS
+        if (restHere) purposes += Purpose.REST
+        if (here.facilities.food && inMealWindow(input.now)) purposes += Purpose.MEAL
+        val careAfter = care.map { c ->
+            if (c.elapsedNowS >= c.fullS * PitStopPlanner.CARE_LABEL_FRACTION && c.facilityOk(here)) {
+                purposes += c.purpose
+                PitStopPlanner.Care(c.purpose, 0.0, c.fullS, c.facilityOk, c.mismatchPenalty)
+            } else {
+                c
+            }
+        }
+        val dwellMin = planner.dwellMin(purposes)
+        val departWall = input.now + dwellMin * 60_000L
+        val ahead = opps.filter { it.stop.id != here.id }
+        // 지금 필요가 다음 후보에 닿기 전에 온다: 여기서 쉬어야 한다
+        val nextS = ahead.firstOrNull()?.let { it.arriveS + it.stop.detourS } ?: Double.POSITIVE_INFINITY
+        val urgent = minOf(restroomFirstS, fatigueFirstS) <= nextS
+        val n = PitStopPlanner.Needs(
+            firstLegMaxS = minOf(restroomFullS, if (restHere) fatigueFullS(departWall) else fatigueFirstS),
+            restroomFullS = restroomFullS,
+            fatigueFullS = fatigueFullS,
+            drivenNowS = if (restHere) 0.0 else drivenNowS,
+            restLabelS = restLabelS,
+            care = careAfter,
+            rangeM = rangeM,
+            sleepyCurveS = sleepyCurveS,
+        )
+        val after = planner.plan(ahead, ctx, n, departWall, local)
+        val note = if (urgent) Reason("PLAN_HERE_NOW", texts.planHereNow(here.name, purposes, dwellMin))
+        else Reason("PLAN_HERE", texts.planHere(here.name, purposes))
+        return after.copy(notes = listOf(note) + after.notes)
     }
 
     /** 사용자가 질문에 답했을 때 (음성 또는 버튼) */

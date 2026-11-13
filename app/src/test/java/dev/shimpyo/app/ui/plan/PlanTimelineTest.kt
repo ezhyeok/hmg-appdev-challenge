@@ -144,6 +144,36 @@ class PlanTimelineTest {
     }
 
     @Test
+    fun restingHereLeadsAndThePlannedStopsAreTheOnesAfterDeparture() {
+        // 서 있는 곳에서 쉬고 출발한다 (엔진 PlanFromHereTest). 2026-11-13 에뮬레이터: 안성휴게소에 서 있는데 "연곡졸음쉼터에 바로
+        // 들르세요"라고 했다
+        val next = stop("망향휴게소", 20.0)
+        val s = summary(
+            PitStopPlan(
+                listOf(PlannedStop(next, setOf(Purpose.RESTROOM), 7, 1_200.0)), 7,
+                listOf(
+                    note("PLAN_HERE_NOW", "지금 쉬어야 할 때예요. 서 있는 안성휴게소에서 화장실·휴식을 마치고 출발하세요(15분)"),
+                    note("PLAN_PARTIAL", "앞 55km 안의 휴게소까지만 계획했어요"),
+                ),
+            ),
+            ahead = listOf(next),
+        )
+        assertEquals("여기서 쉬고 출발하세요", s.headline)
+        assertEquals("그다음 정차 1번 · 쉬는 시간 7분", s.detail)
+        assertEquals("무엇을 얼마나 하는지는 경고 메모로 남는다", listOf(true, false), s.notes.map { it.warning })
+        assertTrue(s.notes.first().text.contains("서 있는 안성휴게소"))
+        // 출발 뒤 정차가 없으면 둘째 줄이 없고, '앞 후보까지는 쉬지 않아도 돼요'는 메모로 보인다
+        val none = summary(PitStopPlan(emptyList(), 0, listOf(note("PLAN_HERE_NOW", "지금 쉬어야 할 때예요. 서 있는 안성휴게소에서 화장실을 마치고 출발하세요(7분)"), note("PLAN_NONE_NEEDED", "앞의 후보까지는 쉬지 않고 가도 돼요"))))
+        assertEquals("여기서 쉬고 출발하세요", none.headline)
+        assertNull(none.detail)
+        assertTrue(none.notes.any { it.text == "앞의 후보까지는 쉬지 않고 가도 돼요" })
+        // 급하지 않으면 첫 줄은 그대로이고, 서 있는 곳에서 다녀온다고 보고 세운 계획이라는 것은 일반 메모다
+        val calm = summary(PitStopPlan(emptyList(), 0, listOf(note("PLAN_HERE", "서 있는 안성휴게소에서 화장실을 마치고 출발한다고 보고 세운 계획이에요"), note("PLAN_NONE_NEEDED", "앞의 후보까지는 쉬지 않고 가도 돼요"), note("PLAN_PARTIAL", "앞 55km 안의 휴게소까지만 계획했어요"))))
+        assertEquals("앞 후보까지는 쉬지 않아도 돼요", calm.headline)
+        assertTrue(calm.notes.any { "서 있는 안성휴게소" in it.text && !it.warning })
+    }
+
+    @Test
     fun allPlannedStopsPassedAsksToRecalculate() {
         val a = PlannedStop(stop("a", 5.0), setOf(Purpose.RESTROOM), 5, 200.0)
         val s = planSummary(CoachUiState(guiding = true, remainDistanceM = 2_000.0, plan = PitStopPlan(listOf(a), 5), ahead = listOf(stop("a", 5.0))))

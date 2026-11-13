@@ -267,7 +267,7 @@ object Labels {
 
     /** 칩으로 쓰지 않는 엔진 코드 (계획 메모는 정차 화면에 문장으로, 급해 소요 시간은 결과 카드의 구성 줄로 보인다) */
     val NOT_CHIP_CODES: Set<String> = setOf(
-        "PLAN_NO_CANDIDATES", "PLAN_NOW", "PLAN_GAP", "PLAN_FUEL_SHORT", "PLAN_NONE_NEEDED", "PLAN_MEAL", "PLAN_FUEL",
+        "PLAN_NO_CANDIDATES", "PLAN_NOW", "PLAN_HERE_NOW", "PLAN_HERE", "PLAN_GAP", "PLAN_FUEL_SHORT", "PLAN_NONE_NEEDED", "PLAN_MEAL", "PLAN_FUEL",
         "PLAN_SLEEPY_TIME", "PLAN_NO_DESTINATION", "PLAN_PARTIAL", "URGENT_TIME",
     )
 

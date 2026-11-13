@@ -262,6 +262,30 @@ open class CoachTexts {
     open fun planNoCandidates(): String = "경로 앞 정차 후보가 없어요"
     open fun planGapTooLong(): String = "화장실 사이가 먼 구간이 있어 기준을 다 지킬 수는 없어요. 가장 덜 기다리는 계획이에요"
     open fun planNow(stop: String): String = "지금 쉬어야 할 때예요. ${stop}에 바로 들르세요"
+
+    /** 서 있는 곳에서 할 일 ("화장실·휴식·식사") */
+    open fun planHereWhat(purposes: Set<Purpose>): String = Purpose.entries.filter { it in purposes }.joinToString("·") {
+        when (it) {
+            Purpose.RESTROOM -> "화장실"
+            Purpose.REST -> "휴식"
+            Purpose.MEAL -> "식사"
+            Purpose.FUEL -> "주유"
+            Purpose.FEEDING -> "수유"
+            Purpose.PET -> "반려견 산책"
+        }
+    }
+
+    /** 지금 필요가 다음 후보보다 먼저 온다: 서 있는 곳에서 마치고 출발 */
+    open fun planHereNow(stop: String, purposes: Set<Purpose>, dwellMin: Int): String {
+        val what = planHereWhat(purposes)
+        return "지금 쉬어야 할 때예요. 서 있는 ${stop}에서 ${what}${obj(what)} 마치고 출발하세요(${duration(dwellMin)})"
+    }
+
+    /** 급하지는 않다: 서 있는 곳에서 다녀온다고 보고 세운 계획 */
+    open fun planHere(stop: String, purposes: Set<Purpose>): String {
+        val what = planHereWhat(purposes)
+        return "서 있는 ${stop}에서 ${what}${obj(what)} 마치고 출발한다고 보고 세운 계획이에요"
+    }
     open fun planNoneNeeded(hasDestination: Boolean): String =
         if (hasDestination) "목적지까지 쉬지 않고 가도 돼요" else "앞의 후보까지는 쉬지 않고 가도 돼요"
     open fun planMeal(stop: String): String = "식사 시간에 맞춰 ${stop}에서 식사해요"

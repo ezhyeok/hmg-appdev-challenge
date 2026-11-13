@@ -68,7 +68,9 @@ class CandidateHorizonTest {
 
     @Test
     fun anOverdueNeedSaysStopNowNotLongGap() {
-        // 휴게소 100m 앞, 7살 아이는 이미 쉬어야 할 때가 지났다(마지막 화장실 110분 전). 가까운 곳에 들르는 것밖에 없다
+        // 휴게소 100m 안에 서 있고, 7살 아이는 이미 쉬어야 할 때가 지났다(마지막 화장실 110분 전). 먼 구간이라고 하지 않고
+        // 지금 쉬라고 한다. 서 있는 곳(300m 안의 화장실)이라 그곳에서 마치고 출발하라고 한다 (PlanFromHereTest, 2026-11-13).
+        // 예전에는 "안성휴게소에 바로 들르세요"(PLAN_NOW)였다
         val engine = CoachEngine(
             profile = TripProfile(listOf(adult("driver"), child("kid", 7)), tripStart = start - 110 * MIN, lastRestroomAt = mapOf("driver" to start - 110 * MIN, "kid" to start - 110 * MIN)),
             random = Random(7),
@@ -81,7 +83,7 @@ class CandidateHorizonTest {
             ),
         )
         assertTrue(plan.notes.none { it.code == "PLAN_GAP" }, plan.notes.toString())
-        assertTrue(plan.notes.any { it.code == "PLAN_NOW" && it.text.contains("안성휴게소") }, plan.notes.toString())
+        assertTrue(plan.notes.any { it.code == "PLAN_HERE_NOW" && it.text.contains("안성휴게소") }, plan.notes.toString())
     }
 
     @Test
