@@ -23,6 +23,8 @@
 
 ### 시연 모드
 
+시연 영상: [`docs/demo/shimpyo-demo.mp4`](docs/demo/shimpyo-demo.mp4) (1분 52초, 에뮬레이터 화면 녹화와 자막. 다시 만들기: `tools/video/`).
+
 에뮬레이터는 실제로 달리지 않아서 위치 이동과 정체 구간은 앱의 시연 모드로 넣습니다.
 
 ```

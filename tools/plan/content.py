@@ -196,7 +196,7 @@ def prompt_rate_line():
 
 
 GITHUB_PLACEHOLDER = "[[GitHub 저장소 링크: 제출 전에 계정명이 드러나지 않는 주소로 기입]]"
-VIDEO_PLACEHOLDER = "[[시연 영상 링크: 제출 시 기입]]"
+VIDEO_PLACEHOLDER = "저장소 `docs/demo/shimpyo-demo.mp4`"
 
 # ---------------------------------------------------------------------------- 1
 S1 = Section(1, "app_summary", "앱 한 줄 소개", [
@@ -593,7 +593,7 @@ S5 = Section(5, "pleos_plan", "개발 계획", [
          "72MB, 내비 조회 분당 12회",
          "질문 문구와 시점 다듬기, 사용성 점검"],
         [f"화면: 주행·계획·급해·탑승자·기록·설정, 라이트·다크, 주행 제한(상태를 모르면 제한), 건강 정보 동의·철회. "
-         f"앱 테스트 {tests_android()}개, 정차 후보 60,084곳 내장", "시연 영상"],
+         f"앱 테스트 {tests_android()}개, 정차 후보 60,084곳 내장. 시연 영상(1분 52초)", "화면 스크린샷 테스트(창 크기 셋)"],
     ], widths=[60, 40], size=8, first_col_bold=False),
     Figure("emu_full", "그림 9. 에뮬레이터 통합 실행 — 장면 A의 질문에 ‘들르기’를 누르자 Pleos 내비가 옥산휴게소로 길안내를 "
            "시작했다. 왼쪽은 Virtual Console 계기판(D, 시속 100km), 가운데는 쉼표, 오른쪽은 Pleos 내비다. 에뮬레이터 "
@@ -701,7 +701,8 @@ S7 = Section(7, "reference_link", "참고자료", [
          "설정, APK 위치), 구조 문서(docs/ARCHITECTURE.md), 에뮬레이터 점검 결과, 근거 자료와 분석 코드",
          GITHUB_PLACEHOLDER],
         ["APK", "실행 가능한 release 빌드. 공모전 규칙에 따라 저장소 `apk/` 폴더", "저장소 `apk/` 폴더"],
-        ["시연 영상", "Pleos Connect Emulator + Virtual Console 화면 녹화(4번 항목의 장면)", VIDEO_PLACEHOLDER],
+        ["시연 영상", "Pleos Connect Emulator + Virtual Console 화면 녹화, 1분 52초, 자막(소리 없음). 귀성길 마지막 화장실 질문 → "
+         "‘들르기’ → 내비 길안내, 휴게소 정차의 계획(‘여기서 쉬고 출발하세요’)·자동 기록", VIDEO_PLACEHOLDER],
         ["화면", "Pleos Connect Emulator에서 캡처한 실제 앱 화면(시연 모드, 1번 항목의 그림, 그림 4·9·12)", "이 문서"],
         ["테스트 환경", "Pleos Connect Emulator 2.1.0(API 34, Automotive) + Virtual Console. Vehicle 2.3.2, "
          "NaviHelper 3.0.5, TextToSpeech·SpeechToText 3.3.1, FusedLocation 1.1.3", "README"],
