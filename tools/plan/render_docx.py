@@ -177,7 +177,7 @@ def render_screens(shots, b, media, width=X.BOX_CONTENT_DXA):
         cells = []
         for i, (path, label) in enumerate(pending):
             w_cm = (colw[i] - 160) / 567.0
-            cells.append(X.cell(_image_para(media, path, w_cm, label, keep_next=True, max_h_cm=9.5,
+            cells.append(X.cell(_image_para(media, path, w_cm, label, keep_next=True, max_h_cm=b.screen_max_h_cm,
                                             outline="C7C9CE") +
                                 X.para(X.inline(label, size=8, color=X.INK2), before=0, after=60, line=240,
                                        jc='center'), colw[i]))

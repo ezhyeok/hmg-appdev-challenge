@@ -177,7 +177,8 @@ class DriveModelsTest {
         val card = stopCard(state, driving = false)
         assertEquals("출발 전 화장실", card.context)
         assertEquals("출발 전에 화장실 다녀오세요", card.title)
-        assertEquals("도착까지 약 1시간 10분이에요", card.meta)
+        // 도착까지 걸리는 시간은 칩이 말하고, 설명 줄은 왜 묻는지를 말한다 (같은 말을 두 번 보이지 않는다)
+        assertEquals("7살 아이는 45분쯤 뒤 화장실을 찾을 것 같아요", card.meta)
         assertTrue("도착 시간 칩: ${card.chips}", card.chips.contains("도착까지 1시간 10분"))
         assertEquals("다녀올게요", acceptLabel(p))
     }

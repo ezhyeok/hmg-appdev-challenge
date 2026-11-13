@@ -158,6 +158,11 @@ fun shortQuestion(p: Prompt): String {
 fun promptLead(p: Prompt): String? {
     val sentences = splitSentences(p.speech)
     if (sentences.size < 2) return null
+    // 출발 전 한마디: 도착까지 걸리는 시간은 칩(DEPARTURE_TRIP)이 말한다. 설명 줄은 왜 묻는지("7살 아이는 44분쯤 뒤 …")를 보인다.
+    // 서 있을 때만 뜨는 카드라 주행 중 글자 수 제한보다 길어도 된다
+    if (p.kind == PromptKind.DEPARTURE) {
+        sentences.getOrNull(1)?.removeSuffix(".")?.takeIf { it.length <= DEPARTURE_LEAD_CHARS }?.let { return it }
+    }
     return sentences.first().removeSuffix(".").takeIf { it.length <= LEAD_CHARS && !it.endsWith("?") }
 }
 
@@ -168,6 +173,7 @@ private fun splitSentences(text: String): List<String> =
 private val SENTENCE_END = Regex("(?<=[.?!])\\s+")
 private const val SHORT_QUESTION_CHARS = 30
 private const val LEAD_CHARS = 24
+private const val DEPARTURE_LEAD_CHARS = 34
 
 /**
  * 추천 카드. 우선순위: 서비스 멈춤 > 질문 > 내비에 넣는 중 > 경유지 실패 > (정차 중) 다음 계획 > 엔진 추천 > 경로 앞 첫 화장실 > 빈 상태.
