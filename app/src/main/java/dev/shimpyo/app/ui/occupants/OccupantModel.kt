@@ -57,6 +57,13 @@ fun occupantSubtitle(o: Occupant, isDriver: Boolean, asleep: Boolean = false): S
     ).joinToString(" · ")
 }
 
+/**
+ * 탑승자 줄의 설명([occupantSubtitle]) 한 줄에 잡아 두는 폭(dp). 가장 긴 설명 '평소 1시간 45분마다 · 자는 중'이 Body M(28sp)에서
+ * 넉넉히 재어 약 390dp다(OccupantEditTest가 모든 유형·간격으로 확인한다). 아이 줄의 나이 스테퍼는 이름 칸이 이만큼 남을 때만
+ * 이름 옆에 두고, 아니면 이름 아래 줄로 내린다 (OccupantsScreen)
+ */
+const val SUBTITLE_ROOM_DP = 400
+
 /** 목록 아래 요약 두 줄 */
 @Immutable
 data class OccupantsSummary(val headline: String, val detail: String)

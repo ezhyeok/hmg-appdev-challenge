@@ -105,6 +105,38 @@ class OccupantEditTest {
         assertNull(occupantsSummary(emptyList(), drivenBy = null))
     }
 
+    /**
+     * 2026-11-13 에뮬레이터 캡처(17" 세로 윈도 840dp): 아이 줄의 나이 스테퍼가 이름 옆에 있어 이름 칸이 228dp만 남았고 설명이
+     * '평소 1시간 45분…'으로 잘렸다. 이제 화면은 이름 칸이 [SUBTITLE_ROOM_DP]만큼 남을 때만 스테퍼를 옆에 둔다.
+     * 그 폭이 어떤 설명이든 담는지 확인한다
+     */
+    @Test
+    fun everySubtitleFitsTheRoomTheRowKeepsForIt() {
+        // Body M 28sp를 넉넉히 잰다: 한글 1em, 숫자·영문 0.6em, 빈칸·기호 0.35em (기본 서체 Noto Sans CJK는 한글 1em, 숫자 약 0.55em)
+        fun widthDp(s: String) = s.sumOf { ch ->
+            when (ch) {
+                in '가'..'힣' -> 1.0
+                in '0'..'9', in 'a'..'z', in 'A'..'Z' -> 0.6
+                else -> 0.35
+            }
+        } * 28
+        val subtitles = OccupantType.entries.flatMap { type ->
+            listOf(null, 3, 7, 12).flatMap { age ->
+                (listOf<Double?>(null) + (15..240 step 5).map { it.toDouble() }).flatMap { min ->
+                    val o = Occupant("x", type, ageYears = age, intervalOverrideMin = min)
+                    listOf(false, true).flatMap { asleep ->
+                        // 운전자 줄(유형 이름이 앞에 붙는다)은 어른뿐이다 (OccupantsScreen의 isDriver)
+                        listOfNotNull(occupantSubtitle(o, isDriver = false, asleep), occupantSubtitle(o, isDriver = true, asleep).takeIf { type == OccupantType.ADULT })
+                    }
+                }
+            }
+        }
+        val widest = subtitles.maxBy { widthDp(it) }
+        assertTrue("'$widest' ≈ ${widthDp(widest)}dp > $SUBTITLE_ROOM_DP", widthDp(widest) <= SUBTITLE_ROOM_DP)
+        // 지금 가장 긴 것은 자는 중을 켠 아이 줄이다 (약 390dp)
+        assertTrue(widthDp("평소 1시간 45분마다 · 자는 중") <= widthDp(widest))
+    }
+
     // ------------------------------------------------------------ 자는 중 (U4)
 
     @Test

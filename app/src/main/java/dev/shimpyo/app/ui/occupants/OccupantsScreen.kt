@@ -1,6 +1,7 @@
 package dev.shimpyo.app.ui.occupants
 
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
@@ -188,100 +189,107 @@ private fun OccupantList(
     onRemove: (Occupant) -> Unit,
 ) {
     val c = ShimpyoTheme.colors
-    // 좁은 세로 윈도(12.9" 628dp, WF 648dp)에서는 나이 스테퍼를 이름 아래 줄로 내린다: 한 줄이면 이름이 약 48dp만 남았다 (UI 감사 #22)
-    val narrow = LocalLayout.current.width < NARROW_ROW_WIDTH
     // 평소 간격 선택지를 펼쳐 둔 탑승자
     var intervalOpenFor by rememberSaveable { mutableStateOf<String?>(null) }
-    ListGroup {
-        list.forEachIndexed { i, o ->
-            if (i > 0) ListDivider()
-            // 운전자는 항상 첫 번째다 (Settings 기본값, OccupantPhrase 모두 운전자를 먼저 넣는다)
-            val isDriver = o.id == DRIVER.id || (i == 0 && o.type == OccupantType.ADULT)
-            val asleep = canSleep(o) && o.id in asleepIds
-            val stepper: @Composable () -> Unit = {
-                val age = o.ageYears ?: DEFAULT_CHILD_AGE
-                PleosStepper(
-                    value = "${age}세",
-                    onMinus = { onAge(o, (age - 1).coerceAtLeast(MIN_CHILD_AGE)) },
-                    onPlus = { onAge(o, (age + 1).coerceAtMost(MAX_CHILD_AGE)) },
-                    minusEnabled = age > MIN_CHILD_AGE,
-                    plusEnabled = age < MAX_CHILD_AGE,
-                    label = "나이",
-                    width = 300.dp,
-                )
-            }
-            // 이름 아래 줄들은 아이콘 폭만큼 들여 이름과 맞춘다
-            val under = Modifier.fillMaxWidth().padding(start = Dimens.Icon.base + Dimens.Space.l)
-            Column(Modifier.fillMaxWidth().padding(horizontal = Dimens.Space.l, vertical = Dimens.Space.s)) {
-                Row(Modifier.fillMaxWidth().heightIn(min = Dimens.Component.listItemHeight - Dimens.Space.m), verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Labels.typeIcon(o.type), contentDescription = null, modifier = Modifier.size(Dimens.Icon.base), tint = c.iconSecondary)
-                    Spacer(Modifier.width(Dimens.Space.l))
-                    Column(Modifier.weight(1f)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                if (isDriver) "운전자" else Labels.occupantName(o),
-                                style = PleosType.TitleSmall,
-                                color = c.textPrimary,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                modifier = Modifier.weight(1f, fill = false),
-                            )
-                            if (o.id == drivenBy && list.size > 1) {
-                                // 지금 화장실 게이지를 정하는 사람
-                                Spacer(Modifier.width(Dimens.Space.xs))
-                                // 반전 글자: 라이트 흰색(4.9:1), 다크 static_dark_100(4.9:1)
-                                SmallChip("기준", container = c.gaugeOk, content = c.textOnFilledPrimary)
-                            }
-                        }
-                        Text(occupantSubtitle(o, isDriver, asleep), style = PleosType.BodyMedium, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                    }
-                    if (o.type == OccupantType.CHILD && !narrow) {
-                        stepper()
-                        Spacer(Modifier.width(Dimens.Space.m))
-                    }
-                    if (!isDriver) {
-                        PleosIconButton(ShimpyoIcons.Close, contentDescription = "${Labels.occupantName(o)} 빼기", onClick = { onRemove(o) })
-                    }
+    // 아이의 나이 스테퍼는 이름 칸에 가장 긴 설명이 들어갈 때만 이름 옆에 둔다. 윈도 폭이 아니라 이 목록의 실제 폭으로 정한다:
+    // 예전에는 윈도 700dp를 기준으로 갈라서 17" 세로 윈도(840dp)와 가로 2단 목록(약 780dp)에서 이름 칸이 230dp 안팎만 남아
+    // 설명이 '평소 1시간 45분…'으로 잘렸다 (2026-11-13 에뮬레이터 캡처). 그 전에는 좁은 윈도에서 이름이 48dp만 남았다 (UI 감사 #22)
+    BoxWithConstraints {
+        val rowWidth = maxWidth - Dimens.Space.xs * 2 - Dimens.Space.l * 2 // ListGroup 안쪽 여백, 줄 좌우 여백
+        val nameRoomBesideStepper = rowWidth - (Dimens.Icon.base + Dimens.Space.l + STEPPER_WIDTH + Dimens.Space.m + Dimens.Button.iconButton)
+        val stepperBesideName = nameRoomBesideStepper >= SUBTITLE_ROOM_DP.dp
+        ListGroup {
+            list.forEachIndexed { i, o ->
+                if (i > 0) ListDivider()
+                // 운전자는 항상 첫 번째다 (Settings 기본값, OccupantPhrase 모두 운전자를 먼저 넣는다)
+                val isDriver = o.id == DRIVER.id || (i == 0 && o.type == OccupantType.ADULT)
+                val asleep = canSleep(o) && o.id in asleepIds
+                val stepper: @Composable () -> Unit = {
+                    val age = o.ageYears ?: DEFAULT_CHILD_AGE
+                    PleosStepper(
+                        value = "${age}세",
+                        onMinus = { onAge(o, (age - 1).coerceAtLeast(MIN_CHILD_AGE)) },
+                        onPlus = { onAge(o, (age + 1).coerceAtMost(MAX_CHILD_AGE)) },
+                        minusEnabled = age > MIN_CHILD_AGE,
+                        plusEnabled = age < MAX_CHILD_AGE,
+                        label = "나이",
+                        width = STEPPER_WIDTH,
+                    )
                 }
-                if (o.type == OccupantType.CHILD && narrow) {
-                    Spacer(Modifier.height(Dimens.Space.xs))
-                    Row(under) { stepper() }
-                }
-                if (canSetInterval(o.type) || canSleep(o)) {
-                    val open = intervalOpenFor == o.id
-                    Spacer(Modifier.height(Dimens.Space.xs))
-                    ChipFlow(under, spacing = Dimens.Space.s, maxLines = 2) {
-                        if (canSetInterval(o.type)) {
-                            PleosSelectButton(intervalButtonLabel(o), expanded = open, onClick = { intervalOpenFor = if (open) null else o.id })
-                        }
-                        if (canSleep(o)) {
-                            ToggleButton("자는 중", asleep, { onAsleep(o.id, !asleep) }, icon = ShimpyoIcons.Bedtime)
-                        }
-                    }
-                    if (open && canSetInterval(o.type)) {
-                        Spacer(Modifier.height(Dimens.Space.s))
-                        // 줄이 넘치면 다음 줄로 보낸다. 선택지가 빠지지 않게 줄 수를 넉넉히 둔다 (ChipFlow는 넘치는 줄을 그리지 않는다)
-                        ChipFlow(under, spacing = Dimens.Space.s, maxLines = INTERVAL_CHOICES.size) {
-                            INTERVAL_CHOICES.forEach { choice ->
-                                ToggleButton(
-                                    intervalChoiceLabel(choice),
-                                    selected = intervalSelected(o, choice),
-                                    onClick = {
-                                        onInterval(o, choice)
-                                        intervalOpenFor = null
-                                    },
-                                    role = Role.RadioButton,
+                // 이름 아래 줄들은 아이콘 폭만큼 들여 이름과 맞춘다
+                val under = Modifier.fillMaxWidth().padding(start = Dimens.Icon.base + Dimens.Space.l)
+                Column(Modifier.fillMaxWidth().padding(horizontal = Dimens.Space.l, vertical = Dimens.Space.s)) {
+                    Row(Modifier.fillMaxWidth().heightIn(min = Dimens.Component.listItemHeight - Dimens.Space.m), verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Labels.typeIcon(o.type), contentDescription = null, modifier = Modifier.size(Dimens.Icon.base), tint = c.iconSecondary)
+                        Spacer(Modifier.width(Dimens.Space.l))
+                        Column(Modifier.weight(1f)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Text(
+                                    if (isDriver) "운전자" else Labels.occupantName(o),
+                                    style = PleosType.TitleSmall,
+                                    color = c.textPrimary,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
+                                    modifier = Modifier.weight(1f, fill = false),
                                 )
+                                if (o.id == drivenBy && list.size > 1) {
+                                    // 지금 화장실 게이지를 정하는 사람
+                                    Spacer(Modifier.width(Dimens.Space.xs))
+                                    // 반전 글자: 라이트 흰색(4.9:1), 다크 static_dark_100(4.9:1)
+                                    SmallChip("기준", container = c.gaugeOk, content = c.textOnFilledPrimary)
+                                }
+                            }
+                            // 자르지 않고 두 줄까지 접는다: 가장 좁은 12.9" 세로 윈도에서 '… · 자는 중'이 이름 칸(약 364dp)을 넘을 수 있다
+                            Text(occupantSubtitle(o, isDriver, asleep), style = PleosType.BodyMedium, color = c.textSecondary, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        }
+                        if (o.type == OccupantType.CHILD && stepperBesideName) {
+                            stepper()
+                            Spacer(Modifier.width(Dimens.Space.m))
+                        }
+                        if (!isDriver) {
+                            PleosIconButton(ShimpyoIcons.Close, contentDescription = "${Labels.occupantName(o)} 빼기", onClick = { onRemove(o) })
+                        }
+                    }
+                    if (o.type == OccupantType.CHILD && !stepperBesideName) {
+                        Spacer(Modifier.height(Dimens.Space.xs))
+                        Row(under) { stepper() }
+                    }
+                    if (canSetInterval(o.type) || canSleep(o)) {
+                        val open = intervalOpenFor == o.id
+                        Spacer(Modifier.height(Dimens.Space.xs))
+                        ChipFlow(under, spacing = Dimens.Space.s, maxLines = 2) {
+                            if (canSetInterval(o.type)) {
+                                PleosSelectButton(intervalButtonLabel(o), expanded = open, onClick = { intervalOpenFor = if (open) null else o.id })
+                            }
+                            if (canSleep(o)) {
+                                ToggleButton("자는 중", asleep, { onAsleep(o.id, !asleep) }, icon = ShimpyoIcons.Bedtime)
                             }
                         }
+                        if (open && canSetInterval(o.type)) {
+                            Spacer(Modifier.height(Dimens.Space.s))
+                            // 줄이 넘치면 다음 줄로 보낸다. 선택지가 빠지지 않게 줄 수를 넉넉히 둔다 (ChipFlow는 넘치는 줄을 그리지 않는다)
+                            ChipFlow(under, spacing = Dimens.Space.s, maxLines = INTERVAL_CHOICES.size) {
+                                INTERVAL_CHOICES.forEach { choice ->
+                                    ToggleButton(
+                                        intervalChoiceLabel(choice),
+                                        selected = intervalSelected(o, choice),
+                                        onClick = {
+                                            onInterval(o, choice)
+                                            intervalOpenFor = null
+                                        },
+                                        role = Role.RadioButton,
+                                    )
+                                }
+                            }
+                            Spacer(Modifier.height(Dimens.Space.xs))
+                            Text(autoIntervalHint(o), style = PleosType.BodyMedium, color = c.textTertiary, modifier = under)
+                        }
+                        if (asleep) {
+                            Spacer(Modifier.height(Dimens.Space.xs))
+                            Text(ASLEEP_HINT, style = PleosType.BodyMedium, color = c.textTertiary, modifier = under)
+                        }
                         Spacer(Modifier.height(Dimens.Space.xs))
-                        Text(autoIntervalHint(o), style = PleosType.BodyMedium, color = c.textTertiary, modifier = under)
                     }
-                    if (asleep) {
-                        Spacer(Modifier.height(Dimens.Space.xs))
-                        Text(ASLEEP_HINT, style = PleosType.BodyMedium, color = c.textTertiary, modifier = under)
-                    }
-                    Spacer(Modifier.height(Dimens.Space.xs))
                 }
             }
         }
@@ -371,5 +379,5 @@ private const val DEFAULT_CHILD_AGE = 5
 private const val MIN_CHILD_AGE = 3
 private const val MAX_CHILD_AGE = 12
 private const val STEPPER_DEBOUNCE_MS = 700L
-/** 이보다 좁은 윈도에서는 탑승자 행을 두 줄로 놓는다 (LayoutSpec.margin의 좁은 기준과 같다) */
-private val NARROW_ROW_WIDTH = 700.dp
+/** 아이 줄의 나이 스테퍼 폭 (가이드 400dp보다 좁힌 값) */
+private val STEPPER_WIDTH = 300.dp
