@@ -160,4 +160,45 @@ class EverydayAuditCoreTest {
         rig.run(150_000)
         assertNotNull("2분 뒤에도 남는다", rig.state.next?.reasons?.firstOrNull { it.code == "NEXT_ACCEPTED" })
     }
+
+    // ---------------------------------------------------------------- 2026-11-13 검증
+
+    @Test
+    fun withoutASpeedSignalTheCoachAndTheEngineAgreeAboutTheRestroomStop() = runTest {
+        // 검증 3: 차속 권한이 없거나 Car 서비스가 다시 붙는 중(차속 null). 엔진은 D로 30초 지나면 움직인 것으로 봤지만 코치는 차속으로만
+        // 봐서, 엔진은 화장실 정차를 배우고 기록·여정은 '타는 중'으로 문을 세지 않았다
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER, KID)), wallBase = wall)
+        rig.fix(37.40, 127.10, 0f)
+        rig.hub.gear = dev.shimpyo.engine.Gear.DRIVE
+        rig.hub.speedKph = null
+        rig.start()
+        rig.run(10 * min)
+        rig.park()
+        rig.hub.speedKph = null
+        rig.run(20_000)
+        rig.hub.markDoorOpened()
+        rig.run(4 * min)
+        val engineSaysRestroom = rig.state.restroom!!.minutes!! > 90
+        val anchor = checkNotNull(rig.trips.stored)
+        val anchorMoved = (anchor.lastRestroomAt.values + anchor.restroomFallbackAt).max() > wall
+        assertTrue("엔진: 화장실 정차 (${rig.state.restroom?.minutes}분)", engineSaysRestroom)
+        assertTrue("여정 기준점도 같은 정차로 옮겼다", anchorMoved)
+    }
+
+    @Test
+    fun theHolidayDemoParkedWithADoorDoesNotAskTheDepartureQuestion() = runTest {
+        // 검증 7: 시연 경로에는 목적지가 없어 남은 거리로 새 목적지를 가렸는데, 시연 차는 P에서도 움직여 남은 거리가 10초에 2km씩 바뀌었다
+        val rig = CoreRig(this, wallBase = wall)
+        rig.drive(100f)
+        rig.start()
+        rig.command(UiCommand.Demo("holiday"))
+        rig.run(20_000)
+        rig.park()
+        rig.run(5_000)
+        rig.hub.markDoorOpened()
+        repeat(40) {
+            rig.run(1_000)
+            assertNotEquals("귀성길 시연 한가운데서 출발 전 질문: ${rig.state.prompt?.speech}", PromptKind.DEPARTURE, rig.state.prompt?.kind)
+        }
+    }
 }

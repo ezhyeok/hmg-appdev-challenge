@@ -12,7 +12,7 @@ import kotlin.test.assertTrue
  * 도심 다음 화장실 (일상 확장, 2026-11-13). 엔진의 정차 후보(CoachInput.candidates)는 고속도로 휴게소·졸음쉼터라 도심에서는
  * '다음 화장실'이 비거나 수십 km 밖 휴게소였다. 앱은 이제 차 가까이의 일상 정차 후보(공중화장실·화장실 있는 주유소·화장실 가까운
  * 공영주차장, 지금 연 곳, 차를 세울 수 있는 곳)를 따로 넣는다(CoachInput.nearby). 엔진은 이 목록을 고속도로의 공백 판단에 쓰지 않고,
- * 경로 위 화장실 기회가 [CoachConfig.nearbyPreferRouteM] 안에 없을 때만 다음 화장실·NOW 질문·"화장실 가고 싶대"의 답에 쓴다.
+ * 경로의 화장실보다 빨리 닿을 때(NOW·말한 요청은 2분 넘게) 다음 화장실·NOW 질문·"화장실 가고 싶대"의 답에 쓴다.
  */
 class CityNearbyTest {
     private val start = kst(2026, 11, 13, 17, 30)
@@ -231,5 +231,55 @@ class CityNearbyTest {
         drive(e, start, listOf(park, gas))
         val p = assertNotNull(drive(e, start + 2 * SEC, listOf(park, gas), intent = VoiceIntent.HowLong).prompt)
         assertTrue("정자공원" in p.speech, p.speech)
+    }
+
+    // ---------------------------------------------------------------- 2026-11-13 검증
+
+    @Test
+    fun aCityQuestionSurvivesAShortAbsenceLikeATurn() {
+        // 검증 2: 좌회전하는 동안 장소가 진행 방향 뒤로 잠깐 빠지면 질문이 첫 틱에 사라지고 20분 동안 다른 질문까지 막혔다
+        val e = nowEngine()
+        fun tick(sec: Int, list: List<StopCandidate>) = e.update(CoachInput(now = start + sec * SEC, gear = Gear.DRIVE, speedKph = 30f, nearby = list)).prompt
+        var askedAt = -1
+        var id: String? = null
+        for (sec in 0..40) { val p = tick(sec, listOf(park, gas)); if (p != null) { askedAt = sec; id = p.id; break } }
+        assertTrue(askedAt >= 0)
+        for (k in 1..3) tick(askedAt + k, listOf(gas)) // 회전: 정자공원이 3초 동안 목록에서 빠진다
+        assertEquals(id, tick(askedAt + 4, listOf(park, gas))?.id, "짧게 빠졌다 돌아온 장소의 질문은 그대로다")
+    }
+
+    @Test
+    fun aCityQuestionWhosePlaceIsGoneDoesNotBlockTheNextOne() {
+        // 지나쳐 목록에서 빠진 장소의 질문은 내리되, 그것을 '대답하지 않음'으로 쳐서 다음 장소의 질문을 20분 막지 않는다
+        val e = nowEngine()
+        fun tick(sec: Int, list: List<StopCandidate>) = e.update(CoachInput(now = start + sec * SEC, gear = Gear.DRIVE, speedKph = 30f, nearby = list)).prompt
+        var askedAt = -1
+        for (sec in 0..40) { if (tick(sec, listOf(park, gas))?.stop?.id == "park") { askedAt = sec; break } }
+        assertTrue(askedAt >= 0)
+        var next: Prompt? = null
+        for (sec in askedAt + 1..askedAt + 90) { val p = tick(sec, listOf(gas)); if (p?.stop?.id == "gas") { next = p; break } }
+        assertNotNull(next, "정자공원을 지나친 뒤 1분 30초 안에 다음 곳(분당주유소)을 묻는다")
+    }
+
+    @Test
+    fun anUrgentResultKeepsItsLifetimeThroughAOneTickAbsence() {
+        // 검증 6: 거리 없이 낸 질문을 모두 도심 질문으로 봐서, 급해 결과도 후보가 한 틱 빠지면 사라졌다 (예전에는 수명까지 남았다)
+        val e = engine(restroomMinAgo = 40)
+        val rest = stop("ra", 6_000.0, name = "안성휴게소")
+        val p = assertNotNull(e.update(CoachInput(now = start, gear = Gear.DRIVE, speedKph = 60f, candidates = listOf(rest), intent = VoiceIntent.UrgentRestroom)).prompt)
+        assertEquals(PromptKind.URGENT_RESULT, p.kind)
+        e.update(CoachInput(now = start + SEC, gear = Gear.DRIVE, speedKph = 60f, candidates = emptyList()))
+        assertEquals(p.id, e.update(CoachInput(now = start + 2 * SEC, gear = Gear.DRIVE, speedKph = 60f, candidates = listOf(rest))).prompt?.id)
+    }
+
+    @Test
+    fun onAGuidedRouteWithARestAreaCloseByTheNearbyParkDoesNotTakeOverTheNextCard() {
+        // 검증 8: 경로 위 휴게소가 3km 앞인데(게이지 여유) 다음 화장실이 600m 공원이 됐다. 비슷하게 닿으면 경로의 화장실이다
+        val e = engine(restroomMinAgo = 40)
+        // 목적지 10km: 휴게소 뒤 공백이 짧아 마지막 기회가 아니다 (그 규칙 없이 다음 화장실을 고르는 경우)
+        val route = RouteState(guiding = true, remainDistanceM = 10_000.0, remainTimeS = 420.0)
+        val rest = stop("ra", 3_000.0, name = "안성휴게소")
+        val out = e.update(CoachInput(now = start, gear = Gear.DRIVE, speedKph = 90f, route = route, candidates = listOf(rest), nearby = listOf(park)))
+        assertNotEquals("park", out.next?.stop?.id, "${out.next}")
     }
 }

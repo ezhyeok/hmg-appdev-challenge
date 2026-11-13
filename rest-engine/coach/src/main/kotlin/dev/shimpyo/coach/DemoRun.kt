@@ -4,6 +4,7 @@ import dev.shimpyo.engine.CoachInput
 import dev.shimpyo.engine.CongestionSegment
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
+import dev.shimpyo.engine.RouteDestination
 import dev.shimpyo.engine.RouteState
 import dev.shimpyo.engine.StopCandidate
 import java.time.Instant
@@ -187,6 +188,9 @@ class DemoRun private constructor(
             congestion = congestion,
             // 시연 후보는 직선 60km 안의 시설이라 경로 거리 55km까지만 다 들어 있다. 그 뒤를 목적지까지의 공백으로 보지 않게
             candidatesUntilM = DEMO_CANDIDATES_UNTIL_M,
+            // 시연의 목적지는 하나다: 시연 차는 P에서도 경로를 따라 움직여 남은 거리가 계속 바뀌는데, 목적지를 모르면 엔진이 그것을
+            // '서 있는 동안 정한 새 목적지'로 보고 귀성길 한가운데서 출발 전 한마디를 했다 (2026-11-13 검증)
+            destination = RouteDestination(s.destinationName ?: s.name, null, null),
         )
         return input.copy(route = route)
     }

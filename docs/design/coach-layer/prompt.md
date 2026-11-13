@@ -288,6 +288,7 @@ NOW가 되고 답이 보이지 않았다. 엔진이 그런 답에 `Prompt.userRe
 | 다시 P가 된 틱에 차속이 함께 옴 | 그 차속이 30km/h를 넘으면 새 정차 | 잡음으로 본다 (P를 믿는다, 엔진과 같다) | `speedOnTheTickTheCarParksAgainIsNoise` |
 | 천천히 떠남 | 바로 기록 | 3분 창이 끝나거나 30km/h·300m를 넘을 때 기록 | `aSlowDepartureIsRecordedWhenTheReparkWindowCloses`, `speedAboveThirtyEndsTheStopAtOnce`, `parkingAgainAfterTheWindowIsANewStop` |
 | 정차 중 시계가 뒤로 맞춰짐 (NTP) | 끝 - 시작이 짧아져 정차가 사라짐 (엔진은 셈) | 선 시간 = 틱 사이 시간의 합, 거꾸로 간 걸음은 0 (엔진 EngineClock과 같다) | `aClockJumpBackWhileParkedDoesNotLoseTheStop`, `clockGoingBackwardsCountsNoParkedTimeForThatStep` |
+| 타는 중 (이번 여정에서 아직 움직이지 않았을 때의 정차, 2026-11-13) | 탈 때 연 문 + 3분이 화장실 정차 (집 앞 가짜 기록·학습) | 문을 세지 않는다. 출발 전 한마디에 '응' 한 뒤(`intendRestroom`)의 문만 센다. 새 정차가 타는 중인지는 코어가 `onTick(…, boardingIfNew = !TripSession.moved)`로, 되돌린 정차는 `restore(…, boarding)`로 준다 (엔진 StopTracker와 같은 규칙) | `aBoardingStopIgnoresDoorsUntilTheDepartureIsAccepted` |
 
 예전 동작은 먼저 그대로 고정한 테스트(`currentBehavior_*`)로 커밋한 뒤 다음 커밋에서 뒤집었다 (git log로 바뀐 점이 보인다).
 기록의 '화장실' 표시와 엔진이 배운 화장실 간격이 같은 규칙에서 나오게 하려는 것이다(구조 리뷰 §2.3e). 엔진 규칙이 바뀌면

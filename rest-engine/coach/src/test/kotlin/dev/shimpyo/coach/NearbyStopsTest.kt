@@ -165,4 +165,35 @@ class NearbyStopsTest {
         assertTrue("잠실 서행에도 쓸 곳이 있다: ${n.size}", n.size >= 6)
         assertTrue(n.all { it.parkable && it.facilities.restroom && it.openNow != false })
     }
+
+    // ---------------------------------------------------------------- 2026-11-13 검증
+
+    @Test
+    fun parkedARestroomBehindTheLastHeadingIsKept() {
+        // 검증 4: 150m 지나쳐 세운 차 (마지막 방향은 북쪽). 서 있으면 걸어서 가니 뒤쪽 화장실도 '가까이에 화장실이 있어요'의 후보다
+        val rows = FakeStopIndex(listOf(row("behind", -150.0), row("ahead", 900.0)))
+        // StopRepository.nearUsable처럼 방향을 주면 뒤쪽(50m 밖, 100도 넘게)을 뺀다
+        val behind = object : StopIndex by rows {
+            override fun nearUsable(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, now: Long, limit: Int) =
+                rows.nearUsable(lat, lon, null, radiusM, kinds, now, limit).filter { c ->
+                    heading == null || Geo.distanceM(lat, lon, c.lat, c.lon) <= 50.0 ||
+                        Geo.angleDiff(Geo.bearingDeg(lat, lon, c.lat, c.lon), heading.toDouble()) <= 100.0
+                }
+        }
+        val n = NearbyStops(behind).current(here, 0f, false, 0f, null, 0L, 0L)
+        assertTrue("서 있으면 뒤쪽도: ${n.map { it.id }}", n.any { it.id == "behind" })
+        // 달리기 시작하면 다시 찾는다 (서 있을 때 찾은 목록을 들고 가지 않는다)
+        assertTrue(NearbyStops(behind).current(here, 0f, false, 30f, null, 0L, 0L).none { it.id == "behind" })
+        val s = NearbyStops(behind)
+        s.current(here, 0f, false, 0f, null, 0L, 0L)
+        assertTrue("출발하면 곧바로 다시 찾는다", s.current(here, 0f, false, 30f, null, 0L, 1_000L).none { it.id == "behind" })
+    }
+
+    @Test
+    fun aTurnDoesNotDropAFarPlace() {
+        // 검증 2: 좌회전하는 동안 800m 앞 장소가 진행 방향 뒤로 잠깐 들어간다. 지나친 곳은 바로 뒤(300m 안)뿐이다
+        val s = NearbyStops(FakeStopIndex(listOf(row("far", 800.0))))
+        assertEquals(listOf("far"), s.current(here, 0f, false, 30f, null, 0L, 0L).map { it.id })
+        assertEquals("방향이 180도 돌아도 800m 떨어진 곳은 지나친 것이 아니다", listOf("far"), s.current(here, 180f, false, 30f, null, 0L, 2_000L).map { it.id })
+    }
 }

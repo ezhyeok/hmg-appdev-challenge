@@ -79,11 +79,6 @@ data class CoachConfig(
      * 타는 중에 연 문은 화장실 정차로 세지 않는다. 근거: 설계값 (시동 → 출발은 대개 1~2분)
      */
     val boardingWindowMin: Int = 2,
-    /**
-     * 경로 위 화장실 기회가 이 거리 안에 있으면 일상 정차 후보(CoachInput.nearby)를 쓰지 않는다 (m). 고속도로에서는 휴게소가 대개 이 안에
-     * 있고 길가 화장실에는 갈 수 없다. 근거: 설계값 (도심 공중화장실은 대개 1km 안에 있다)
-     */
-    val nearbyPreferRouteM: Double = 5_000.0,
     /** 엔진이 먼저 거는 질문 상한 (시간당). 근거: AI §9-3 */
     val maxPromptsPerHour: Int = 3,
 

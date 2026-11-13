@@ -97,6 +97,8 @@ class CoachCore(private val d: CoachDeps) {
      * (서비스 닫힘 검증 N7). 끝내 보이지 않으면(지나쳤다, 경로 후보가 아니었다) [restoredAcceptUntilMs]에 버린다
      */
     private var restoredAccept: String? = null
+    /** 차속을 모른 채 P가 아니게 된 때 ([movedNow]) */
+    private var noSpeedSince: Long? = null
     private var restoredAcceptUntilMs = 0L
 
     /** 내비에 넣는 중인 들르기 (한 번에 하나다, PromptMachine). 어느 세계에서 시작했고 급해 목록에서 고른 것인지 */
@@ -289,7 +291,7 @@ class CoachCore(private val d: CoachDeps) {
                 log.i("restored park ended ${(t - endedAt) / 1000}s ago")
                 worlds.restoredParkEnded(endedAt)
             }
-            worlds.onTick(t, recorder.parkState, moving = gear != Gear.PARK && (speed ?: 0f) > StopDetector.MOVING_KPH)?.let { change ->
+            worlds.onTick(t, recorder.parkState, moving = movedNow(gear, speed, t))?.let { change ->
                 log.i("new trip")
                 applyChange(change)
                 a = worlds.active
@@ -534,6 +536,25 @@ class CoachCore(private val d: CoachDeps) {
     }
 
     /** 재시작 전에 들르기로 한 곳이 지금 후보에 보이면 엔진에 다시 알린다 (한 번). 기다리는 시간이 지나면 잊는다 */
+    /**
+     * 이번 틱에 차가 움직이는지 (TripSession.moved, 엔진 CoachEngine.tripMoved와 같은 규칙): P가 아니고 시속 3km 초과. 차속을 모르면
+     * (차속 권한 없음, Car 서비스가 다시 붙는 중) P가 아닌 채 30초가 지나면 움직인 것으로 본다. 다르면 엔진은 화장실 정차로 배우고 기록·
+     * 여정은 '타는 중'으로 문을 세지 않았다 (2026-11-13 검증)
+     */
+    private fun movedNow(gear: Gear, speed: Float?, t: Long): Boolean {
+        if (gear == Gear.PARK) {
+            noSpeedSince = null
+            return false
+        }
+        if (speed != null) {
+            noSpeedSince = null
+            return speed > StopDetector.MOVING_KPH
+        }
+        if (gear == Gear.UNKNOWN) return false
+        val since = noSpeedSince ?: t.also { noSpeedSince = it }
+        return t - since >= MOVED_WITHOUT_SPEED_MS
+    }
+
     private fun restoreAccepted(a: ActiveWorld, input: CoachInput, el: Long) {
         val id = restoredAccept ?: return
         // 경로 후보, 없으면 차 가까이의 일상 후보 (도심에서 고른 공중화장실은 경로 후보에 없다: 2026-11-13 감사 13)
@@ -825,6 +846,8 @@ class CoachCore(private val d: CoachDeps) {
     companion object {
         const val TICK_MS = 1_000L
         const val MAX_PENDING_INTENTS = 4
+        /** 차속을 모를 때 P가 아닌 채 이만큼 지나면 움직인 것으로 본다 (엔진 CoachEngine.MOVED_UNKNOWN_SPEED_MS와 같다) */
+        const val MOVED_WITHOUT_SPEED_MS = 30_000L
         /** 재시작 전에 들르기로 한 곳이 후보에 다시 보이기를 기다리는 시간 (후보는 20초 안에 다시 만든다) */
         const val ACCEPT_RESTORE_MS = 2 * 60_000L
         /** 화면에 싣는 코치 시각의 단위 (CoachUiState.clockMinuteMs) */

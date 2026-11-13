@@ -25,6 +25,8 @@ class NearbyStops(private val stops: StopIndex) {
     private var cache: List<StopCandidate> = emptyList()
     private var at: Fix? = null
     private var atMs = Long.MIN_VALUE
+    /** 마지막 검색이 달리는 중이었는지 (서 있을 때는 방향 없이 찾는다: 출발하면 다시 찾는다) */
+    private var atMoving = false
 
     /**
      * [pos]: 이 세계의 위치(시연이면 시연 위치), [heading]: 진행 방향(서 있어도 마지막으로 달리던 방향), [highwayRoute]: 길안내 경로 위
@@ -37,17 +39,20 @@ class NearbyStops(private val stops: StopIndex) {
     ): List<StopCandidate> {
         if (pos == null || !stops.loaded || mode == NearbyMode.NEVER) return emptyList()
         if (mode == NearbyMode.SIGNALS && accessControlled(pos, heading, highwayRoute, speedKph, roadLimitKph, now)) return emptyList()
+        val moving = (speedKph ?: 0f) >= MOVING_KPH
         val last = at
-        if (last == null || Geo.distanceM(last.lat, last.lon, pos.lat, pos.lon) > REFRESH_M || elapsedMs - atMs >= REFRESH_MS) {
-            cache = stops.nearUsable(pos.lat, pos.lon, heading, RADIUS_M, KINDS, now = now, limit = MAX)
+        if (last == null || moving != atMoving || Geo.distanceM(last.lat, last.lon, pos.lat, pos.lon) > REFRESH_M || elapsedMs - atMs >= REFRESH_MS) {
+            // 서 있으면 방향 없이 찾는다: 걸어서 가니 지나쳐 세운 뒤쪽 화장실도 '가까이에 화장실이 있어요'다 (2026-11-13 검증)
+            cache = stops.nearUsable(pos.lat, pos.lon, if (moving) heading else null, RADIUS_M, KINDS, now = now, limit = MAX)
             at = pos
             atMs = elapsedMs
+            atMoving = moving
         }
-        val moving = (speedKph ?: 0f) >= MOVING_KPH
         val out = ArrayList<StopCandidate>(cache.size)
         for (c in cache) {
             val d = Geo.distanceM(pos.lat, pos.lon, c.lat, c.lon)
-            if (moving && heading != null && d > PASSED_FREE_M &&
+            // 지나친 곳은 바로 뒤([PASSED_MAX_M] 안)뿐이다: 길을 꺾는 동안 멀리 있는 곳이 잠깐 뒤로 들어가는 것은 지나친 것이 아니다
+            if (moving && heading != null && d > PASSED_FREE_M && d <= PASSED_MAX_M &&
                 Geo.angleDiff(Geo.bearingDeg(pos.lat, pos.lon, c.lat, c.lon), heading.toDouble()) > PASSED_DEG
             ) continue
             out += c.copy(straightDistanceM = d, routeDistanceM = null, etaS = null)
@@ -69,6 +74,7 @@ class NearbyStops(private val stops: StopIndex) {
         cache = emptyList()
         at = null
         atMs = Long.MIN_VALUE
+        atMoving = false
     }
 
     companion object {
@@ -90,6 +96,8 @@ class NearbyStops(private val stops: StopIndex) {
         const val MOVING_KPH = 5f
         /** 바로 옆(이 안)은 방위가 흔들려 지나쳤다고 보지 않는다 */
         const val PASSED_FREE_M = 50.0
+        /** 검색 사이(250m)에 지나친 곳은 이 안에 있다. 더 먼 곳이 뒤로 보이면 길을 꺾는 중이다 */
+        const val PASSED_MAX_M = 300.0
         const val PASSED_DEG = 100.0
         val KINDS: Set<StopKind> = setOf(StopKind.PUBLIC_RESTROOM, StopKind.GAS_STATION, StopKind.PUBLIC_PARKING)
         private val HIGHWAY_KINDS: Set<StopKind> = setOf(StopKind.HIGHWAY_REST_AREA, StopKind.DROWSY_SHELTER)

@@ -502,13 +502,14 @@ internal class RestroomNeedModel(private val config: CoachConfig, local: LocalCl
      * 맞는 사람이 없으면 아무에게도 남기지 않는다: 반려견만 설정했는데 운전자가 "화장실 급해"라고 하면 그건 목록에 없는
      * 운전자의 필요다. 예전에는 반려견의 기록으로 남아 반려견 게이지를 계속 줄였다(감사 O3).
      */
-    fun onVoiced(occupantId: String?, purpose: Purpose, mono: Long, memory: PersonalMemory): PersonalMemory {
+    fun onVoiced(occupantId: String?, purpose: Purpose, mono: Long, memory: PersonalMemory, learn: Boolean = true): PersonalMemory {
         val t = resolve(occupantId, purpose, mono) ?: return memory
         if (t.voiced) return memory
         val interval = elapsedMin(t, mono)
         t.voicedAt = mono
         cached = null
-        if (interval < config.restroomMinObservedMin) return memory
+        // [learn]이 false면 NOW로만 올리고 관측은 남기지 않는다 (출발 전: 앞 구간의 시작이 대개 가정한 값이다)
+        if (!learn || interval < config.restroomMinObservedMin) return memory
         val mem = memory.copy(
             restroomIntervalsMin = memory.restroomIntervalsMin.prepend(t.id, tauMin(t, mono), config.restroomMemoryMax),
         )

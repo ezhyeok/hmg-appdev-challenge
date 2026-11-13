@@ -54,6 +54,13 @@ internal class PromptPolicy(
          * 달리다 대답 없이 지나간 답은 '그곳은 됐다'로 보지만, 서 있을 때의 무응답을 그렇게 보면 출발한 뒤 그곳을 묻지 못한다
          */
         val cooldownOnExpiry: Boolean = true,
+        /**
+         * 도심 길의 일상 정차 후보를 묻는 질문 (CoachEngine의 가까운 화장실). 진입로 거리로 묻지 않았으니 지나가는 중(500m 안)이라고
+         * 내리지 않고, 장소가 지금 목록에서 [CITY_MISSING_GRACE_MS] 넘게 빠지면(지나쳤다) 내린다. 길을 꺾는 동안 잠깐 빠지는 것은
+         * 견딘다. 빠져서 내린 것은 대답하지 않은 것이 아니라 쉼을 걸지 않는다 (2026-11-13 검증: 좌회전 한 번에 질문이 사라지고 20분 동안
+         * 다른 질문까지 막혔다)
+         */
+        val city: Boolean = false,
     )
 
     class Issued internal constructor(
@@ -85,6 +92,8 @@ internal class PromptPolicy(
         // 대상이 목록에서 빠졌을 때 쓰는 마지막으로 본 거리 (m)와 시각
         internal var lastSeenD: Double = Double.NaN
         internal var lastSeenMono: Long = 0L
+        /** 도심 질문의 장소가 목록에서 빠지기 시작한 때 (있으면 NONE) */
+        internal var missingSinceMono: Long = Long.MIN_VALUE
     }
 
     internal class Cooldown(val atMono: Long, val targetId: String?, val level: Level, val durationMs: Long)
@@ -268,8 +277,16 @@ internal class PromptPolicy(
         val a = active ?: return
         var expire = mono >= a.expiresMono
         if (!expire && a.targetId != null && !a.byDistance) {
-            // 거리 없이 물은 도심 질문: 장소가 지금 목록에 없으면(지나쳐 뒤로 빠졌다) 내린다
-            if (distanceOf(a.targetId) == null) expire = true
+            // 도심 질문: 장소가 목록에서 잠깐 빠지는 것(길을 꺾는 동안)은 견디고, 계속 빠져 있으면(지나쳤다) 쉼 없이 내린다
+            if (distanceOf(a.targetId) != null) {
+                a.missingSinceMono = Long.MIN_VALUE
+            } else {
+                if (a.missingSinceMono == Long.MIN_VALUE) a.missingSinceMono = mono
+                if (mono - a.missingSinceMono >= CITY_MISSING_GRACE_MS) {
+                    active = null
+                    return
+                }
+            }
         } else if (!expire && a.targetId != null &&
             (a.kind == PromptKind.LAST_CHANCE || a.kind == PromptKind.REST_SUGGESTION)
         ) {
@@ -331,7 +348,7 @@ internal class PromptPolicy(
         )
         val iss = Issued(
             p, c.stop?.id, statKey, c.level, mono + ttl, c.userInitiated, c.purposes, c.reasons, c.groupDriven, c.cooldownOnExpiry,
-            byDistance = c.distanceM != null || c.stop == null,
+            byDistance = !c.city,
         )
         iss.lastSeenD = c.distanceM ?: Double.NaN
         iss.lastSeenMono = mono
@@ -381,6 +398,8 @@ internal class PromptPolicy(
     private fun choiceKey(kind: PromptKind, stopId: String) = "${kind.name}|$stopId"
 
     companion object {
+        /** 도심 질문의 장소가 목록에서 이만큼 넘게 빠지면 지나친 것으로 본다 (길을 꺾는 동안의 깜빡임은 이보다 짧다) */
+        const val CITY_MISSING_GRACE_MS = 15_000L
         private const val HOUR_MS = 3_600_000L
         private const val RECENT_MAX = 8
         /** 질문 대상까지 이보다 가까워지면 대답이 없어도 내린다 (m) */

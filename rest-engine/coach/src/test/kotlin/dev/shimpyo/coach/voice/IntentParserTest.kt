@@ -85,6 +85,21 @@ class IntentParserTest {
                 "다녀왔어?" to CardReply(YesNo.UNKNOWN, null),
             ),
         ) { reply(it!!) }
+        // 검증 1: 아직 안 갔다는 말, 다녀와서 가겠다는 말, 바람은 '이미 다녀왔다'가 아니다 (게이지를 채우면 1시간 반 동안 아무것도 묻지 않는다)
+        table(
+            "출발 전 카드: 아직·다녀와서·바람", listOf(
+                "아직 안 다녀왔어" to null,
+                "아니 안 다녀왔는데" to null,
+                "안 갔다 왔어" to null,
+                "화장실 다녀왔다가 출발할게" to null,
+                "다녀왔다가 갈게요" to null,
+                "다녀왔으면 좋겠는데" to null,
+            ),
+        ) { reply(it!!).other }
+        assertEquals(YesNo.YES, reply("화장실 다녀왔다가 출발할게").answer)
+        assertEquals(YesNo.YES, reply("다녀왔다가 갈게요").answer)
+        // 검증 5: "응 애가 화장실 가고 싶대": 그 요청이 바로 이 카드다. 화장실 요청으로 또 넘기면 엔진이 가까운 화장실을 다시 찾았다
+        assertEquals(CardReply(YesNo.YES, null), reply("응 애가 화장실 가고 싶대"))
         // 다른 카드에서는 출발 전 규칙을 쓰지 않는다 ("이미 다녀왔어"가 경유지 카드의 화장실 시계를 돌리지 않는다)
         assertEquals(null, parser.replyTo("이미 다녀왔어", withKid, cardStopName = "옥산휴게소", cardKind = PromptKind.LAST_CHANCE).other)
     }

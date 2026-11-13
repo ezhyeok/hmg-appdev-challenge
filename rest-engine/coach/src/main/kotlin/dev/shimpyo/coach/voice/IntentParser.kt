@@ -283,12 +283,18 @@ class IntentParser {
      */
     private fun departureReply(t: String, text: String?, occupants: List<Occupant>): CardReply? {
         if (asked(text) || HOW_LONG.containsMatchIn(t)) return null
+        // "아직 안 다녀왔어": 대답이 아니라 지금 상태다. 카드는 그대로 두고(버튼·다시 말하기) 시계는 돌리지 않는다
+        if (NOT_YET.containsMatchIn(t)) return CardReply(YesNo.UNKNOWN, null)
+        // "다녀왔다가 출발할게": 다녀오겠다는 말이다 ("다녀왔"이 들어 있어도)
+        if (GO_THEN.containsMatchIn(t)) return CardReply(YesNo.YES, null)
         if (ALREADY_WENT.containsMatchIn(t)) {
             val w = who(t, occupants)
             return CardReply(YesNo.NO, VoiceIntent.RestroomDone(w.occupant?.id))
         }
         if (refused(t)) return null
         if (WILL_GO.containsMatchIn(t)) return CardReply(YesNo.YES, null)
+        // "응 애가 화장실 가고 싶대": 그 요청이 바로 이 카드다. 화장실 요청으로 넘기면 엔진이 가까운 화장실을 또 찾는다
+        if (answer(t, false) == YesNo.YES) return CardReply(YesNo.YES, null)
         return null
     }
 
@@ -414,7 +420,11 @@ class IntentParser {
 
         // ---- 출발 전 한마디의 대답
         /** 이미 다녀왔다 ("다녀왔어", "갔다 왔어", "이미 갔어", "방금 화장실 다녀왔어요") */
-        val ALREADY_WENT = Regex("(다녀왔|갔다왔|(이미|방금|아까|벌써)(화장실)?(갔|다녀|볼일봤|쌌))")
+        val ALREADY_WENT = Regex("(다녀왔(?!으면)|갔다왔(?!으면)|(이미|방금|아까|벌써)(화장실)?(갔|다녀|볼일봤|쌌))")
+        /** 아직 안 갔다 ("아직 안 다녀왔어", "안 갔다 왔어", "못 다녀왔는데") */
+        val NOT_YET = Regex("(아직|안|못)(화장실)?(다녀|갔다|갔어|갔는데|갔고)")
+        /** 다녀왔다가(다녀와서) 출발하겠다 */
+        val GO_THEN = Regex("(다녀왔다가|갔다왔다가)")
         /** 지금 다녀오겠다 ("다녀올게요", "갔다 올게", "다녀와서 출발할게", "화장실 보내고 올게", "데리고 다녀올게", "다녀오자") */
         val WILL_GO = Regex("(다녀올|다녀오자|다녀오겠|다녀와서|갔다올|갔다오자|갔다오겠|갔다와서|보내고올|보낼게|데려갔다올|데리고다녀올|데리고갔다올|다녀오라고할)")
 

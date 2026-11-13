@@ -42,8 +42,8 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 | `TripHeartbeat` / `TripStorePort` | 여정 맥박과 그 저장소 (새 포트). 맥박에는 정차(`park`)와 들르기로 한 곳(`accepted: AcceptedStop(stopId, at)?`)도 담긴다 | `load()`(시작 때 IO에서), `save(h)`(막지 않음) |
 | `TripRules` | 임계값 | 4절 |
 | `StopHistory` | 저장된 정차 기록 읽기 규칙 | `sanitize(history, now)`, `restroomAt(log)`, `lastRestroomAt(history)` |
-| `TripSession` | 한 세계의 여정 | `open(saved, history, now, elapsed, store)`, `started(anchor, now, elapsed)`, `onTick(now, park): TripEvent?`, `onStop(log, now)`, `onAccepted(stopId, now)`, `flush(now)`, `anchor`, `park`, `restoredPark`, `accepted`, `restoredAccepted`, `origin` |
-| `WorldSwitch` | 세계 전환 | `open(heartbeat, memory, history)`, `enterDemo(name)`, `exitDemo()`, `setOccupants(list)`, `dropHealthOccupants()`, `profileChanged()`, `clearLearning()`, `onTick(now, park)`, `restoredParkEnded(endedAt)`, `onAccepted(stopId)`, `onStop(log, now)`, `memoryToSave()`, `flush()`, `active`, `real` |
+| `TripSession` | 한 세계의 여정 | `open(saved, history, now, elapsed, store)`, `started(anchor, now, elapsed)`, `onTick(now, park, moving): TripEvent?`, `onStop(log, now)`, `onAccepted(stopId, now)`, `onRestroomDone(occupantId, at)`, `flush(now)`, `anchor`, `park`, `moved`(이번 여정에서 실제로 움직였나: 타는 중 판정), `restoredPark`, `accepted`, `restoredAccepted`, `origin` |
+| `WorldSwitch` | 세계 전환 | `open(heartbeat, memory, history)`, `enterDemo(name)`, `exitDemo()`, `setOccupants(list)`, `dropHealthOccupants()`, `profileChanged()`, `clearLearning()`, `onTick(now, park, moving)`, `restoredParkEnded(endedAt)`, `onAccepted(stopId)`, `onStop(log, now)`, `memoryToSave()`, `flush()`, `active`, `real` |
 | `WorldChange` | 전환 결과 | `active`, `kind`(NONE/ENGINE/WORLD), `saveMemory: MemorySave?`, `restorePark: ParkState?` |
 
 ## 3. 세계별 정책

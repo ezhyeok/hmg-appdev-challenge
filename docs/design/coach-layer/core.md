@@ -74,9 +74,9 @@ PT 기술 질의응답용. 코드: `rest-engine/coach/src/main/kotlin/dev/shimpy
 odometer.advance(차속); crew.enforceConsent()            주행 거리, 동의가 꺼졌는지
 t = 세계 시계, pos = world.position(실제 위치)            시연이면 가상 시각·위치를 덧씌운다
 heading = travel.update(실제 위치, 차속, 기어)            진행 방향: 움직일 때 본 마지막 방위 (C1)
-recorder.onTick(t, 기어, 차속, 문, pos, persistsHistory)  → 정차 기록이면 여정에 알림, 화면 기록, 자는 중 표시 풂
+recorder.onTick(t, 기어, 차속, 문, pos, persistsHistory, boardingIfNew = !여정.moved)  → 정차 기록이면 여정에 알림, 화면 기록, 자는 중 표시 풂
 waiting = recorder.restorePending                         되돌린 정차의 판정을 기다리는 중 (10장)
-!waiting: 되돌린 정차가 끝났으면 worlds.restoredParkEnded → worlds.onTick(t, 정차) → 새 여정이면 ENGINE 변경
+!waiting: 되돌린 정차가 끝났으면 worlds.restoredParkEnded → worlds.onTick(t, 정차, 움직임) → 새 여정이면 ENGINE 변경 (움직임: P가 아니고 시속 3km 초과, 차속을 모르면 30초)
 crew.onTick(t, 정차)                                      화장실 정차·아침 7시에 자는 중 표시 풂
 ahead = world.candidates(candidates.live(내비, 주행 거리))  후보를 매초 달린 만큼 줄인다 (UI #19)
 input = world.apply(CoachInput(..., candidates = ahead + 급해 결과·고른 곳, intent = 급해 알림 또는 쌓인 의도 하나, asleepOccupantIds))

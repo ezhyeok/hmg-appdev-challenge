@@ -241,7 +241,8 @@ class CoachEngine(
                 // "아이가 화장실 가고 싶대": 그 사람을 NOW로 올리고, 바로 다음 들를 곳을 답한다.
                 // 예전에는 게이지만 올리고 엔진 질문이 30초 뒤에야 나왔다(그 사이 2km 안으로 들어온 휴게소는 건너뛰었다, 감사 V1)
                 Purpose.RESTROOM, Purpose.FEEDING, Purpose.PET -> {
-                    memory = needs.onVoiced(intent.occupantId, intent.purpose, mono, memory)
+                    // 아직 출발 전(타는 중)이면 마지막 화장실이 대개 가정한 값이라 그 간격은 배우지 않는다 (2026-11-13 검증)
+                    memory = needs.onVoiced(intent.occupantId, intent.purpose, mono, memory, learn = tripMoved)
                     needAnswer.request(intent.purpose)
                     voicedRestroomAt = mono
                 }
@@ -250,7 +251,7 @@ class CoachEngine(
                 Purpose.FUEL -> fuelAnswer.request(Purpose.FUEL) // 예전에는 아무 답도 없었다(감사 V2)
             }
             VoiceIntent.UrgentRestroom -> {
-                memory = needs.onVoiced(null, Purpose.RESTROOM, mono, memory)
+                memory = needs.onVoiced(null, Purpose.RESTROOM, mono, memory, learn = tripMoved)
                 urgentRequested = true
                 voicedRestroomAt = mono
             }
@@ -366,7 +367,7 @@ class CoachEngine(
                             if (p == Purpose.RESTROOM) Reason("NEXT_REQUESTED_RESTROOM", texts.reasonNextRequestedRestroom())
                             else Reason("NEXT_REQUESTED_CARE", texts.reasonNextRequestedCare()),
                         ),
-                        cooldownOnExpiry = moving,
+                        cooldownOnExpiry = moving, city = true,
                     )
                     t == null -> ask(PromptKind.INFO, texts.restroomRequestedNone(), user = true, fresh = fresh)
                     else -> goingThere(t.stop, t.distanceM, fresh) ?: run {
@@ -465,6 +466,7 @@ class CoachEngine(
                     ask(
                         PromptKind.LAST_CHANCE, texts.restroomNowSuggestion(nowNearby.name, nearbyDistanceM(nowNearby)),
                         nowNearby, null, Level.NOW, purposes = purposesFor(nowNearby, Purpose.RESTROOM, ctx), reasons = listOf(nearbyReason()),
+                        city = true,
                     ),
                     null,
                 )
@@ -535,7 +537,12 @@ class CoachEngine(
         }
 
         // 7. 다음 추천. 질문을 정한 뒤에 낸다: 화장실 질문이 떠 있으면 추천은 그 질문의 장소와 이유다
-        val next = recommend(ctx, urgentList, lastChance, lastChanceIsNearest, nowRestroom, wantsRest, restTarget, mealTarget, input.candidates, speed, nowNearby, nearbyBest)
+        // 다음 화장실의 마지막 대안(일상 후보)은 경로의 첫 화장실보다 확실히 빨리 닿을 때만 (비슷하면 화면이 경로의 화장실을 보인다)
+        val routeFirst = restroomOpps.firstOrNull { !isEveryday(it.stop) }
+        val nearbyFallback = nearbyBest?.takeIf {
+            routeFirst == null || nearbyRanked!!.totalTimeS + NOW_NEARBY_MARGIN_S < routeFirst.arriveS + ranker.parkWalkMin(routeFirst.stop) * 60.0
+        }
+        val next = recommend(ctx, urgentList, lastChance, lastChanceIsNearest, nowRestroom, wantsRest, restTarget, mealTarget, input.candidates, speed, nowNearby, nearbyFallback)
 
         // 8. 공조 (피로와 별개인 편의 기능. 앱은 사용자가 허용했을 때만 실행하고, 외기는 1~2분 뒤 되돌린다)
         val coolDown = !freshAir && fatigueGauge.level >= Level.SOON && input.cabin.hvacOn == true &&
@@ -1018,7 +1025,8 @@ class CoachEngine(
         reasons: List<Reason> = emptyList(),
         groupDriven: Boolean = false,
         cooldownOnExpiry: Boolean = true,
-    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh, reasons, groupDriven, cooldownOnExpiry)
+        city: Boolean = false,
+    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh, reasons, groupDriven, cooldownOnExpiry, city)
 
     /**
      * 사용자의 말에 답할 곳([stop])이 이미 들르기로 한 곳이면 '들를까요?' 대신 낼 안내, 아니면 null.

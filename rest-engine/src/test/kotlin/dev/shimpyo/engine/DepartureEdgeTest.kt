@@ -225,4 +225,19 @@ class DepartureEdgeTest {
         drive(e, start + 20 * SEC, null, kph = 0f)
         assertNotNull(askedWhileParked(e, start + 30 * SEC, 60, route(48.0, 70)), "움직이지 않았으면 아직 출발 전이다")
     }
+
+    // ---------------------------------------------------------------- 2026-11-13 검증
+
+    @Test
+    fun aVoicedNeedWhileBoardingTeachesNothing() {
+        // 검증 5: 집 앞에서 "애가 화장실 가고 싶대": 출발 전 마지막 화장실은 가정한 60분 전이라 그 간격(60분)은 아이의 기록이 아니다
+        val e = engine()
+        parked(e, start, route(48.0, 70), intent = VoiceIntent.OccupantNeed("kid", Purpose.RESTROOM))
+        assertTrue(e.memory().restroomIntervalsMin.isEmpty(), "탈 때 말한 요청으로 배우지 않는다: ${e.memory().restroomIntervalsMin}")
+        // 달리던 중에 말한 요청은 그대로 배운다
+        val m = engine(restroomMinAgo = 90, drivenMin = 60)
+        drive(m, start, null, kph = 80f)
+        drive(m, start + SEC, null, kph = 80f).let { m.update(CoachInput(now = start + 2 * SEC, gear = Gear.DRIVE, speedKph = 80f, intent = VoiceIntent.OccupantNeed("kid", Purpose.RESTROOM))) }
+        assertTrue(m.memory().restroomIntervalsMin["kid"]?.isNotEmpty() == true, "달리는 중 요청: ${m.memory().restroomIntervalsMin}")
+    }
 }
