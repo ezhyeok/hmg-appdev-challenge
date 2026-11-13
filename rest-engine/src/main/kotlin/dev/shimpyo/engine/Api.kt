@@ -217,7 +217,11 @@ data class Recommendation(
     val reasons: List<Reason>,
 )
 
-enum class PromptKind { LAST_CHANCE, REST_SUGGESTION, URGENT_RESULT, CHECK_IN, FRESH_AIR, INFO }
+/**
+ * 질문 종류. DEPARTURE: 서 있고 목적지가 있을 때 "출발 전에 화장실 다녀오세요" (일상 주행, 정차지를 묻지 않는다.
+ * 서 있는 동안에만 뜻이 있어 달리기 시작하면 거둔다)
+ */
+enum class PromptKind { LAST_CHANCE, REST_SUGGESTION, URGENT_RESULT, CHECK_IN, FRESH_AIR, INFO, DEPARTURE }
 
 data class Prompt(
     val id: String,

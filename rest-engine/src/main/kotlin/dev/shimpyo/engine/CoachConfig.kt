@@ -58,6 +58,13 @@ data class CoachConfig(
     val quietAfterBrakeOrSteerS: Int = 10,
     /** 같은 종류 질문의 기본 쉼 (분). 거절하면 2배씩, 최대 declineCooldownMaxMin. 단계가 오르면 해제. 근거: AI §9-3 */
     val declineCooldownMin: Int = 20,
+    /**
+     * 출발 전 한마디: 도착까지 이보다 짧은 길에는 묻지 않는다 (분). 근거: 설계값. 등원·학원 같은 짧은 길까지 매번 묻지 않게 하되,
+     * 아이의 30% 마감이 이보다 짧으면(이미 오래됐다) 20분 길에도 묻는다
+     */
+    val departureMinTripMin: Int = 20,
+    /** 서 있는 동안 남은 거리가 이만큼 넘게 바뀌면 새 목적지다 (m). 같은 경로의 재탐색은 이보다 덜 바뀐다. 근거: 설계값 */
+    val departureNewRouteM: Double = 2_000.0,
     /** 엔진이 먼저 거는 질문 상한 (시간당). 근거: AI §9-3 */
     val maxPromptsPerHour: Int = 3,
 

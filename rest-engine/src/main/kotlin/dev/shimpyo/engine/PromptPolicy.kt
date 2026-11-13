@@ -331,6 +331,15 @@ internal class PromptPolicy(
     }
 
     /** 시간이 지나면 의미가 없어지는 질문: 마지막 기회, NOW 단계 */
+    /**
+     * [kind]의 활성 질문을 거둔다: 뜻이 없어졌다 (출발 전 질문인데 달리기 시작했다). 대답 없이 지나간 것으로 치지 않아
+     * 쉼·시간당 횟수를 남기지 않는다
+     */
+    fun withdraw(kind: PromptKind) {
+        val a = active ?: return
+        if (a.kind == kind) interrupt(a)
+    }
+
     private fun urgentKind(c: Candidate): Boolean = c.kind == PromptKind.LAST_CHANCE || c.level == Level.NOW
 
     /** 작을수록 우선 */
@@ -338,6 +347,7 @@ internal class PromptPolicy(
         PromptKind.URGENT_RESULT -> 0
         PromptKind.LAST_CHANCE -> 1
         PromptKind.REST_SUGGESTION -> 2
+        PromptKind.DEPARTURE -> 2
         PromptKind.CHECK_IN -> 3
         PromptKind.FRESH_AIR -> 4
         PromptKind.INFO -> 5

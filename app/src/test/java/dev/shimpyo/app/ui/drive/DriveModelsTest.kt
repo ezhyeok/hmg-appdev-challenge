@@ -167,6 +167,22 @@ class DriveModelsTest {
     }
 
     @Test
+    fun theDepartureQuestionSaysWhyAndOffersToGoFirst() {
+        // 출발 전 한마디 (엔진 DepartureCheckTest): 서 있고 목적지가 있을 때. 정차지가 없는 카드이고 버튼은 '다녀올게요'
+        val p = Prompt(
+            "d", PromptKind.DEPARTURE,
+            "도착까지 약 1시간 10분이에요. 7살 아이는 45분쯤 뒤 화장실을 찾을 것 같아요. 출발 전에 다녀오세요", null, Long.MAX_VALUE,
+        )
+        val state = running.copy(prompt = p, promptReasons = listOf(Reason("DEPARTURE_TRIP", "도착까지 1시간 10분")))
+        val card = stopCard(state, driving = false)
+        assertEquals("출발 전 화장실", card.context)
+        assertEquals("출발 전에 화장실 다녀오세요", card.title)
+        assertEquals("도착까지 약 1시간 10분이에요", card.meta)
+        assertTrue("도착 시간 칩: ${card.chips}", card.chips.contains("도착까지 1시간 10분"))
+        assertEquals("다녀올게요", acceptLabel(p))
+    }
+
+    @Test
     fun checkInLabelFollowsItsReason() {
         // 연속 운전 시간으로 묻는 상태 확인에 '운전 패턴 변화'라고 붙었다 (2026-11-11 에뮬레이터)
         fun label(speech: String) = stopCard(running.copy(prompt = Prompt("c", PromptKind.CHECK_IN, speech, expiresAt = Long.MAX_VALUE)), driving = true).context

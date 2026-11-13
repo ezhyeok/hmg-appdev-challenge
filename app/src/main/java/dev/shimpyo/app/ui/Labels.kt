@@ -239,6 +239,8 @@ object Labels {
         "FATIGUE_RECIRC", "CABIN_RECIRC" -> "환기 권장"
         "CABIN_COOL_DOWN" -> "온도 낮추기 권장"
         "NEXT_ACCEPTED" -> "들르기로 함"
+        // 출발 전 한마디: "도착까지 1시간 10분" (칩에 들어가는 길이로)
+        "DEPARTURE_TRIP" -> durationIn(r.text)?.let { chipWithDuration("도착까지 ", it, "") } ?: "도착까지 오래 걸림"
         "NEXT_NEAREST_RESTROOM" -> "가장 빨리 가는 곳"
         // 말로 한 요청("화장실 가고 싶대", 수유·반려견)에 답한 곳. 질문 카드에서는 맥락 줄이 이 말을 한다
         "NEXT_REQUESTED_RESTROOM" -> "요청하신 화장실"

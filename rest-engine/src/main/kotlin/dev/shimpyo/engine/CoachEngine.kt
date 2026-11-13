@@ -120,6 +120,15 @@ class CoachEngine(
     private val needAnswer = Pending()
     private val fuelAnswer = Pending()
     private var styleMuteUntil = NONE
+
+    // 출발 전 한마디 (departureCheck)
+    /** 이번 여정에서 차가 움직인 적이 있는지. 이미 달린 시간으로 시작한 여정(continuousDrivingMin)은 움직인 것이다 */
+    private var tripMoved = false
+    /** 지금 정차를 시작할 때 본 경로의 남은 거리 (길안내가 아니었으면 null). 서 있는 동안 새 목적지를 정했는지 본다 */
+    private var parkRouteRemainM: Double? = null
+    private var parkRouteSession = NONE
+    /** 출발 전 한마디를 건 정차 (한 정차에 한 번) */
+    private var departureAskedSession = NONE
     private var cruiseOn = false
 
     private val restroomOpps = ArrayList<Opportunity>()
@@ -174,6 +183,11 @@ class CoachEngine(
         // 2. 정차
         val ev = stops.update(mono, input.gear, speed, input.doorOpened)
         val moving = !stops.parked && movementKnown
+        if (moving) tripMoved = true
+        if (stops.parked && parkRouteSession != stops.sessionStart) {
+            parkRouteSession = stops.sessionStart
+            parkRouteRemainM = input.route?.takeIf { it.guiding }?.remainDistanceM
+        }
         fatigue.advance(dtMs, moving, input.now, mono)
         // 식사 정차 판단에 쓸 것(선 곳, 식사 목적)은 아래 정차 사건이 수락한 정차를 내리기 전에 본다
         val wasMealStop = meal.factor != 1.0
@@ -429,6 +443,7 @@ class CoachEngine(
                 )
             }
         }
+        departureCheck(input, restroom, mono)?.let { addCand(it, null) }
         val styleCheck = styleOut.persistent && !styleMuted && deviation >= config.styleAdvanceDeviation
         if (moving && !fatigue.sleepyVoiced && fatigueGauge.level < Level.NOW && (styleCheck || fatigueGauge.level >= Level.SOON)) {
             val speech = when {
@@ -444,7 +459,10 @@ class CoachEngine(
             // 환기는 편의 기능: 피로 단계를 싣지 않는다 (피로가 올라도 60분 쉼·시간당 상한을 그대로 받는다)
             addCand(ask(PromptKind.FRESH_AIR, texts.freshAir(fat.recircMin), level = Level.OK), null)
         }
+        // 출발 전 질문은 서 있는 동안에만 뜻이 있다: 달리기 시작하면 거둔다 (무시한 것으로 치지 않는다)
+        if (!stops.parked) policy.withdraw(PromptKind.DEPARTURE)
         val prompt = policy.decide(promptCands, input.now, mono, isQuiet(input, speed), distanceOfId, memory)
+        if (policy.lastIssued?.kind == PromptKind.DEPARTURE) departureAskedSession = stops.sessionStart
         // 물은 사용자 응답은 내리고, 못 물은 응답은 다음에 '밀린 응답'으로 남긴다
         val issued = policy.lastIssued
         for (i in promptCands.indices) {
@@ -692,6 +710,10 @@ class CoachEngine(
             needAnswer.clear()
             fuelAnswer.clear()
             styleMuteUntil = NONE
+            tripMoved = false
+            parkRouteRemainM = null
+            parkRouteSession = NONE
+            departureAskedSession = NONE
         }
         if (clock.started) {
             syncProfile()
@@ -720,6 +742,36 @@ class CoachEngine(
     /** 새 여정을 시작할 때: 엔진 전에 이미 달린 시간을 휴식 리듬에 채운다 (TripProfile.continuousDrivingMin) */
     private fun seedTrip(now: Long) {
         fatigue.seedContinuous(profile.continuousDrivingMin, now, clock.monoAt(now))
+        // 엔진 전에 이미 달린 여정이다 (재시작, 시연의 '이미 달린 시간'): 출발 전이 아니다
+        if (profile.continuousDrivingMin > 0.0) tripMoved = true
+    }
+
+    /**
+     * 출발 전 한마디 (DepartureCheckTest). 서 있고(기어 P) 목적지가 있으며, 도착까지 걸리는 시간(내비의 남은 시간, 정체 포함)이
+     * 화장실 게이지(가장 먼저 필요해지는 사람이 필요할 확률 50%까지)보다 길면 출발 전에 다녀오라고 한 번 묻는다.
+     * 고속도로의 마지막 기회처럼 30% 마감을 쓰지 않는다: 그것은 피할 수 없는 공백 앞의 판단이고, 일상 길에서는 가다가도 세울 곳이
+     * 많다. 30%로 물으면 1시간 전에 다녀온 7살 아이와 20분 길에도 물었다(잔소리가 된다, 2026-11-13 확인).
+     * 이번 여정에서 아직 출발하지 않았거나 서 있는 동안 새 목적지를 정했을 때만 묻는다: 장거리 중 휴게소에 선 것만으로는 묻지 않는다
+     * (그 안내는 계획 화면이 한다, PlanFromHereTest). 들르기로 한 곳이 있으면(그곳으로 가는 중) 묻지 않는다
+     */
+    private fun departureCheck(input: CoachInput, restroom: Gauge, mono: Long): PromptPolicy.Candidate? {
+        if (!stops.parked || accepted != null || departureAskedSession == stops.sessionStart) return null
+        val r = input.route?.takeIf { it.guiding } ?: return null
+        val tripMin = r.remainTimeS?.takeIf { it.isFinite() && it > 0.0 }?.div(60.0) ?: return null
+        if (tripMin < config.departureMinTripMin) return null
+        val atPark = parkRouteRemainM
+        val remain = r.remainDistanceM
+        val newRoute = atPark == null || (remain != null && abs(remain - atPark) > config.departureNewRouteM)
+        if (tripMoved && !newRoute) return null
+        val gauge = restroom.minutes ?: return null
+        if (gauge >= tripMin) return null
+        val who = restroom.drivenBy?.let { id -> needs.tracked.firstOrNull { it.id == id } }
+            ?.takeIf { needs.tracked.size > 1 }?.let { texts.occupantName(it.occupant) }
+        val trip = tripMin.roundToInt()
+        return ask(
+            PromptKind.DEPARTURE, texts.departureCheck(trip, restroom.minutes, who), level = restroom.level,
+            reasons = listOf(Reason("DEPARTURE_TRIP", texts.reasonDepartureTrip(trip))),
+        )
     }
 
     private fun syncProfile() {
@@ -770,7 +822,8 @@ class CoachEngine(
                 } else if (rec.kind == PromptKind.REST_SUGGESTION) {
                     restWantedAt = mono
                 }
-            PromptKind.FRESH_AIR, PromptKind.INFO -> {}
+            // 출발 전 한마디에 '응': 엔진이 할 일은 없다. 다녀오면 정차 기록(문 열림, 3분)이 화장실 시계를 되돌린다
+            PromptKind.FRESH_AIR, PromptKind.INFO, PromptKind.DEPARTURE -> {}
         }
     }
 

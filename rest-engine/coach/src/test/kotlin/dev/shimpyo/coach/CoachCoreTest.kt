@@ -117,6 +117,31 @@ class CoachCoreTest {
         assertEquals("게이지와 질문은 그대로", PromptKind.LAST_CHANCE, rig.state.prompt?.kind)
     }
 
+    // ------------------------------------------------------------ 출발 전 한마디 (일상 주행)
+
+    @Test
+    fun beforeLeavingHomeWithADestinationTheAppSaysGoFirstAndYesSendsNoNaviCommand() = runTest {
+        // 아침에 집 앞(기어 P)에서 목적지를 정했다: 내비는 길안내 중, 남은 시간 70분. 아이는 1시간 전에 다녀왔다(게이지 45분).
+        // 휴게소가 없는 일상 길이라도 출발 전에 한 번 묻는다 (CoachEngine.departureCheck)
+        val wall = 1_762_909_200_000L // CoreRig의 실제 시각 (2025-11-12 10:00 KST)
+        val lastRestroom = StopLog(start = wall - 70 * 60_000L, end = wall - 60 * 60_000L, lat = null, lon = null, restroom = true)
+        val rig = CoreRig(this, voice = FakeVoice(answer = { if ("출발 전" in it) "응" else null }), history = PromptFakes.History(listOf(lastRestroom)))
+        rig.fakeNavi.mode = { NaviMode.ROUTE_GUIDING }
+        rig.fakeNavi.destination = { FakeNaviPort.dest(48_000.0, timeS = 70 * 60.0, name = "판교 어린이도서관") }
+        rig.park()
+        rig.start()
+        rig.runUntil(60_000) { rig.state.prompt?.kind == PromptKind.DEPARTURE } ?: error("출발 전 질문이 없다. 로그: ${rig.log.lines.takeLast(10)}")
+        val card = rig.state.prompt!!
+        assertTrue(card.speech, "출발 전" in card.speech && "1시간 10분" in card.speech)
+        assertNull("정차지를 묻지 않는다", card.stop)
+        rig.runUntil(30_000) { rig.voice.said.any { it == PromptMachine.DEPARTURE_ACCEPTED } } ?: error("'응'에 답하지 않았다: ${rig.voice.said}")
+        assertTrue("내비 명령을 보내지 않는다", rig.navi.commands.isEmpty())
+        // 출발하면 다시 묻지 않는다
+        rig.drive(30f)
+        rig.run(10_000)
+        assertFalse(rig.state.prompt?.kind == PromptKind.DEPARTURE)
+    }
+
     @Test
     fun theScreenGetsTheCoachClockByTheMinuteSoDemoHistoryAgesInDemoTime() = runTest {
         // 기록 화면은 이 시각으로 '몇 분 전'을 센다 (HistoryNowTest). 정차 시연은 12:40(가상)이다: 실제 시계로 세면 오후 2시 반에

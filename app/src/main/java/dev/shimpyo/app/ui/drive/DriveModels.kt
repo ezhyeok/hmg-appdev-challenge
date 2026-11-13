@@ -133,6 +133,7 @@ fun acceptLabel(p: Prompt, cabinSupported: Boolean = true): String? = when (p.ki
     PromptKind.CHECK_IN -> "쉬어 갈게요"
     PromptKind.FRESH_AIR -> if (cabinSupported) "외기로 전환" else null
     PromptKind.INFO -> null
+    PromptKind.DEPARTURE -> "다녀올게요"
 }
 
 /**
@@ -149,6 +150,7 @@ fun shortQuestion(p: Prompt): String {
         PromptKind.REST_SUGGESTION -> "가까운 곳에서 쉬어 갈까요?"
         PromptKind.LAST_CHANCE, PromptKind.URGENT_RESULT -> "들를까요?"
         PromptKind.INFO -> sentences.firstOrNull()?.let { limitChars(it, SHORT_QUESTION_CHARS) } ?: p.speech
+        PromptKind.DEPARTURE -> "출발 전에 화장실 다녀오세요"
     }
 }
 
@@ -224,7 +226,7 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     val reasons: List<Reason> = state.promptReasons.ifEmpty {
         if (stop != null && prompt.kind == PromptKind.URGENT_RESULT) state.urgent?.firstOrNull { it.stop.id == stop.id }?.why.orEmpty() else emptyList()
     }
-    val restroomKind = prompt.kind == PromptKind.LAST_CHANCE || prompt.kind == PromptKind.URGENT_RESULT
+    val restroomKind = prompt.kind == PromptKind.LAST_CHANCE || prompt.kind == PromptKind.URGENT_RESULT || prompt.kind == PromptKind.DEPARTURE
     val level = (if (restroomKind) state.restroom?.level else state.fatigue?.level) ?: Level.WATCH
     val codes = reasons.map { it.code }
     val context = when (prompt.kind) {
@@ -235,6 +237,8 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
         PromptKind.CHECK_IN -> if (prompt.speech.contains("패턴")) "운전 패턴 변화" else "졸음 확인"
         PromptKind.FRESH_AIR -> "환기 권유"
         PromptKind.INFO -> "안내"
+        // 서 있고 목적지가 있을 때 (일상 주행, CoachEngine.departureCheck)
+        PromptKind.DEPARTURE -> "출발 전 화장실"
     }
     val icon = when (prompt.kind) {
         PromptKind.FRESH_AIR -> ShimpyoIcons.Air

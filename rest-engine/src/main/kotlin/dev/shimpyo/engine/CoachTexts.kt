@@ -263,6 +263,26 @@ open class CoachTexts {
     open fun planGapTooLong(): String = "화장실 사이가 먼 구간이 있어 기준을 다 지킬 수는 없어요. 가장 덜 기다리는 계획이에요"
     open fun planNow(stop: String): String = "지금 쉬어야 할 때예요. ${stop}에 바로 들르세요"
 
+    // ---------------- 출발 전 한마디 ----------------
+
+    /**
+     * 서 있고 목적지가 있을 때. [gaugeMin]: 화장실 게이지(가장 급한 사람이 필요할 확률 50%까지), [who]: 그 사람 (혼자면 null).
+     * 판단은 더 이른 30% 마감으로 했으므로 게이지가 도착보다 길 수도 있다: 그때는 사람·분을 말하지 않는다
+     */
+    open fun departureCheck(tripMin: Int, gaugeMin: Int?, who: String?): String {
+        val trip = duration(tripMin)
+        val head = "도착까지 약 $trip${copula(trip)}."
+        return when {
+            gaugeMin != null && gaugeMin < tripMin && who != null ->
+                "$head $who${topic(who)} ${duration(gaugeMin)}쯤 뒤 화장실을 찾을 것 같아요. 출발 전에 다녀오세요"
+            gaugeMin != null && gaugeMin < tripMin -> "$head ${duration(gaugeMin)}쯤 뒤 화장실이 필요해질 것 같아요. 출발 전에 다녀오세요"
+            else -> "$head 가는 길에 화장실이 필요할 수 있어요. 출발 전에 다녀오세요"
+        }
+    }
+    open fun reasonDepartureTrip(tripMin: Int): String = "도착까지 ${duration(tripMin)}"
+    /** 출발 전 질문에 '응' 했을 때 */
+    open fun departureAccepted(): String = "좋아요. 다녀오세요"
+
     /** 서 있는 곳에서 할 일 ("화장실·휴식·식사") */
     open fun planHereWhat(purposes: Set<Purpose>): String = Purpose.entries.filter { it in purposes }.joinToString("·") {
         when (it) {

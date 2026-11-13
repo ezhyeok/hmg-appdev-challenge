@@ -306,6 +306,11 @@ class PromptMachine {
                 out += PromptEffect.FreshAir(announce = ctx.speak)
                 out += PromptEffect.Report(engineId, true)
             }
+            // 출발 전 한마디에 '응': 할 일은 운전자에게 있다. 말로 받았다고만 알린다 (음성을 끈 사람에게는 말하지 않는다)
+            card.prompt.kind == PromptKind.DEPARTURE -> {
+                if (ctx.speak) out += PromptEffect.Speak(DEPARTURE_ACCEPTED)
+                out += PromptEffect.Report(engineId, true)
+            }
             else -> out += PromptEffect.Report(engineId, true)
         }
     }
@@ -491,6 +496,9 @@ class PromptMachine {
         /** 들르기 결과를 화면에 두는 시간 */
         const val GO_TO_RESULT_TTL_MS = 10 * 60_000L
         private const val REMEMBER_MAX = 32
+
+        /** 출발 전 한마디를 받았을 때 하는 말 (CoachTexts.departureAccepted와 같다) */
+        const val DEPARTURE_ACCEPTED = "좋아요. 다녀오세요"
 
         /** 화면·음성에 쓰는 카드 key. [seq]는 기계가 카드를 띄운 순번 */
         fun keyOf(promptId: String, seq: Int): String = "$promptId#$seq"
