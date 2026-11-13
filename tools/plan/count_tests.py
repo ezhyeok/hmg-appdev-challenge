@@ -29,14 +29,27 @@ MODULES = {
 
 
 def fetch_app(repo='repo'):
-    """Copy the Android modules' JUnit XML from the laptop folder that ran them (default repo\)."""
+    """Copy the Android modules' JUnit XML from the laptop folder that ran them (default repo\).
+
+    Each module is copied into a fresh folder first and replaces the local copy only when the copy worked: the
+    old version deleted the local results before copying, so a failed scp (laptop offline, 2026-11-13) left no
+    results at all and the counts could not be written until the laptop came back.
+    """
+    import shutil
+    import tempfile
     for module in ('app', 'pleos-kit'):
         local = os.path.join(LAPTOP_LOCAL, module)
-        os.makedirs(local, exist_ok=True)
-        for f in glob.glob(os.path.join(local, '*.xml')):
-            os.remove(f)
+        os.makedirs(LAPTOP_LOCAL, exist_ok=True)
         remote = f'hmg-laptop:hmg-appdev-challenge/{repo}/{module}/build/test-results/testDebugUnitTest/*.xml'
-        subprocess.run(['scp', '-q', remote, local], check=True)
+        fresh = tempfile.mkdtemp(prefix=module + '-', dir=LAPTOP_LOCAL)
+        try:
+            subprocess.run(['scp', '-q', remote, fresh], check=True)
+            if not glob.glob(os.path.join(fresh, 'TEST-*.xml')):
+                raise SystemExit(f'no test results copied for {module}')
+            shutil.rmtree(local, ignore_errors=True)
+            os.replace(fresh, local)
+        finally:
+            shutil.rmtree(fresh, ignore_errors=True)
 
 
 def count(directory):
