@@ -6,13 +6,13 @@
     "suites": 34
   },
   "coach": {
-    "tests": 618,
+    "tests": 623,
     "failures": 0,
     "skipped": 0,
     "suites": 48
   },
   "app": {
-    "tests": 215,
+    "tests": 216,
     "failures": 0,
     "skipped": 0,
     "suites": 26
@@ -23,6 +23,6 @@
     "skipped": 0,
     "suites": 3
   },
-  "passed": 1230,
-  "commit": "c2588e8"
+  "passed": 1236,
+  "commit": "b87bc78"
 }
