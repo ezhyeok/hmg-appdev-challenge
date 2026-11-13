@@ -1,0 +1,163 @@
+split	category	text	expected	note
+dev	paraphrase	그래 거기 들르자	YES	
+test	paraphrase	예 들러 주세요	YES	
+test	paraphrase	네 그렇게 해 주세요	YES	
+dev	paraphrase	좋아요 옥산에서 쉬었다 가요	YES	
+dev	paraphrase	오케이 경유지로 넣어 줘	YES	
+test	paraphrase	넵 추가해 주세요	YES	
+test	paraphrase	물론이지	YES	
+dev	paraphrase	알겠어 거기로 안내해 줘	YES	
+dev	paraphrase	그럼요 들러야죠	YES	
+test	paraphrase	좋지 화장실도 가고	YES	
+test	paraphrase	오케이 콜	YES	
+dev	paraphrase	옥산휴게소로 가 주세요	YES	card stop name before 가 (§4 rule 6)
+dev	paraphrase	거기로 가	YES	like 거기로 가줘 (§4 rule 6)
+test	paraphrase	휴게소로 갑시다	YES	stop word before 갑시다 (§4 rule 6)
+test	paraphrase	화장실 가자	YES	the card offers the restroom stop; stop word before 가자 (§4 rule 6)
+dev	paraphrase	들르면 좋을 것 같아	YES	like 들르면 좋겠다 (§4 rule 5)
+dev	paraphrase	지나가면서 들러	YES	지나가면서 is not 지나가자 (§4 note); 들러 = accept
+test	paraphrase	좋은 생각이야	YES	clear acceptance though not in the word list
+test	paraphrase	잠깐 쉬어 가자	YES	rest acceptance like 쉬었다 가자
+dev	paraphrase	애들 화장실 보내고 가자	YES	'~하고 가자' like 밥 먹고 가자 (§4 rule 6)
+dev	paraphrase	화장실만 갔다가 바로 출발하자	YES	clear plan to stop there first
+test	paraphrase	들르는 거 찬성	YES	clear acceptance
+test	paraphrase	그라믄 들르자	YES	Gyeongsang 그러면
+dev	paraphrase	아니요 그냥 가 주세요	NO	
+test	paraphrase	괜찮습니다	NO	polite form of 괜찮아 (§4 rule 2)
+dev	paraphrase	싫다니까	NO	
+test	paraphrase	별로 안 내키는데	NO	
+dev	paraphrase	굳이 들를 필요 없어	NO	
+test	paraphrase	그거 취소해	NO	
+dev	paraphrase	귀찮다 그냥 달려	NO	
+test	paraphrase	옥산은 말고	NO	
+dev	paraphrase	그냥 지나쳐	NO	like 지나가자 (§4 rule 2)
+test	paraphrase	빨리 집에나 가자	NO	like 집에 가자 (§4 rule 2)
+dev	paraphrase	다들 참을 만하대	NO	like 참을 수 있어 (§4 rule 2)
+test	paraphrase	조금만 참아 보자	NO	like 참자 (§4 rule 2)
+dev	paraphrase	패스할게	NO	패스 = skip (§4 note excepts only 하이패스)
+test	paraphrase	그냥 가던 길 가자	NO	keep going
+dev	paraphrase	됐다 마 그냥 가자	NO	Gyeongsang 마
+test	negation	들르지 마세요	NO	
+dev	negation	안 들러도 될 것 같아	NO	
+test	negation	아무도 안 급해	NO	
+dev	negation	휴게소 들르고 싶지 않아	NO	
+test	negation	그건 안 되겠어	NO	안 돼 form (§4 rule 2)
+dev	paraphrase	다음 휴게소에서 들를게	NO	다음 = not now (§4 rule 3)
+test	paraphrase	좀 더 가서 쉬자	NO	더 가서 (rule 3) is checked before 쉬자 (rule 5)
+test	paraphrase	도착하면 갈게	NO	like 도착해서 (§4 rule 3)
+dev	paraphrase	애 깨면 그때 들르자	NO	like 아이 깨면 (§4 rule 3)
+dev	paraphrase	한 삼십 분 뒤에	NO	like 한 시간 뒤에 (§4 rule 3)
+test	paraphrase	좀 있다가 들르자	NO	좀 있다가 (§4 rule 3)
+test	paraphrase	나중에 들를게요	NO	나중에 (§4 rule 3)
+dev	paraphrase	다음 기회에	NO	다음 = not now (§4 rule 3)
+dev	paraphrase	정체 다 빠지고 나서 쉬자	NO	after the jam = not this stop (§4 rule 3)
+test	question	거기까지 얼마나 걸리는데?	UNKNOWN	
+dev	question	옥산까지 몇 킬로 남았어	UNKNOWN	distance question without ? (§4 rule 1)
+dev	question	정체가 진짜 한 시간이나 돼?	UNKNOWN	
+test	question	그다음 휴게소는 어딘데	UNKNOWN	어디 question (§4 rule 1)
+test	question	왜 하필 거기야	UNKNOWN	왜 (§4 rule 1)
+dev	question	거기 수유실 있어?	UNKNOWN	existence question (§7)
+dev	question	화장실 깨끗한 데야?	UNKNOWN	
+test	question	꼭 들러야 돼?	UNKNOWN	question mark beats 들러 (§4 rule 1)
+test	question	굳이 거기를?	UNKNOWN	rule 1 (question mark) is checked before rule 2 (굳이)
+dev	question	들러야 할까?	UNKNOWN	like 들를까? (§4 rule 1)
+dev	question	응? 뭐라고?	UNKNOWN	question mark beats the leading 응 (§4 rule 1)
+test	question	안 들르면 얼마나 늦어?	UNKNOWN	question beats 안 (§4 rule 1)
+test	question	진짜 그래?	UNKNOWN	question mark (§4 rule 1); not the answer 그래
+dev	question	정체 얼마나 막히는데	UNKNOWN	얼마나 question without ? (§4 rule 1)
+dev	other	창문 반만 열어 줘	UNKNOWN	other domain (§4 rule 7)
+test	other	네비 지도 좀 확대해 줘	UNKNOWN	네비 is not 네 (§4 note)
+test	other	둘째가 멀미한대	UNKNOWN	
+dev	other	전화 왔다 잠깐만	UNKNOWN	
+dev	other	좋아하는 노래 좀 틀어 줘	UNKNOWN	좋아하는 is not 좋아 (§4 note)
+test	other	하이패스 차로로 가	UNKNOWN	하이패스 is not 패스 (§4 note)
+test	mention	첫째 자고 있어	UNKNOWN	a sleep statement is not an answer (like 아이가 자, §4 rule 7)
+dev	mention	콜라 마시고 싶다	UNKNOWN	콜라 is not 콜 (§4 note); no acceptance
+dev	mention	네 시 전에는 도착해야 되는데	UNKNOWN	네 시 is not 네 (§4 note)
+test	mention	예정보다 많이 늦어지네	UNKNOWN	예정 is not 예 (§4 note)
+test	mention	그래서 다들 피곤해하잖아	UNKNOWN	그래서 is not 그래 (§4 note)
+dev	paraphrase	얼른 가자	UNKNOWN	ambiguous 가자 (§7)
+test	paraphrase	빨리빨리 가 줘	UNKNOWN	ambiguous 가줘 (§7)
+dev	paraphrase	가자 가자	UNKNOWN	bare 가자 (§4 rule 6)
+test	paraphrase	조용히 가요 우리	UNKNOWN	ambiguous 가자-form (§7)
+dev	paraphrase	가즈아	UNKNOWN	ambiguous 가자-form (§7)
+test	paraphrase	다른 길로 돌아가자	UNKNOWN	reroute: neither yes nor no
+dev	paraphrase	화장실 가고 싶어	UNKNOWN	need without an answer word; the need goes to other (§5, like 배고파 → UNKNOWN)
+dev	negation	더는 못 참겠다	UNKNOWN	못 참아 is not refusal (§4 note); no acceptance word; urgency goes to other (§5)
+test	paraphrase	응가 마렵대	UNKNOWN	응가 is not 응 (§4 note)
+test	paraphrase	배가 좀 고프네	UNKNOWN	need without an answer word (§5)
+dev	paraphrase	졸려 죽겠어	UNKNOWN	need without an answer word (§5)
+dev	filler	음… 잘 모르겠네	UNKNOWN	
+test	filler	아 그게… 좀 생각해 볼게	UNKNOWN	
+test	filler	글쎄다 어떡하지	UNKNOWN	
+dev	filler	들를까 말까	UNKNOWN	undecided
+dev	filler	들러야 하나…	UNKNOWN	self-question / hesitation
+test	filler	괜찮을까	UNKNOWN	괜찮을까 is not 괜찮아 (like 괜찮겠지, §4 rule 7)
+dev	filler	음… 그래 들르자	YES	
+test	filler	어어 들러 들러	YES	
+dev	filler	그… 저기… 일단 들르자	YES	
+test	filler	아 네네 그렇게 해요	YES	
+test	filler	아 그게… 괜찮아요	NO	
+dev	filler	음… 아니 그냥 가자	NO	
+dev	mixed	응 근데 거기서 밥도 먹자	YES	
+test	mixed	들르자 그리고 기름도 좀 넣자	YES	
+dev	mixed	응 들러서 기저귀도 갈자	YES	
+test	mixed	좋아 근데 거기까지 몇 분 걸려?	UNKNOWN	question is checked first (§4 rule 1, like 그래 얼마나 걸려)
+dev	mixed	난 괜찮은데 할머니가 가고 싶어 하셔	UNKNOWN	괜찮은데 is not sentence-final, so not a refusal (§4 note)
+test	mixed	괜찮아 근데 애들은 어때?	UNKNOWN	ends with ? (§4 rule 1 before rule 2)
+test	mixed	아니 근데 둘째가 쉬 마렵대	NO	아니 as an interjection is still a refusal (§8); the restroom need goes to other
+dev	mixed	아뇨 대신 다음 졸음쉼터는 꼭 들러 주세요	NO	refusal (rule 2) is checked before 들러 (rule 5)
+test	mixed	휴게소 말고 졸음쉼터 가자	NO	말고 refuses this stop (§4 rule 2)
+dev	mixed	아니 화장실은 괜찮은데 배고파	NO	
+test	mixed	애들 자니까 나중에	NO	나중에 (§4 rule 3)
+dev	mixed	싫다는 게 아니라 좀 이따가	NO	이따가 = not now (§4 rule 3)
+test	done	아까 다 다녀와서 괜찮아	NO	괜찮아 (§4 rule 2)
+dev	done	방금 들렀다 왔잖아 그냥 가	NO	그냥 가 (§4 rule 2)
+test	done	기저귀 갈았으니까 안 들러도 돼	NO	
+dev	done	애들 방금 화장실 다녀왔어	UNKNOWN	implicit decline without a refusal word (§4 rule 7); §2.5 prefers waiting for the button
+test	done	아까 휴게소에서 실컷 쉬었잖아	UNKNOWN	implicit decline without a refusal word (§4 rule 7)
+dev	mention	옥산휴게소 예전에 가 봤는데	UNKNOWN	
+test	mention	정체 한 시간이라니 미치겠네	UNKNOWN	
+dev	mention	거기 호두과자 맛있었는데	UNKNOWN	
+dev	mixed	화장실 얘기 하니까 갑자기 가고 싶네	UNKNOWN	need without an answer word (§5)
+test	mention	휴게소 우동 생각난다	UNKNOWN	
+dev	stt	응들러줘	YES	
+test	stt	그래들르자	YES	
+test	stt	옥산들르자	YES	
+dev	stt	옥산 휴개소 들르자	YES	휴게소 misheard as 휴개소
+dev	stt	옥산휴게소 들을게	YES	들를게 misheard as 들을게
+test	stt	들려줘	YES	common mishearing/misspelling of 들러줘
+test	stt	들렸다가자	YES	misspelling of 들렀다 가자
+dev	stt	네네 들러	YES	
+dev	stt	그래 그렇게	YES	final 해 dropped
+test	stt	응 부탁	YES	final 해 dropped
+test	stt	오케이경유지추가해줘	YES	
+dev	stt	옥산 으로 가 자	YES	wrong spacing; card stop name before 가자
+dev	stt	화장시 들르자	YES	화장실 misheard as 화장시
+test	stt	알았어 안내해	YES	final 줘 dropped
+test	stt	웅 들러	YES	웅 = casual 응
+dev	stt	그럼들러야지	YES	
+dev	stt	응 거기로가줘	YES	answer word before 가줘
+test	stt	그래 경유지로 넣어	YES	final 줘 dropped
+test	stt	아니괜찮아	NO	
+dev	stt	괜찮아요그냥가요	NO	
+dev	stt	됐어그냥가	NO	
+test	stt	다음에가자	NO	
+test	stt	나중에들릴게	NO	들릴게 = misspelled 들를게; 나중에 (rule 3)
+dev	stt	안들러도될듯	NO	
+dev	stt	아뇨 괜찮	NO	final 아요 dropped
+test	stt	아직참을만해	NO	
+test	stt	더가서쉬자	NO	더 가서 (rule 3)
+dev	stt	그다음휴게소에서쉬자	NO	다음 = not now (rule 3)
+dev	stt	애기깨면들르자	NO	like 아이 깨면 (rule 3)
+test	stt	다음 휴개소 들르자	NO	휴게소 misheard; 다음 = not now (rule 3 before rule 5)
+test	stt	들르지마	NO	
+dev	stt	거기얼마나걸려	UNKNOWN	question without ? (rule 1)
+test	stt	거기까지몇분이야	UNKNOWN	question without ? (rule 1)
+dev	stt	옥산이어디쯤이야	UNKNOWN	어디 question (rule 1)
+test	stt	화장실있어	UNKNOWN	existence question (or statement): not an answer either way
+dev	stt	글쎄요어쩌지	UNKNOWN	
+test	stt	잠깐만있어봐	UNKNOWN	
+dev	stt	빨리가자	UNKNOWN	ambiguous 가자 (§7)
+test	stt	나못참겠어진짜	UNKNOWN	못 참아 is not refusal; no acceptance word
+dev	stt	왜 거기	UNKNOWN	final 야 dropped; 왜 question (rule 1)

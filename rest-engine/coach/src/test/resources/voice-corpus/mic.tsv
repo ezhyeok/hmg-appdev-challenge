@@ -1,0 +1,328 @@
+split	category	text	expected	note
+dev	paraphrase	아 진짜 급하다 빨리 좀	URGENT	
+test	paraphrase	저 화장실이 너무 급해요	URGENT	
+test	paraphrase	더 이상은 못 참겠어	URGENT	
+dev	paraphrase	방광 터질 것 같아	URGENT	bladder bursting = urgent
+dev	paraphrase	첫째가 쉬 급하대	URGENT	urgency outranks RESTROOM (§3 order); URGENT carries no occupant
+test	paraphrase	할머니가 화장실이 급하시대	URGENT	
+test	paraphrase	큰일 났다 배 아파서 급똥이야	URGENT	
+dev	paraphrase	둘째가 바지에 지릴 것 같대	URGENT	
+dev	paraphrase	화장실 빨리 가야 돼 지금	URGENT	화장실 빨리 = urgent (§3)
+test	paraphrase	화장실 급하다 카이	URGENT	Gyeongsang ending
+test	paraphrase	아 미치겠다 진짜 급해!!	URGENT	
+dev	mixed	미안한데 나 급해	URGENT	미안's 안 is not negation (§2.2)
+test	mixed	아니 근데 둘째가 화장실 급하대	URGENT	no card, so 아니 is only an interjection
+dev	mixed	화장실 급한데 휴게소까지 몇 분 남았어	URGENT	need + question → need (§2.4)
+test	mixed	급해, 안 들르면 진짜 큰일 나	URGENT	a later 안 does not cancel the state word 급해 (§2.3)
+dev	mixed	아이고 화장실 급하네	URGENT	아이고 is not a person (§3)
+dev	filler	어… 저기… 나 좀 급한데	URGENT	
+test	filler	음 아 그게 쉬가 너무 급해	URGENT	
+test	stt	화장실급해죽겠어	URGENT	
+dev	stt	화장 실이 급 해요	URGENT	wrong spacing
+dev	stt	쌀것같애	URGENT	dialect 같애
+test	stt	화장시 급해	URGENT	화장실 misheard as 화장시
+test	stt	아미안한데급해	URGENT	미안's 안 is not negation
+dev	stt	지릴거같아요	URGENT	
+dev	stt	화장실 급하	URGENT	final 다 dropped
+test	stt	못참겠어빨리	URGENT	
+test	negation	나 하나도 안 급해	NONE	
+dev	negation	급하진 않아 아직은	NONE	
+dev	negation	급한 건 아니고 그냥 물어본 거야	NONE	
+test	negation	급하게 들를 필요는 없어	NONE	급하게 is not urgency (§8)
+test	mention	약속 시간 때문에 마음이 급하네	NONE	time pressure, not the restroom (§8)
+dev	other	앞차가 급정거했어	NONE	급정거 is not urgency
+test	other	급한 일 생겨서 전화 좀 해야 돼	NONE	급한 일 (§8)
+dev	mention	거기 주차비 비쌀 것 같아	NONE	비쌀 것 같아 is not 쌀 것 같아 (§3)
+dev	negation	아직 참을 만해	NONE	can hold it (§3)
+test	question	애들 안 급할까?	NONE	questioning negation is read as negation (§7)
+test	stt	급한건아닌데	NONE	
+dev	stt	별로안급해요	NONE	
+dev	paraphrase	화장실 좀 가고 싶다	RESTROOM	
+test	paraphrase	첫째가 쉬 마렵대	RESTROOM:kid	
+dev	paraphrase	둘째 응가 하고 싶대	RESTROOM:kid2	
+test	paraphrase	할머니가 화장실 다녀오셔야 한대	RESTROOM:grandma	
+dev	paraphrase	큰애가 화장실 간대	RESTROOM:kid	큰애 = 첫째 (task mapping)
+test	paraphrase	작은애가 오줌 마렵다는데	RESTROOM:kid2	작은애 = 둘째 (task mapping)
+dev	paraphrase	막내가 쉬하고 싶대	RESTROOM:kid2	막내 → kid2 per task mapping (youngest of the child-type occupants; infant not counted)
+test	paraphrase	근처에 화장실 있으면 좀 들르자	RESTROOM	
+dev	paraphrase	제일 가까운 화장실 어디 있어	RESTROOM	asks where to go (어디) = need; unlike asking whether one exists (§7)
+test	paraphrase	소변 좀 보고 가자	RESTROOM	
+dev	paraphrase	볼일 좀 봐야겠어	RESTROOM	
+test	paraphrase	화장실 찾아 줄래	RESTROOM	
+dev	paraphrase	애들 화장실 한 번 보내야겠다	RESTROOM	several children → no id
+test	paraphrase	아이가 화장실 가고 싶다고 하네	RESTROOM	generic 아이 with two children → no id
+dev	paraphrase	애가 쉬 마렵다 카는데	RESTROOM	generic 애 with two children → no id; Gyeongsang 카는데
+test	paraphrase	화장실이요	RESTROOM	single word via mic button (§3)
+dev	paraphrase	천안 지나기 전에 화장실 들르자	RESTROOM	천안's 안 is not negation (§2.2)
+dev	paraphrase	할머니 화장실 가고 싶으시대	RESTROOM:grandma	
+test	paraphrase	첫째 응가 마렵다는데 어떡하지	RESTROOM:kid	
+test	paraphrase	오줌 매려워	RESTROOM	dialect 매렵다 = 마렵다
+dev	paraphrase	할매가 화장실 가고 싶다 카신다	RESTROOM:grandma	할매 = 할머니 (Gyeongsang)
+test	paraphrase	첫째랑 둘째 둘 다 화장실 가고 싶대	RESTROOM	two occupants named → no single id
+dev	paraphrase	와이프가 화장실 가고 싶대	RESTROOM	adult not in the occupant list → no id (§3)
+test	paraphrase	나 화장실 좀 다녀올게	RESTROOM	no id: 나 is not an occupant word in §3
+test	mixed	둘째 기저귀 뗐는데 쉬 마렵대	RESTROOM:kid2	기저귀 here says the child is out of diapers; no diaper need
+dev	mixed	졸리기도 하고 화장실도 가고 싶어	RESTROOM	RESTROOM outranks SLEEPY (§3 order)
+test	mixed	급한 건 아닌데 화장실은 들러야 돼	RESTROOM	urgency negated, restroom need stands
+dev	mixed	화장실 가고 싶은데 아직 멀었어?	RESTROOM	need + question → need (§2.4)
+test	mixed	첫째 깼는데 쉬 마렵대	RESTROOM:kid	a request beats the sleep statement (§6)
+dev	mixed	화장실 들렀다가 밥도 먹자	RESTROOM	RESTROOM outranks HUNGRY (§3 order)
+dev	mixed	첫째 일어나자마자 화장실 찾네	RESTROOM:kid	a request beats the sleep statement (§6)
+test	filler	어… 그… 화장실 좀	RESTROOM	
+dev	filler	음… 쉬 마려운 거 같아	RESTROOM	
+test	filler	아 그게 둘째가 응가 한대	RESTROOM:kid2	
+test	stt	화장실가고싶어요	RESTROOM	
+dev	stt	화장시 가고 싶어	RESTROOM	화장실 misheard as 화장시
+test	stt	쉬마려	RESTROOM	final 워 dropped
+dev	stt	첫째화장실간대	RESTROOM:kid	
+dev	stt	둘째 쉬마렵대	RESTROOM:kid2	
+test	stt	할머니화장실가고싶으시대	RESTROOM:grandma	
+dev	stt	화장실 들을래	RESTROOM	들를 misheard as 들을
+test	stt	화장실 들리자	RESTROOM	들르자 heard as 들리자
+dev	stt	근처화장실찾아줘	RESTROOM	
+test	stt	화장 실 좀 들러 주라	RESTROOM	wrong spacing; dialect-ish 주라
+dev	stt	천안지나서화장실가자	RESTROOM	천안's 안 is not negation
+test	stt	화장실 어디	RESTROOM	final 야 dropped
+test	stt	큰애 오줌 마렵 대	RESTROOM:kid	큰애 = 첫째; wrong spacing
+test	negation	화장실은 안 가도 될 것 같아	NONE	
+dev	negation	화장실 생각 없어	NONE	
+test	negation	화장실 들를 필요 없어	NONE	name word + 필요 없어 (§2.3)
+dev	negation	화장실은 됐고 그냥 가	NONE	name word + 됐어 (§2.3)
+test	negation	쉬 안 마렵대	NONE	
+dev	negation	첫째는 화장실 가기 싫대	NONE	
+dev	done	화장실 아까 다녀왔잖아	NONE	already done (§2.3)
+test	done	애들 쉬 다 시켰어	NONE	already done
+dev	mention	여기 화장실 엄청 깨끗하더라	NONE	
+dev	question	옥산휴게소에 화장실 있나?	NONE	asks whether a restroom exists (§7)
+test	question	그 졸음쉼터는 화장실 있어?	NONE	existence question (§7); 졸음쉼터 is a place
+test	negation	화장실 안 가면 안 될까?	NONE	asks to skip; questioning double negation is read as negation (§7)
+dev	stt	화장실은안가도될듯	NONE	
+test	stt	쉬안마려워	NONE	
+dev	paraphrase	아기 분유 먹일 시간 됐어	FEEDING	
+test	paraphrase	기저귀 갈아야겠다 냄새나	FEEDING	
+dev	paraphrase	아기가 배고파서 보채	FEEDING	baby + hungry → FEEDING (§3)
+test	paraphrase	이유식 데워서 먹여야 돼	FEEDING	
+dev	paraphrase	수유할 데 좀 찾아 줘	FEEDING	
+test	paraphrase	애기 맘마 줄 시간이야	FEEDING	
+dev	paraphrase	아기 젖병 물려야 돼	FEEDING	
+test	mixed	수유실 있는 휴게소로 가자	FEEDING	FEEDING outranks REST (§3 order)
+dev	mixed	기저귀는 갈았는데 분유를 아직 못 먹였어	FEEDING	done part + pending feeding need → need
+test	mixed	아기 기저귀도 갈고 나도 화장실 좀	FEEDING	FEEDING outranks RESTROOM (§3 order)
+dev	mixed	아기 깼는데 기저귀 갈아야 돼	FEEDING	a request beats the sleep statement (§6)
+test	stt	아기분유먹여야돼	FEEDING	
+dev	stt	기저귀갈아야	FEEDING	final 돼 dropped
+test	stt	애기 기저귀 젖었 어	FEEDING	wet diaper = change needed; wrong spacing
+dev	stt	아기 배고프 대	FEEDING	baby + hungry
+test	done	분유 방금 다 먹였어	NONE	already done (§3)
+dev	negation	이유식은 안 먹여도 돼	NONE	
+test	negation	기저귀는 아직 괜찮아	NONE	name word + 괜찮아 (§2.3)
+dev	mention	기저귀 가방은 트렁크에 넣었어	NONE	mentions an item; no need stated
+test	mention	음료수 쏟아서 시트가 다 젖었네	NONE	젖었 without a diaper/feeding word (§3)
+dev	stt	기저귀방금갈아줬어	NONE	already done
+dev	paraphrase	강아지가 쉬 마려운가 봐	PET	
+test	paraphrase	멍멍이 산책 좀 시켜야겠다	PET	
+test	paraphrase	강아지 배변 시켜야 돼	PET	
+dev	paraphrase	강아지가 계속 낑낑거려	PET	
+dev	paraphrase	반려견 볼일 보게 잠깐 세우자	PET	
+test	paraphrase	강아지 화장실 가야 될 것 같아	PET	dog + 화장실 → PET, not RESTROOM
+test	paraphrase	강아지가 좀 급한 것 같은데	PET	dog + 급하다 → PET (outranks URGENT, §3)
+dev	paraphrase	댕댕이가 쉬하고 싶은가 봐	PET	댕댕이 = slang for 강아지
+test	mixed	강아지도 쉬 시키고 우리도 좀 쉬자	PET	PET outranks REST (§3 order)
+dev	stt	강아지쉬마려운가봐	PET	
+test	stt	멍멍이산책시켜야돼	PET	
+dev	stt	강아지 낑낑 대	PET	wrong spacing
+test	mention	강아지 오늘 진짜 얌전하네	NONE	
+dev	done	강아지 아까 산책시켰어	NONE	already done (§3)
+dev	negation	강아지 산책은 안 시켜도 돼	NONE	
+test	stt	강아지아까쉬했어	NONE	already done
+test	paraphrase	주유 경고등 들어왔어	FUEL	
+dev	paraphrase	배터리가 얼마 없어	FUEL	
+dev	paraphrase	충전소 어디 있어	FUEL	충전소 + 어디 (§3)
+test	paraphrase	주유소 들렀다 가자	FUEL	
+test	paraphrase	기름이 거의 바닥이야	FUEL	
+dev	paraphrase	배터리 간당간당하다	FUEL	
+dev	paraphrase	전기차 충전 좀 해야 할 것 같아	FUEL	
+test	paraphrase	연료 부족하다고 뜨네	FUEL	
+test	paraphrase	기름 넣어야 쓰겄다	FUEL	Jeolla-tinged ending
+dev	mixed	기름도 없고 배도 고프다	FUEL	FUEL outranks HUNGRY (§3 order)
+test	mixed	화장실은 괜찮은데 기름 넣어야 돼	FUEL	restroom declined; fuel need stands
+dev	stt	기름이얼마안남았네	FUEL	얼마 안 남았 = running low (not the 얼마나 question)
+test	stt	주유해야	FUEL	final 돼 dropped
+dev	stt	배터리간당간당해	FUEL	
+test	stt	충전소 어디	FUEL	final 야 dropped
+dev	stt	주유소들르자	FUEL	
+dev	question	기름 얼마나 남은 거야?	NONE	fuel amount question (§7)
+test	question	배터리 몇 퍼센트 남았어	NONE	fuel amount question (§7)
+dev	other	핸드폰 배터리 다 됐다	NONE	phone battery, not the car
+test	done	아까 기름 가득 넣었어	NONE	already done (§3)
+test	mention	기름값 또 올랐네	NONE	
+dev	other	서울역 경유지로 추가해 줘	NONE	no card; navi command, not fuel (§3)
+test	negation	주유는 안 해도 돼	NONE	name word + 안 해도 돼 (§2.3)
+dev	stt	기름얼마나남았냐	NONE	fuel amount question without ?
+test	stt	폰배터리없어	NONE	phone battery, not the car
+dev	paraphrase	배고파 죽겠다	HUNGRY	
+test	paraphrase	출출한데 뭐 좀 먹자	HUNGRY	
+dev	paraphrase	애들이 배고프대	HUNGRY	children (not the infant) → HUNGRY, not FEEDING
+test	paraphrase	할머니 시장하시대	HUNGRY	시장하다 = honorific hungry
+dev	paraphrase	간식 좀 사 먹자	HUNGRY	
+test	paraphrase	아이스크림 먹고 싶어	HUNGRY	아이스크림 is not a person (§3)
+dev	paraphrase	라면 땡긴다	HUNGRY	craving food
+test	paraphrase	배고픈디	HUNGRY	dialect ending
+dev	done	아침도 못 먹고 나왔어	HUNGRY	not having eaten = hungry (§2.3)
+test	mixed	휴게소에서 우동 먹고 싶다	HUNGRY	HUNGRY outranks REST (§3 order)
+dev	mixed	화장실 말고 밥 먹자	HUNGRY	restroom cancelled by 말고; eating request stands
+test	mixed	졸리진 않은데 배가 좀 고프네	HUNGRY	sleepiness negated
+dev	mixed	화장실 갔다 왔으니까 이제 밥 먹자	HUNGRY	restroom done; eating request
+test	stt	배가 너무고 파	HUNGRY	wrong spacing
+dev	stt	저녁안먹었잖아	HUNGRY	not having eaten = hungry (§2.3)
+test	stt	출출하	HUNGRY	final 다 dropped
+dev	stt	뭐좀먹고가자	HUNGRY	
+dev	negation	나 배 하나도 안 고파	NONE	
+test	negation	밥은 됐어	NONE	name word + 됐어 (§2.3)
+dev	negation	점심은 안 먹어도 될 것 같아	NONE	
+dev	done	아까 휴게소에서 밥 먹었잖아	NONE	already done (§3)
+test	negation	밥은 도착해서 먹자	NONE	eating deferred to arrival; no stop needed now
+test	stt	아직배안고파요	NONE	
+dev	paraphrase	아 졸리다 진짜	SLEEPY	
+test	paraphrase	졸음이 막 쏟아지네	SLEEPY	
+dev	paraphrase	눈꺼풀이 너무 무거워	SLEEPY	
+test	paraphrase	하품이 계속 나와	SLEEPY	
+dev	paraphrase	오늘 너무 피곤하다	SLEEPY	
+test	paraphrase	잠 좀 깨야겠다	SLEEPY	
+dev	paraphrase	운전하다 잠들 것 같아	SLEEPY	
+test	paraphrase	졸려 죽겄네	SLEEPY	dialect ending
+test	done	방금 깜빡 졸 뻔했어	SLEEPY	near-miss = danger now (§2.3)
+dev	done	꾸벅 졸다가 차선 밟았어	SLEEPY	dozing already happened = danger now (§2.3)
+test	mixed	어제 못 잤더니 너무 피곤해	SLEEPY	
+dev	mixed	아이고야 졸음이 온다	SLEEPY	아이고 is not a person (§3)
+test	mixed	애들 다 자니까 나도 졸리네	SLEEPY	나도 = the driver; a request beats the sleep statement (§6)
+dev	mixed	배불러서 그런가 졸리다	SLEEPY	배불러 is not hunger; the driver is sleepy
+test	mixed	잠 깨게 창문 좀 열어 줘	SLEEPY	driver drowsy; the window part has no intent
+dev	mixed	졸려서 휴게소 가야겠어	SLEEPY	SLEEPY outranks REST (§3 order)
+dev	filler	음… 좀 졸린 것 같아	SLEEPY	
+test	filler	아 그게 자꾸 하품이 나네	SLEEPY	
+test	stt	졸음와요	SLEEPY	
+dev	stt	피곤 해 죽겠 어	SLEEPY	wrong spacing
+dev	stt	눈이자꾸감겨	SLEEPY	
+test	stt	잠와죽겠어	SLEEPY	
+test	stt	아까깜빡졸았어	SLEEPY	dozed = danger now (§2.3)
+dev	stt	아 졸리	SLEEPY	final 다 dropped
+dev	stt	나도졸려죽겠다	SLEEPY	
+dev	negation	하나도 안 졸려	NONE	
+test	negation	졸리지는 않아 괜찮아	NONE	
+dev	negation	잠은 안 온다	NONE	
+dev	mention	둘째가 졸린가 봐	NONE	occupant sleepiness is not the driver's (§7)
+test	mention	첫째가 자고 싶다네	NONE	occupant wants to sleep: not asleep yet (§6), not the driver (§7)
+dev	mention	할머니가 졸리시대	NONE	occupant sleepiness (§7); contrast 할머니 피곤 → REST
+test	mention	졸음운전 사고 뉴스 봤어?	NONE	
+test	other	잠깐 기다려 봐	NONE	잠깐 is not sleep (§3)
+dev	question	애들아 졸리니?	NONE	question to passengers about their sleepiness (§7)
+test	stt	애들졸린가봐	NONE	occupant sleepiness (§7)
+test	paraphrase	잠깐 쉬다 가자	REST	
+dev	paraphrase	나 좀 쉬고 싶은데	REST	
+dev	paraphrase	다리 좀 펴고 가자	REST	stretching
+test	paraphrase	허리가 끊어질 것 같아	REST	like 허리 아파 (§3)
+test	paraphrase	커피 한잔하고 가자	REST	커피 한잔 is a rest phrase (§3)
+dev	paraphrase	다음 휴게소 들어가 보자	REST	no card, so 다음 does not matter
+dev	paraphrase	근처 쉼터 어디야	REST	쉼터 + 어디야 (§3)
+test	paraphrase	안성휴게소 들렀다 가자	REST	안성's 안 is not negation
+test	paraphrase	휴게소요	REST	single word via mic button (§3)
+dev	paraphrase	눈 좀 붙이고 가야겠다	REST	like 눈 좀 붙이자 (§3)
+dev	paraphrase	할머니가 많이 지치셨대	REST	another person is tired → WantRest (§3)
+test	paraphrase	오래 앉아 있었더니 온몸이 뻐근하다	REST	stiffness, like 허리 아파 / 스트레칭 (§3)
+test	paraphrase	졸음쉼터에서 잠깐 쉬자	REST	졸음쉼터 is a place, not sleepiness (§3)
+dev	paraphrase	한숨 자고 갈래	REST	nap then go → WantRest (§3, §6)
+test	mixed	휴게소 말고 졸음쉼터 가자	REST	휴게소 cancelled by 말고; 졸음쉼터 가자 stands
+dev	mixed	주유소 말고 휴게소 들르자	REST	주유소 cancelled by 말고
+test	mixed	밥은 먹었고 이제 좀 쉬자	REST	meal done; rest request
+dev	mixed	안 졸린데 허리가 아파	REST	sleepiness negated; back pain → rest
+dev	filler	음… 좀 쉬자	REST	
+test	filler	아 그게… 허리가 좀 아프네	REST	
+test	stt	좀쉬었다가자	REST	
+dev	stt	휴개소 들르자	REST	휴게소 misheard as 휴개소
+test	stt	휴게소 들을래	REST	들를 misheard as 들을
+dev	stt	휴게 소 들어가자	REST	wrong spacing
+test	stt	졸음쉼터들르자	REST	
+dev	stt	바람좀쐬고가자	REST	
+test	stt	휴게소 들리자	REST	들르자 heard as 들리자
+dev	stt	잠깐 쉬어가 자 우리	REST	wrong spacing (쉬어 가자)
+test	negation	쉬는 건 괜찮아	NONE	
+dev	negation	휴게소는 그냥 패스	NONE	like 그냥 지나가자 (§3)
+test	negation	안 쉬고 쭉 갈래	NONE	
+dev	negation	쉼터 들를 필요 없어	NONE	name word + 필요 없어 (§2.3)
+test	done	아까 충분히 쉬었어	NONE	already done (§3)
+dev	mention	휴게소 주차장 꽉 찼네	NONE	
+dev	mention	이 휴게소 호두과자 유명하잖아	NONE	
+dev	stt	휴개소는안가도돼	NONE	name word + 안 가도 돼 (§2.3)
+test	stt	아까많이쉬었어	NONE	already done
+test	question	다음 휴게소까지 얼마나 남았어?	HOWLONG	
+dev	question	화장실 있는 데까지 몇 분이야	HOWLONG	
+test	question	다음 쉼터는 언제 나와요	HOWLONG	
+dev	question	목적지까지 몇 킬로 남았지	HOWLONG	
+test	question	할머니댁까지 얼마나 걸려	HOWLONG	할머니댁 = the destination, not an occupant
+dev	question	우리 언제 도착해?	HOWLONG	
+test	question	아직 한참 남았어?	HOWLONG	
+dev	question	남은 시간 좀 알려 줘	HOWLONG	
+test	question	휴게소까지 얼마나 더 가야 돼	HOWLONG	'가야' inside the question is not a need (§2.4)
+dev	question	엄마 아직 멀었어?	HOWLONG	a child asking; 엄마 is not an occupant
+test	question	다 와 가?	HOWLONG	
+dev	filler	음… 몇 분 정도 남았지	HOWLONG	
+test	stt	이제얼마나남았어	HOWLONG	
+dev	stt	휴게소까지몇키로야	HOWLONG	
+test	stt	아직도멀었어	HOWLONG	
+dev	stt	언제도착 해	HOWLONG	wrong spacing
+test	stt	휴개소언제쯤나와	HOWLONG	휴게소 misheard as 휴개소
+dev	stt	목적지 까지 얼마나 걸 려	HOWLONG	wrong spacing
+test	mention	이제 거의 다 왔다	NONE	statement, not a question (§3)
+dev	question	지금 몇 시 됐어?	NONE	clock time question (§7)
+test	question	충전소 있는 휴게소야?	NONE	existence question like 화장실 있어? (§7)
+dev	question	주유소 몇 시까지 해?	NONE	opening hours, not a need
+test	stt	거의다왔네	NONE	statement, not a question
+dev	paraphrase	첫째는 벌써 꿈나라야	ASLEEP:kid	꿈나라 = asleep
+test	paraphrase	아기 방금 재웠어	ASLEEP:baby	
+test	paraphrase	할머니 주무시네	ASLEEP:grandma	
+dev	paraphrase	둘째 자고 있어	ASLEEP:kid2	
+dev	paraphrase	애들 둘 다 곯아떨어졌다	ASLEEP	several children → no id (§6)
+test	paraphrase	강아지도 자네	ASLEEP:dog	
+test	paraphrase	뒷자리 다 자고 있어	ASLEEP	everyone in the back → no id (§6)
+dev	paraphrase	애 자요	ASLEEP	generic 애 with several children → no id (§6)
+test	negation	첫째 아직 안 깼어	ASLEEP:kid	아직 안 깼어 = still asleep (§6)
+dev	mixed	할머니 피곤하셨는지 주무셔	ASLEEP:grandma	tiredness inside a sleep statement → sleep (§6)
+test	mixed	둘째 자니까 노래 좀 줄여 줘	ASLEEP:kid2	the music part has no intent
+test	mixed	애들 자니까 조용히 가자	ASLEEP	조용히 가자 means nothing without a card; several children → no id
+dev	filler	음… 아기 이제 자는 중이야	ASLEEP:baby	
+dev	stt	아기잠들었어	ASLEEP:baby	
+test	stt	둘째 자 요	ASLEEP:kid2	wrong spacing
+dev	stt	할머니주무셔	ASLEEP:grandma	
+test	stt	첫째아직자	ASLEEP:kid	
+test	other	와이프도 곯아떨어졌네	NONE	adult not in the occupant list → no Asleep (§6)
+dev	other	아이 자리 좀 앞으로 당겨 줘	NONE	자리 is not sleep (§6)
+dev	other	애들아 이제 출발하자	NONE	no card; not a sleep statement (§6)
+test	paraphrase	둘째 깼다	AWAKE:kid2	
+dev	paraphrase	아기 일어났어	AWAKE:baby	
+dev	paraphrase	할머니 일어나셨어	AWAKE:grandma	
+test	paraphrase	강아지 깼어	AWAKE:dog	
+test	paraphrase	애들 다 깼네	AWAKE	several children → no id (§6)
+dev	negation	첫째는 안 자고 계속 떠들어	AWAKE:kid	안 자 = awake (§6)
+test	negation	둘째 아직 안 자	AWAKE:kid2	아직 안 자 = awake, unlike 아직 안 깼어 (§6)
+dev	stt	아기깼어	AWAKE:baby	
+test	stt	첫째 일어 났어	AWAKE:kid	wrong spacing
+dev	stt	애들안자	AWAKE	안 자 = awake; several children → no id
+test	other	창문 좀 내려 줘	NONE	other domain (§7)
+dev	other	다음 노래 틀어 줘	NONE	other domain (§7)
+test	other	내비 목적지 서울역으로 바꿔 줘	NONE	other domain (§7)
+test	other	첫째가 멀미하는 것 같아	NONE	motion sickness (§7)
+dev	other	너무 덥다	NONE	heat (§7)
+dev	other	애들이 심심하대	NONE	boredom (§7)
+test	other	둘째가 토할 것 같대	NONE	motion sickness, not restroom urgency (§7)
+test	other	그래 알았어	NONE	no card → an answer carries no meaning (§3)
+dev	other	아니야 됐어	NONE	no card → a refusal carries no meaning (§3)
+dev	other	가자 가자	NONE	no card → 가자 carries no meaning (§3)
+test	other	엄마한테 전화 걸어 줘	NONE	other domain
+test	other	고고씽	NONE	no card
+dev	mention	정체가 장난 아니네	NONE	
+dev	mention	옥산휴게소 새로 지었대	NONE	mention of a rest area, no request
+test	stt	창문좀닫아	NONE	other domain
+dev	stt	노래꺼줘	NONE	other domain
+dev	stt	몇시야지금	NONE	clock time question (§7)
+test	stt	에어컨켜줘	NONE	other domain

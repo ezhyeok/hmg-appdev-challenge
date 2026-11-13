@@ -10,7 +10,7 @@ import dev.shimpyo.engine.OccupantType
 object OccupantWords {
     val INFANT = listOf("아기", "애기", "갓난", "신생아")
     val CHILD = listOf("아이", "애가", "애는", "애도", "애들", "첫째", "둘째", "셋째", "막내", "큰애", "작은애", "딸", "아들", "꼬맹이", "꼬마")
-    val ELDER = listOf("할머니", "할아버지", "어르신", "부모님", "어머님", "아버님")
+    val ELDER = listOf("할머니", "할아버지", "할매", "할배", "어르신", "부모님", "어머님", "아버님")
     val PREGNANT = listOf("임산부", "임신", "만삭")
     val DOG = listOf("강아지", "반려견", "멍멍", "댕댕", "개가")
     /** 운전자 말고 함께 탄 어른 */

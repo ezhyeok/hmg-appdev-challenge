@@ -105,7 +105,7 @@ class IntentParser {
         if (question || HOW_LONG.containsMatchIn(t) || ASKS.containsMatchIn(t)) return YesNo.UNKNOWN
         // 거절이 수락 낱말을 품고 있어서 거절을 먼저 본다 ("안 들러도 돼", "그냥 가자"). "다음 휴게소 가자"도 지금은 아니라는 뜻이다
         if (refused(t) || LATER.containsMatchIn(t)) return YesNo.NO
-        if (YES_START.containsMatchIn(t) || YES_ANY.containsMatchIn(t) || goesThere(t, stopKey)) return YesNo.YES
+        if (YES_START.containsMatchIn(t) || YES_ANY.containsMatchIn(t) || GO_THERE_PLAIN.containsMatchIn(t) || goesThere(t, stopKey)) return YesNo.YES
         return YesNo.UNKNOWN
     }
 
@@ -125,9 +125,15 @@ class IntentParser {
      * "가자", "가줘"가 거기로 가자는 뜻인지. 앞말이 대답·정차·'들렀다'일 때만 그렇다("응 가자", "휴게소 가자", "쉬었다 가자").
      * 그 밖의 "가자"는 계속 가자는 말일 수 있고("조용히 가자", "바로 가자") "아이가 자"일 수도 있어서 수락으로 보지 않는다.
      */
-    private fun goesThere(t: String, stopKey: String?): Boolean = GO_VERB.findAll(t).any { m ->
-        val before = t.substring(0, m.range.first)
-        before.isEmpty() || GO_THERE_AFTER.containsMatchIn(before) || (stopKey != null && stopKey.length >= 2 && before.endsWith(stopKey))
+    private fun goesThere(t: String, stopKey: String?): Boolean {
+        // "가자 가자"는 "고고"처럼 계속 가자는 말일 수도 있다 (발화 묶음 2026-11-13)
+        if (REPEATED_GO.matches(t)) return false
+        return GO_VERB.findAll(t).any { m ->
+            val before = t.substring(0, m.range.first)
+            // "옥산으로 가자": 정차 이름 뒤의 조사를 떼고 본다
+            val place = PLACE_PARTICLE.replace(before, "")
+            before.isEmpty() || GO_THERE_AFTER.containsMatchIn(before) || (stopKey != null && stopKey.length >= 2 && place.endsWith(stopKey))
+        }
     }
 
     // ------------------------------------------------------------ 요청
@@ -152,7 +158,8 @@ class IntentParser {
 
         // 영아: 수유·기저귀. 아기가 배고프면 식당이 아니라 수유실이다
         val babyTalk = who.type == OccupantType.INFANT && (who.occupant == null || who.occupant.type == OccupantType.INFANT)
-        if (said(s, FEEDING, topic = true) || (babyTalk && hungry(s))) {
+        // "기저귀 가방"은 물건 이름이다 (발화 묶음 2026-11-13: "기저귀 가방은 트렁크에 넣었어"를 수유 요청으로 읽었다)
+        if (said(s.replace("기저귀가방", "가방"), FEEDING, topic = true) || (babyTalk && hungry(s))) {
             val baby = who.occupant?.takeIf { it.type == OccupantType.INFANT || it.type == OccupantType.CHILD }
                 ?: occupants.firstOrNull { it.type == OccupantType.INFANT }
             return Request(Kind.FEEDING, VoiceIntent.OccupantNeed(baby?.id, Purpose.FEEDING))
@@ -194,6 +201,11 @@ class IntentParser {
         if (said(s, REST_PLACE, topic = true) && said(s, GO_PLACE) && !refused(t)) {
             return Request(Kind.REST, VoiceIntent.WantRest, byPlaceWord = true)
         }
+        // "주유소 말고 휴게소 들르자": '말고'는 앞말을 물리고, 뒤에 진짜 요청이 온다 (발화 묶음 2026-11-13)
+        val afterBut = s.substringAfterLast("말고", "")
+        if (afterBut.isNotEmpty() && said(afterBut, REST_PLACE, topic = true) && said(afterBut, GO_PLACE) && !refused(afterBut)) {
+            return Request(Kind.REST, VoiceIntent.WantRest, byPlaceWord = true)
+        }
 
         // 묻기만 했다. 연료량은 코치가 모른다: 화장실 여유를 답하면 틀린 답이다
         if (asks) return if (fuelTalk) null else Request(Kind.HOW_LONG, VoiceIntent.HowLong)
@@ -213,7 +225,7 @@ class IntentParser {
         return FILLER.replace(PERSON.replace(t.replace(word, ""), ""), "").isEmpty()
     }
 
-    private fun hungry(t: String): Boolean = said(t, HUNGRY) || said(t, EAT, topic = true)
+    private fun hungry(t: String): Boolean = said(t, HUNGRY) || said(t, EAT, topic = true) || MISSED_MEAL.containsMatchIn(t)
 
     /** 화장실이 급하다는 말인지. "급하게 가지 마", "시간이 급해"는 서두른다는 말이다 */
     private fun urgent(t: String): Boolean = URGENT.findAll(t).any { m ->
@@ -323,18 +335,20 @@ class IntentParser {
             "말고", "말자", "지마", "지말", "그냥가", "계속가", "쭉가", "더가", "집에가", "가던길", "갈길", "지나쳐", "지나치",
             "안들러", "안들르", "안들를", "안가", "안갈", "안간", "안해", "안할", "안쉬", "안쉴", "안돼", "안먹", "안좋",
             "안급", "급하지않", "급하진않", "안마려", "안졸", "안피곤", "안배고", "참을수있", "참을게", "참을만", "참을래", "버틸", "노노",
+            "싶지않", "싶진않",
         )
         /**
          * 거절 가운데 앞뒤를 봐야 하는 말: "참자"(급하다는 "못 참아"가 아닐 때), 말끝의 "괜찮은데"("난 괜찮은데 애가 가고 싶대"는
          * 거절이 아니다), "패스"("하이패스"가 아닐 때), "지나가자"("지나가는 길에 들르자"가 아닐 때)
          */
-        val NO_MORE = Regex("(?<!못)참(자|아봐|으라|아야|아$)|괜찮은데(요)?$|(?<!하이)패스|지나가(?!는길|다가)")
+        val NO_MORE = Regex("(?<!못)참(자|아봐|으라|아야|아$)|괜찮은데(요)?$|(?<!하이)패스|지나가(?!는길|다가|면서|는김)")
         /** 지금은 아니라는 말. "뒤에 다 자"(뒷자리)의 '뒤에'는 아니다 */
         val LATER = Regex(
-            "다음|나중|이따|있다가|좀있다|조금있다|(분|시간|조금|좀|잠시|금)(뒤|후)에|도착해서|도착하고|도착하면|더가서|더가다|만더|깨면|일어나면",
+            "다음|나중|이따|있다가|좀있다|조금있다|(분|시간|조금|좀|잠시|금)(뒤|후)에|도착해서|도착하고|도착하면|더가서|더가다|만더|깨면|일어나면" +
+                "|(빠지|풀리|뚫리)(고나서|고서|면|고)",
         )
         /** 묻는 말 (남은 시간·거리는 [HOW_LONG]). "어디든 들르자"는 묻는 말이 아니다 */
-        val ASKS = Regex("어디(야|지|에|있|인|쯤|냐|예요|에요)|뭐(야|지|냐|예요|에요)|이름이|왜")
+        val ASKS = Regex("어디(야|지|에|있|인|쯤|냐|예요|에요)|뭐(야|지|냐|예요|에요)|이름이|왜|(야|어야)(하나|되나|할까|될까)$|(하나|되나|려나|을까|를까)$")
         /** 말머리의 대답. 같은 글자로 시작하는 다른 말은 뺀다: 응가·응급, 네비·네 시, 예정, 그래도, 좋아하는, 콜라 */
         val YES_START = Regex(
             "^(어|아|음|오)?(응(?!가|급|원)|웅|엉|네(?!비|가|시|번|명|개|살)|넵|넹|예(?!정|상|전|를|약|쁘)|옙|그래(?!도|서|야|프)|그럼요?$|그러자|그러죠|그럽시다" +
@@ -342,7 +356,8 @@ class IntentParser {
         )
         /** 어디에 있어도 수락인 말. 뜻이 갈리는 "가자"는 [goesThere]가 앞말을 보고 정한다 */
         val YES_ANY = Regex(
-            "들르자|들러|들렀다가|들를게|들를래|들릅시다|그러자|그렇게해|그렇게하자|그게좋겠|그게낫겠|(그러|들르|가|쉬)지뭐" +
+            "들르자|들러|들렀다가|들를게|들를래|들을게|들을께|들릅시다|그러자|그렇게해|그렇게하자|그게좋겠|그게낫겠|(그러|들르|가|쉬)지뭐" +
+                "|갔다가.{0,4}(출발|가자|가)" +
                 "|(들르면|들르는게|들렀으면|쉬면|쉬는게|쉬었으면)좋(겠|을)" +
                 "|좋아(?!하|해)|좋습니다|좋지(?!않|는않|도않|못)|좋죠|좋네|좋은데|좋은생각|부탁|넣어(?!야|도)|추가해|안내해|쉬자|쉬어가자|쉬었다가|세워줘|들어가자",
         )
@@ -350,8 +365,14 @@ class IntentParser {
         /** 이 말 바로 뒤의 "가자"는 거기로 가자는 말이다: 대답, 정차·거기, 들렀다·쉬었다 */
         val GO_THERE_AFTER = Regex(
             "(응|어|엉|웅|네|예|그래|그럼|좋아|오케이|그러자|휴게소|쉼터|화장실|주유소|충전소|거기|그곳|저기|여기|그리|글로|이리|그쪽|저쪽)(에|로|으로|에서)?(한번|같이|빨리|얼른)?$" +
-                "|(들렀다|쉬었다|쉬고|들러서|들르고|보고|먹고|넣고|하고|다녀|갔다)$",
+                "|(들렀다|쉬었다|쉬고|들러서|들르고|보고|먹고|넣고|하고|다녀|갔다|보내고)$",
         )
+        /** "거기로 가": 말끝의 '가'는 거기·정차 낱말 바로 뒤일 때만 거기로 가자는 말이다 (발화 묶음 2026-11-13) */
+        val GO_THERE_PLAIN = Regex("(거기|그곳|그리|그쪽|글로|휴게소|쉼터|화장실)(에|로|으로)?가$")
+        /** "가자 가자", "가자가자가자" */
+        val REPEATED_GO = Regex("^(가자){2,}$")
+        /** 정차 이름 뒤에 붙는 조사 ("옥산으로 가자") */
+        val PLACE_PARTICLE = Regex("(으로|로|에|까지)$")
 
         // ---- 부정
         /** '안'으로 끝나는 낱말. 그 뒤에 온 말은 부정이 아니다 */
@@ -365,10 +386,10 @@ class IntentParser {
         val TOPIC_OFF = Regex(
             "^(은|는|이|가|을|를|도)?(말고|괜찮|됐어|됐고|필요없)" +                             // 화장실은 괜찮아, 휴게소 말고
                 // 화장실 안 가도 돼, 산책 안 해도 돼, 점심 안 먹어도 돼. "점심 안 먹었어"는 배고프다는 말이라 넣지 않는다
-                "|^(은|는|이|가|을|를|도|에)?안(가|갈|들|해|할|쉬|갈아|넣|시켜|먹어도|먹을|먹어$|먹는다|먹고싶)" +
+                "|^(은|는|이|가|을|를|도|에)?안(가|갈|들|해|할|쉬|갈아|넣|시켜|먹어도|먹여도|먹일|먹을|먹어$|먹는다|먹고싶)" +
                 "|^(은|는|이|가|을|를|도|에)?(아까|방금|이미|벌써)?" +
-                "(갔다왔|다녀왔|갔어|갔었|갔는데|했어|했는데|했다|했습니다|시켰|갈았|먹였|먹었|넣었|끝났|들렀어|들렀는데)" + // 화장실 갔다 왔어, 산책했어
-                "|^(었|였)(어|다|는데|지|고|습니다|네|거든)",                                    // 밥 먹'었어'
+                "(갔다왔|다녀왔|갔어|갔었|갔는데|했어|했는데|했다|했습니다|시켰|갈았|갈아줬|갈아놨|먹였|먹었|넣었|끝났|들렀어|들렀는데)" + // 화장실 갔다 왔어, 산책했어
+                "|^(었|였)(어|다|는데|지|고|습니다|네|거든|잖아|잖)",                            // 밥 먹'었어', 먹'었잖아'
         )
 
         // ---- 되묻기
@@ -385,11 +406,12 @@ class IntentParser {
          */
         val URGENT = Regex(
             "급해|급하(?!게)|급한(?!일|약속|전화|용무|게)|급함|급합|급똥|못참|참을수없|참기힘|(?<!비)쌀(것|거)같|지릴|지리겠|화장실빨리|빨리화장실" +
-                "|(화장실|소변|볼일|대변|오줌)(이|가)?급$",
+                "|(화장실|소변|볼일|대변|오줌)(이|가)?급$|(방광|오줌|소변)(이|가)?터질(것|거)같",
         )
         /** 이 말 뒤의 '급해'는 화장실이 아니다. "볼일이 급해"는 화장실이라 '일이'는 넣지 않는다 */
         val HURRY_BEFORE = listOf("시간이", "시간", "마음이", "마음", "갈길이")
-        val TOILET = listOf("화장실", "소변", "오줌", "응가", "똥", "대변", "볼일", "쉬야")
+        /** '화장시'는 STT가 '화장실'을 잘못 들은 것이다 (발화 묶음 2026-11-13) */
+        val TOILET = listOf("화장실", "화장시", "소변", "오줌", "응가", "똥", "대변", "볼일", "쉬야")
         /** 소변을 뜻하는 '쉬'. 쉬다(쉬자, 쉬고 싶어)와 다음 글자로 가른다 */
         val PEE = Regex("쉬(?=하|할|한|해|마려|마렵|싸|좀하|좀싸)")
         /** 화장실 낱말 없이도 화장실인 말 */
@@ -399,7 +421,8 @@ class IntentParser {
         /** 화장실 낱말과 함께면 가겠다는 말 */
         val GO = listOf(
             "가고싶", "가고파", "가야", "갈래", "가자", "가줘", "가주", "가도돼", "가도될", "간대", "간다는", "갈게",
-            "들르", "들러", "들를", "들렀다", "다녀오", "다녀올", "갔다오", "갔다올", "찾아", "어디", "세워",
+            "들르", "들러", "들를", "들을래", "들을게", "들렀다", "다녀오", "다녀올", "갔다오", "갔다올", "찾아", "찾네", "찾는다", "찾는데", "찾더",
+            "어디", "세워", "보내",
             "하고싶", "한대", "할래", "해야", "하자", "보고싶", "봐야", "보고올", "보고와", "보러", "싸야", "쌀래", "누고싶", "눠야",
         )
 
@@ -410,10 +433,10 @@ class IntentParser {
 
         // ---- 졸림·휴식
         val DROWSY = listOf(
-            "졸려", "졸리", "졸린", "졸음", "졸았", "졸뻔", "졸고", "잠와", "잠이와", "잠온", "잠이온",
+            "졸려", "졸리", "졸린", "졸음", "졸았", "졸뻔", "졸고", "졸다가", "꾸벅", "잠와", "잠이와", "잠온", "잠이온",
             "잠들것같", "잠들거같", "잠들겠", "잠들뻔", "눈이감", "눈감", "감겨", "감긴다", "눈꺼풀", "하품", "자고싶", "잠깨야", "잠좀깨", "잠을깨",
         )
-        val TIRED = listOf("피곤")
+        val TIRED = listOf("피곤", "지치", "지쳤")
         /** 운전자 자신을 가리키는 말. "아이도 자고 나도 졸려"는 운전자의 졸림이다 */
         val SELF = listOf("나도", "나는", "내가", "저도", "저는", "제가")
         val REST = listOf(
@@ -421,15 +444,19 @@ class IntentParser {
             "쉬고가", "쉬다가", "한숨자", "눈좀붙", "눈붙이", "자고가",
             // 쉬자고 하지는 않았지만 차에서 내리고 싶다는 말
             "스트레칭", "바람쐬", "바람좀쐬", "허리아파", "허리가아파", "다리저려", "다리가저려", "엉덩이아파", "뻐근", "커피한잔", "커피마시고싶", "커피사",
+            "다리좀펴", "다리펴", "기지개",
         )
         /** 이름으로 말한 휴식 ("휴식이 필요해". "휴식 필요 없어"는 아니다) */
         val REST_NOUN = listOf("휴식")
-        val REST_PLACE = listOf("휴게소", "쉼터")
+        /** '휴개소'는 STT가 '휴게소'를 잘못 들은 것이다 */
+        val REST_PLACE = listOf("휴게소", "휴개소", "쉼터")
         /** 장소 낱말과 함께면 거기 가자는 말 */
         val GO_PLACE = listOf("가자", "가줘", "가주", "가고싶", "가야", "갈래", "들르", "들러", "들를", "들렀다", "들어가", "세워", "찾아", "어디")
 
         // ---- 식사·주유
-        val HUNGRY = listOf("배고파", "배고프", "배고픈", "배가고", "출출", "허기")
+        val HUNGRY = listOf("배고파", "배고프", "배고픈", "배가고", "출출", "허기", "땡기", "땡긴", "땡겨")
+        /** 끼니를 거른 말: "아침도 못 먹고 나왔어", "저녁 안 먹었잖아". "점심 안 먹어도 돼"는 아니다 */
+        val MISSED_MEAL = Regex("(아침|점심|저녁|밥)(도|을|은|는)?(못|안)먹(고|었|은|어서)")
         /** 먹자는 말. 이미 먹었으면("밥 먹었어") 요청이 아니다 */
         val EAT = listOf("밥먹", "밥좀먹", "밥도먹", "밥이나먹", "밥을먹", "식사", "점심", "저녁먹", "아침먹", "간식", "뭐좀먹", "뭐먹", "먹고가", "먹고싶")
         val FUEL_PLACE = listOf("주유소", "충전소")
@@ -462,7 +489,7 @@ class IntentParser {
         // ---- 잠
         /** "아직 안 깼어", "아직 자": 여전히 잔다 */
         val STILL_ASLEEP = Regex("안깼|안일어났|(아직|아직도|계속)(자$|자요|자네|잔다|자고있)")
-        val AWAKE = listOf("깼어", "깼다", "깼네", "깼는데", "깼나", "깼습니다", "깨어났", "깨났", "일어났", "눈떴", "안잠들", "잠을안자", "잠안자")
+        val AWAKE = listOf("깼어", "깼다", "깼네", "깼는데", "깼나", "깼습니다", "깨어났", "깨났", "일어났", "일어나셨", "깨셨", "눈떴", "안잠들", "잠을안자", "잠안자")
         val NOT_SLEEPING = Regex("(?<![미천불편동])안(자$|자요|자네|잔다|자고(?!싶)|자는)")
         /** 누가 자고 있다는 말. 운전자 자신의 말("잠들 것 같아", "자고 싶어", "자고 가자")은 들어 있지 않다 */
         val ASLEEP = listOf(
