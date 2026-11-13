@@ -143,6 +143,19 @@ class CoachCoreTest {
     }
 
     @Test
+    fun theDepartureDemoAsksBeforeLeavingWhileParked() = runTest {
+        // 시연 '출발 전': 분당 아파트 앞(기어 P), 아이 1시간 전 화장실, 목적지까지 약 1시간 3분(정체 포함)
+        val rig = CoreRig(this)
+        rig.park()
+        rig.start()
+        rig.command(UiCommand.Demo("departure"))
+        rig.runUntil(30_000) { rig.state.prompt?.kind == PromptKind.DEPARTURE } ?: error("출발 전 질문이 없다: ${rig.log.lines.takeLast(10)}")
+        val speech = rig.state.prompt!!.speech
+        assertTrue(speech, "1시간 3분" in speech && "7살 아이" in speech && Regex("4[45]분쯤").containsMatchIn(speech))
+        assertEquals("고양 킨텍스", rig.state.destinationName)
+    }
+
+    @Test
     fun theScreenGetsTheCoachClockByTheMinuteSoDemoHistoryAgesInDemoTime() = runTest {
         // 기록 화면은 이 시각으로 '몇 분 전'을 센다 (HistoryNowTest). 정차 시연은 12:40(가상)이다: 실제 시계로 세면 오후 2시 반에
         // 방금 끝낸 정차가 "1시간 27분 전"이었다 (2026-11-13 영상 녹화)

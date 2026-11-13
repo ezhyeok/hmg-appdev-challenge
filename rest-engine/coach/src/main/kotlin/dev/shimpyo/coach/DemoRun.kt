@@ -22,6 +22,8 @@ import java.util.concurrent.ConcurrentHashMap
  * - fatigue: 오후 3시, 연속 주행 95분, 안성휴게소를 지나 졸음쉼터·망향휴게소 앞 → 피로 게이지와 휴식 제안
  * - urgent: 밤 11시 강남역 부근, 영아 동승 → 급해 모드
  * - stop: 시간을 10배로 돌려 휴게소 정차(15분 이상)와 게이지 회복을 짧게 보여 준다
+ * - departure: 아침 8시 10분 분당 아파트 앞(정차), 7살 아이(1시간 전 화장실), 목적지 고양 킨텍스(약 1시간, 강변북로 정체) →
+ *   '출발 전 한마디' (일상 확장). 도심 길의 가까운 화장실은 urgent 장면(강남역 부근 주행)에서 보인다
  *
  * 시간 배속: 엔진은 입력 시각으로만 판단하므로, 시연 시각을 실제보다 빠르게 흐르게 하면 15분 휴식이나
  * 25분 뒤의 피로 단계를 몇 분 안에 보여 줄 수 있다. 1초 간격 호출이 배속 후에도 2분을 넘지 않게 한다.
@@ -58,7 +60,7 @@ class DemoScenario internal constructor(
 
     companion object {
         /** 화면 시연 패널·adb `--es demo`가 쓰는 이름 */
-        val NAMES: List<String> = listOf("holiday", "fatigue", "urgent", "stop")
+        val NAMES: List<String> = listOf("holiday", "fatigue", "urgent", "stop", "departure")
 
         /** 이보다 느리면 달리는 시나리오가 아니다 (엔진이 받는 자유 속도의 아래 끝, 시속 10km) */
         private const val MIN_CRUISE_MPS = 10 / 3.6
@@ -71,6 +73,7 @@ class DemoScenario internal constructor(
             "fatigue" -> DemoScenarios.fatigue()
             "urgent" -> DemoScenarios.urgent()
             "stop" -> DemoScenarios.stop()
+            "departure" -> DemoScenarios.departure()
             else -> null
         }
     }
@@ -319,6 +322,23 @@ private object DemoScenarios {
         drivenMin = 20,
         congestion = emptyList(),
         routeTotalM = 12_000.0,
+    )
+
+    /**
+     * 출발 전 (일상 확장). 분당 정자동 아파트 앞에 서 있다(0m/s). 목적지까지 46km, 그중 12km는 강변북로 정체(40분)라 남은 시간은 약
+     * 1시간 3분이다. 아이의 게이지(1시간 전 화장실: 45분)보다 길어 출발 전에 다녀오라고 묻는다 (CoachEngine.departureCheck)
+     */
+    fun departure(): DemoScenario = DemoScenario(
+        name = "departure",
+        path = listOf(DemoRun.Pt(37.3662, 127.1046), DemoRun.Pt(37.3700, 127.1052)),
+        metersPerSecond = 0.0,
+        occupants = listOf(driver(), Occupant("kid", OccupantType.CHILD, ageYears = 7, label = "7살 아이")),
+        timeOfDay = LocalTime.of(8, 10),
+        drivenMin = 0,
+        lastRestroomMin = 60,
+        congestion = listOf(DemoScenario.Jam(startM = 15_000.0, lengthM = 12_000.0, durationS = 40 * 60.0)),
+        routeTotalM = 46_000.0,
+        destinationName = "고양 킨텍스",
     )
 
     fun stop(): DemoScenario = DemoScenario(
