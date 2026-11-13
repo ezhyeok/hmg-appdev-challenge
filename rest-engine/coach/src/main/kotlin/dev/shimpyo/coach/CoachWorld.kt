@@ -35,6 +35,8 @@ sealed class CoachWorld {
     abstract val persistsTrip: Boolean
     /** 위치 SDK가 멈췄을 때 내비 현재 위치로 보충할지 */
     abstract val usesNaviLocationFallback: Boolean
+    /** 내비가 알려 주는 지금 도로의 제한속도를 쓸지 (NearbyStops). 시연 위치는 내비가 보는 실제 도로와 다르므로 쓰지 않는다 */
+    abstract val usesNaviRoadLimit: Boolean
 
     /** 이 세계의 탑승자. 질문·음성 해석·화면이 모두 이것을 쓴다 (구조 리뷰 D9: 경로마다 출처가 달랐다) */
     abstract fun occupants(settings: SettingsPort): List<Occupant>
@@ -115,6 +117,7 @@ sealed class CoachWorld {
         override val persistsHistory: Boolean get() = true
         override val persistsTrip: Boolean get() = true
         override val usesNaviLocationFallback: Boolean get() = true
+        override val usesNaviRoadLimit: Boolean get() = true
         override fun occupants(settings: SettingsPort): List<Occupant> = settings.occupants
         override fun engineMemory(loaded: PersonalMemory): PersonalMemory = loaded
     }
@@ -133,6 +136,7 @@ sealed class CoachWorld {
         override val persistsHistory: Boolean get() = false
         override val persistsTrip: Boolean get() = false
         override val usesNaviLocationFallback: Boolean get() = false
+        override val usesNaviRoadLimit: Boolean get() = false
         override fun occupants(settings: SettingsPort): List<Occupant> = occupantsOverride ?: run.scenario.occupants
         override fun position(real: Fix?): Fix = run.position()
         override fun apply(input: CoachInput): CoachInput = run.apply(input)

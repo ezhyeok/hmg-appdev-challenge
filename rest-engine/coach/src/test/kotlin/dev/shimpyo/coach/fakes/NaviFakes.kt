@@ -47,6 +47,9 @@ class FakeNaviPort(private val clock: ElapsedClock) : NaviPort {
     /** 내비가 먼저 보내는 변화. 구독자가 없을 때 보낸 것은 버려진다(실제 SharedFlow와 같다) */
     override val changes = MutableSharedFlow<NaviChange>(extraBufferCapacity = 16)
 
+    /** 지금 도로의 제한속도 (실제 내비는 매초 보낸다). 구독자가 없을 때 보낸 것은 버려진다 */
+    override val roadSpeedLimits = MutableSharedFlow<Int>(extraBufferCapacity = 16)
+
     /** 답은 물은 순간의 상태로 만든다 (지연 중에 대본이 바뀌어도 옛 답이 온다: 실제 내비와 같다) */
     private suspend fun <T> answer(name: String, value: () -> T): T {
         calls += Call(name, clock.elapsedMs())

@@ -63,6 +63,11 @@ class StopRepository(
         }
     }
 
+    override fun onMotorway(lat: Double, lon: Double, heading: Float): Boolean {
+        val l = state ?: return false
+        return roadAt(l, lat, lon, heading) >= 0
+    }
+
     /** 지금 달리는 고속도로 이름 (지도 맞춤). 고속도로 위가 아니거나 방위를 모르면 null */
     fun currentRoad(lat: Double, lon: Double, heading: Float?): String? {
         val l = state ?: return null

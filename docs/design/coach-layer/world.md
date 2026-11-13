@@ -36,7 +36,7 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 | `DemoScenario` | 시나리오 정의 (불변) | `NAMES`, `byName(name)` |
 | `DemoRun` | 시작된 시연 한 번 (불변, `CoachClock`) | `start(name, wallNow, elapsed, elapsedNow?, zone?)`, `now()`, `travelledM()`, `position(): Fix`, `apply(input)`, `candidates(list)`, `alongM(pt)`, `anchor` |
 | `DemoDirector` | 옛 서비스용 호환 겉면. 불변 `DemoRun` 참조 하나만 바꾼다 | 예전 API 그대로 (`start`, `now`, `position`, `apply`, `candidates`, `active`, `name`, `oracleEnabled`) |
-| `CoachWorld` | 세계별 정책과 변환 | `name`, `clock`, `candidatePolicy`, `oracleEnabled`, `persistsLearning`, `persistsHistory`, `persistsTrip`, `usesNaviLocationFallback`, `engineConfig`, `occupants(settings)`, `position(real)`, `apply(input)`, `candidates(live)`, `profile(settings, anchor)`, `newEngine(factory, settings, memory, anchor, park?)`, `endPark(engine, endedAt)`; `Demo.withOccupants(list)`, `Demo.occupantsEdited` |
+| `CoachWorld` | 세계별 정책과 변환 | `name`, `clock`, `candidatePolicy`, `oracleEnabled`, `persistsLearning`, `persistsHistory`, `persistsTrip`, `usesNaviLocationFallback`, `usesNaviRoadLimit`, `engineConfig`, `occupants(settings)`, `position(real)`, `apply(input)`, `candidates(live)`, `profile(settings, anchor)`, `newEngine(factory, settings, memory, anchor, park?)`, `endPark(engine, endedAt)`; `Demo.withOccupants(list)`, `Demo.occupantsEdited` |
 | `TripAnchor` | 여정 기준점 | `tripStart`, `lastRestroomAt`(탑승자별), `restroomFallbackAt`(나중에 탄 사람), `continuousDrivingMin`, `lastRestroomFor(occupants)`, `withRestroomAt(at)` |
 | `ParkState` | 지금 정차 (`since`, `doorSeen`) | prompt 트랙 정차 감지기와 합칠 최소 타입 |
 | `TripHeartbeat` / `TripStorePort` | 여정 맥박과 그 저장소 (새 포트). 맥박에는 정차(`park`)와 들르기로 한 곳(`accepted: AcceptedStop(stopId, at)?`)도 담긴다 | `load()`(시작 때 IO에서), `save(h)`(막지 않음) |
@@ -59,6 +59,7 @@ TripSession = 여정 기준점(TripAnchor) + 연속 주행 + 정차 상태 + 맥
 | `persistsHistory` | true | false | 가상 시각 정차를 `stops.json`에 쓰지 않는다 (B4, D3, UI #15). 화면에는 보인다 |
 | `persistsTrip` | true | false | 시연 여정은 저장하지 않는다 |
 | `usesNaviLocationFallback` | true | false | 시연 위치가 덧씌워져 있다 (D3) |
+| `usesNaviRoadLimit` | true | false | 내비의 지금 도로 제한속도는 내비가 보는 실제 도로의 값이다. 에뮬레이터 내비는 판교에 서 있어 시연 위치(강남·분당)의 가까운 화장실을 지울 수 있다 (`NearbyStops`, `CoachCoreTest.theDemoIgnoresTheRealRoadSpeedLimit`) |
 | `occupants(settings)` | 설정 | 시나리오 (편집하면 그 시연에만) | 질문·음성 해석·화면이 같은 탑승자를 쓴다 (D9) |
 | `position(real)` | real | 시연 경로 위 위치 | 실제 위치는 PositionTracker가 계속 받는다. 시연은 덧씌울 뿐 쓰지 않는다 (B3) |
 | `apply` / `candidates` | 그대로 | 시나리오 경로·정체·후보 거리 | 실제 내비 경로를 섞지 않는다 (2026-11-11 회귀) |

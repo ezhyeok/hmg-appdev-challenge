@@ -9,6 +9,7 @@ import dev.shimpyo.engine.StopKind
 import dev.shimpyo.engine.TripProfile
 import dev.shimpyo.engine.VoiceIntent
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.emptyFlow
 
 /*
  * 코치 계층이 바깥(차량·내비·음성·저장소·화면)과 만나는 경계. 앱이 Pleos SDK와 안드로이드로 구현하고,
@@ -55,6 +56,11 @@ interface NaviPort {
     suspend fun showPlaceSearch(keyword: String): Boolean
     /** 내비가 먼저 보내는 경로 변화. 조회 주기를 기다리지 않고 다시 읽는 데 쓴다 */
     val changes: Flow<NaviChange>
+    /**
+     * 지금 달리는 도로의 제한속도(km/h). Pleos 내비가 리스너를 건 뒤 매초 보낸다(onCurrentRoadSpeedLimit). 0 이하는 모름.
+     * 길가 화장실에 바로 갈 수 없는 길(도시고속도로·자동차전용도로)을 가리는 데 쓴다(NearbyStops). 보내지 않는 구현은 빈 흐름
+     */
+    val roadSpeedLimits: Flow<Int> get() = emptyFlow()
 }
 
 // ------------------------------------------------------------ 음성
@@ -102,6 +108,8 @@ interface StopIndex {
     fun near(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, now: Long, limit: Int): List<StopCandidate>
     /** TBT 이름으로 공공데이터 행을 찾는다. [heading]을 주면 반대 차로 행은 뺀다 */
     fun matchByName(name: String, kind: StopKind, lat: Double, lon: Double, maxStraightM: Double, heading: Float? = null): List<StopCandidate>
+    /** 차가 고속도로 차로 위인지 (지도 맞춤, MotorwayIndex: 차로 선형 가까이이고 방향이 맞다). 표를 읽기 전이나 모르면 false */
+    fun onMotorway(lat: Double, lon: Double, heading: Float): Boolean = false
 }
 
 /** 후보까지의 실제 경로 거리·ETA·방향을 내비로 보정한다 (RouteOracle) */

@@ -17,6 +17,7 @@ import dev.shimpyo.engine.PromptKind
 import kotlinx.coroutines.test.runTest
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
@@ -153,6 +154,46 @@ class CoachCoreTest {
         val speech = rig.state.prompt!!.speech
         assertTrue(speech, "1시간 3분" in speech && "7살 아이" in speech && Regex("4[45]분쯤").containsMatchIn(speech))
         assertEquals("고양 킨텍스", rig.state.destinationName)
+    }
+
+    @Test
+    fun inTheCityTheNextRestroomIsNearbyUntilTheNaviSaysTheRoadIsAnUrbanExpressway() = runTest {
+        // 일상 길(실제 세계): 강남역 남쪽 300m에서 북쪽으로 시속 30km. 경로 위 휴게소가 없으니 다음 화장실은 가까운 공중화장실이다.
+        // 내비가 제한속도 80(도시고속도로)을 알려 오면 길가 화장실에 바로 갈 수 없으니 내리고, 소식이 끊기면(5초) 다시 올린다
+        val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER)))
+        rig.drive(30f)
+        rig.fix(37.4958, 127.0290, 0f)
+        rig.start()
+        rig.runUntil(30_000) { rig.state.next?.stop?.id == "gangnam-wc" } ?: error("가까운 화장실이 다음 화장실이 아니다: ${rig.state.next}")
+        assertTrue(rig.state.next!!.reasons.any { it.code == "NEXT_NEARBY_RESTROOM" })
+        val gone = rig.runUntil(10_000) {
+            rig.fakeNavi.roadSpeedLimits.tryEmit(80)
+            rig.state.next?.stop?.id != "gangnam-wc"
+        }
+        assertNotNull("제한속도 80이면 길가 화장실을 내린다", gone)
+        repeat(3) {
+            rig.fakeNavi.roadSpeedLimits.tryEmit(80)
+            rig.run(1_000)
+            assertNotEquals("제한속도가 매초 오는 동안은 내린 채다", "gangnam-wc", rig.state.next?.stop?.id)
+        }
+        // 내비가 더 보내지 않는다 (도로를 놓쳤거나 멈췄다): 5초 뒤에는 제한속도를 모르는 것으로 본다
+        rig.runUntil(30_000) { rig.state.next?.stop?.id == "gangnam-wc" } ?: error("제한속도 소식이 끊긴 뒤에도 내린 채다")
+    }
+
+    @Test
+    fun theDemoIgnoresTheRealRoadSpeedLimit() = runTest {
+        // 에뮬레이터 내비는 판교에 서 있다: 그 도로의 제한속도가 시연(강남역 밤 11시)의 가까운 화장실을 지우면 안 된다
+        val rig = CoreRig(this)
+        rig.drive(30f)
+        rig.start()
+        rig.command(UiCommand.Demo("urgent"))
+        fun nearby() = rig.state.next?.reasons.orEmpty().any { it.code == "NEXT_NEARBY_RESTROOM" }
+        rig.runUntil(10_000) { nearby() } ?: error("시연에서 가까운 화장실이 다음 화장실이 아니다: ${rig.state.next}")
+        repeat(8) {
+            rig.fakeNavi.roadSpeedLimits.tryEmit(80)
+            rig.run(1_000)
+            assertTrue("실제 내비의 제한속도 80이 시연의 가까운 화장실을 지웠다 (${it + 1}초): ${rig.state.next}", nearby())
+        }
     }
 
     @Test

@@ -7,7 +7,7 @@
 # 이미 떠 있는 앱 창에 다시 보내는 인텐트는 Pleos 홈 화면이 창을 다시 띄우는 것으로 처리해 서비스까지
 # 오지 않을 수 있어서, 여기서는 `am start -S`(앱 재시작)로 보낸다.
 #
-# 사용: tools/laptop/demo-smoke.sh [holiday|fatigue|urgent|stop|off] [--split]
+# 사용: tools/laptop/demo-smoke.sh [holiday|fatigue|urgent|stop|departure|off] [--split]
 #   off는 시연을 끄고 실제 신호로 돌아간다. 차량 상태(기어·차속)는 tools/vc/vc.sh로 따로 맞춘다
 #   --split: 시연이 시작된 뒤 창 막대를 끌어 앱을 portrait 창으로 나누고(화면이 다시 만들어진다), 시연이 처음부터
 #            다시 시작되지 않는지 본다 (2026-11-11 회귀: 화면 재생성 때 처음 실행 인텐트의 시연 옵션을 다시 보냈다).

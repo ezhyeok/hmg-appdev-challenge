@@ -294,6 +294,8 @@ class CoachCore(private val d: CoachDeps) {
         val navi = d.tracker.snapshot.value
         val odo = d.odometer.meters
         val ahead = a.world.candidates(d.candidates.live(navi, odo))
+        // 후보 검색에 쓰는 위치와 방위: 실제면 진행 방향(서 있으면 마지막으로 달리던 방향), 시연이면 시연 경로의 방위
+        val search = CoreRules.searchFix(pos, real, heading)
         val input = a.world.apply(
             CoachInput(
                 now = t,
@@ -308,11 +310,14 @@ class CoachCore(private val d: CoachDeps) {
                 intent = if (waiting) null else if (urgent.takeEngineIntent()) VoiceIntent.UrgentRestroom else pendingIntents.removeFirstOrNull(),
                 cabinAutoAllowed = d.settings.autoFreshAir,
                 asleepOccupantIds = crew.asleepIds,
-                // 일상 길의 가까운 화장실 (NearbyStops). 길안내 경로 위 휴게소가 보이면 고속도로라 비운다
-                nearby = nearbyStops.current(pos, heading, navi.guiding && ahead.isNotEmpty(), speed, t, el),
+                // 일상 길의 가까운 화장실 (NearbyStops). 고속도로 차로 위·제한속도 70 이상인 길·시속 80 이상이면 비운다
+                nearby = nearbyStops.current(
+                    search, search?.heading, highwayRoute = navi.guiding && ahead.isNotEmpty(), speedKph = speed,
+                    roadLimitKph = if (a.world.usesNaviRoadLimit) d.tracker.roadLimit.value?.fresh(el) else null, now = t, elapsedMs = el,
+                ),
             ),
         )
-        d.loopInputs.request = CandidateRequest(CoreRules.searchFix(pos, real, heading), navi, a.world.candidatePolicy)
+        d.loopInputs.request = CandidateRequest(search, navi, a.world.candidatePolicy)
         // 엔진이 한 번이라도 돌았으면, 이번 update 전에 알린다 (엔진이 그 정차를 먼저 묻지 않게)
         if (!waiting && lastInput != null) restoreAccepted(a, input, el)
         val out = if (waiting) null else try {

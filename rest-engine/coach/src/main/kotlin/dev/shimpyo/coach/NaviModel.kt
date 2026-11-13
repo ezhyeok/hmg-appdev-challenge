@@ -127,6 +127,19 @@ enum class NaviChange {
     DESTINATION_ARRIVED,
 }
 
+/**
+ * 내비가 알려 준 지금 도로의 제한속도 [kph]와 받은 때 [atMs](ElapsedClock). 내비는 매초 보내므로 [FRESH_MS] 넘게 소식이 없으면
+ * 모르는 것으로 본다 (내비가 멈췄거나 도로를 놓쳤다)
+ */
+data class RoadLimit(val kph: Int, val atMs: Long) {
+    /** 지금 믿을 수 있는 제한속도. 오래됐거나 0 이하(모름)면 null */
+    fun fresh(nowMs: Long): Int? = kph.takeIf { it > 0 && nowMs - atMs in 0..FRESH_MS }
+
+    companion object {
+        const val FRESH_MS = 5_000L
+    }
+}
+
 /** 경유지 추가의 결과 (NaviPort.addWaypoint) */
 enum class WaypointResult {
     ADDED,

@@ -51,6 +51,13 @@ class NaviTracker(
     private val state = MutableStateFlow(NaviSnapshot())
     val snapshot: StateFlow<NaviSnapshot> = state.asStateFlow()
 
+    /**
+     * 내비가 마지막으로 알려 준 지금 도로의 제한속도 (NaviPort.roadSpeedLimits, 매초). 스냅샷과 따로 둔다: 매초 바뀌는 값이
+     * 경로 스냅샷을 매초 새로 만들면 스냅샷이 바뀌었는지로 움직이는 쪽(후보 갱신 열쇠 등)이 흔들린다
+     */
+    private val limit = MutableStateFlow<RoadLimit?>(null)
+    val roadLimit: StateFlow<RoadLimit?> = limit.asStateFlow()
+
     // ---- 다른 코루틴이 보내는 요청. pollOnce가 시작할 때 한꺼번에 가져간다
     private val pending = AtomicInteger(0)
     private val wake = Channel<Unit>(Channel.CONFLATED)
@@ -109,6 +116,7 @@ class NaviTracker(
     suspend fun run(): Unit = coroutineScope {
         connect()
         launch { watchChanges() }
+        launch { watchRoadLimit() }
         while (true) {
             try {
                 pollOnce()
@@ -367,6 +375,24 @@ class NaviTracker(
                 log.w("navi events failed: ${e.message ?: e.javaClass.simpleName}")
             }
             delay(CONNECT_RETRY_MS) // 흐름이 끝나거나 실패했으면 다시 구독한다
+        }
+    }
+
+    /**
+     * 제한속도 흐름을 받는다. 실패하면 다시 구독하고, 흐름이 그냥 끝나면(보내지 않는 구현, 빈 흐름) 그만 받는다:
+     * 끝난 흐름을 2초마다 다시 구독할 까닭이 없다 (경로 변화 흐름과 달리, 실제 내비의 흐름은 끝나지 않는다)
+     */
+    private suspend fun watchRoadLimit() {
+        while (true) {
+            try {
+                navi.roadSpeedLimits.collect { kph -> limit.value = RoadLimit(kph, clock.elapsedMs()) }
+                return
+            } catch (e: CancellationException) {
+                throw e
+            } catch (e: Exception) {
+                log.w("navi speed limits failed: ${e.message ?: e.javaClass.simpleName}")
+            }
+            delay(CONNECT_RETRY_MS)
         }
     }
 

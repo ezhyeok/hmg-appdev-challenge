@@ -692,6 +692,45 @@ class NaviTrackerTest {
         assertEquals(14_000L, r.navi.times("routeStatus").first())
     }
 
+    // ------------------------------------------------------------ 지금 도로의 제한속도 (NearbyStops, 2026-11-13)
+
+    @Test
+    fun theRoadSpeedLimitIsKeptWithWhenItCameAndDoesNotTouchTheSnapshot() = runTest {
+        val r = Rig(this)
+        r.start()
+        advanceTimeBy(2_000)
+        val snapshots = r.published.size
+        r.navi.roadSpeedLimits.emit(80)
+        runCurrent()
+        assertEquals(RoadLimit(80, 2_000L), r.tracker.roadLimit.value)
+        assertEquals(80, r.tracker.roadLimit.value?.fresh(r.clock.elapsedMs()))
+        assertEquals("매초 오는 값이 경로 스냅샷을 새로 만들지 않는다", snapshots, r.published.size)
+        advanceTimeBy(RoadLimit.FRESH_MS + 1)
+        assertNull("내비가 보내지 않으면 곧 모르는 것으로 본다", r.tracker.roadLimit.value?.fresh(r.clock.elapsedMs()))
+    }
+
+    @Test
+    fun aPortThatSendsNoLimitsIsSubscribedOnce() = runTest {
+        // 제한속도를 보내지 않는 구현(빈 흐름): 끝난 흐름을 2초마다 다시 구독하지 않는다. 실패한 흐름은 다시 구독한다
+        val clock = ElapsedClock { testScheduler.currentTime }
+        var subscriptions = 0
+        var failFirst = true
+        val quiet = object : NaviPort by FakeNaviPort(clock) {
+            override val roadSpeedLimits = kotlinx.coroutines.flow.flow<Int> {
+                subscriptions++
+                if (failFirst) {
+                    failFirst = false
+                    throw IllegalStateException("speed limits failed (fake)")
+                }
+            }
+        }
+        val tracker = NaviTracker(quiet, Odometer(clock), { true }, clock)
+        backgroundScope.launch { tracker.run() }
+        advanceTimeBy(30_000)
+        assertEquals("실패한 흐름은 한 번 다시, 끝난 흐름은 그만", 2, subscriptions)
+        assertNull(tracker.roadLimit.value)
+    }
+
     // ------------------------------------------------------------ 위치 대체
 
     @Test
