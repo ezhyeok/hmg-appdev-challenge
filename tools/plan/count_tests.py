@@ -52,10 +52,36 @@ def fetch_app(repo='repo'):
             shutil.rmtree(fresh, ignore_errors=True)
 
 
-def count(directory):
+# Test sources per module. A filtered run (gradlew ... --tests X) replaces the results with only the classes it ran, so
+# the counts must come from a run of the whole module: the number of result suites has to cover the test classes.
+# (2026-11-13: a voice-only run left 3 coach suites and the counts read 26 coach tests instead of 628.)
+SOURCES = {
+    'engine': os.path.join(ROOT, 'rest-engine', 'src', 'test'),
+    'coach': os.path.join(ROOT, 'rest-engine', 'coach', 'src', 'test'),
+    'app': os.path.join(ROOT, 'app', 'src', 'test'),
+    'kit': os.path.join(ROOT, 'pleos-kit', 'src', 'test'),
+}
+
+
+def test_classes(module):
+    """Source files that declare at least one @Test (one result suite each)."""
+    n = 0
+    for f in glob.glob(os.path.join(SOURCES[module], '**', '*.kt'), recursive=True):
+        with open(f, encoding='utf-8') as fh:
+            if '@Test' in fh.read():
+                n += 1
+    return n
+
+
+def count(directory, module=None):
     files = glob.glob(os.path.join(directory, 'TEST-*.xml'))
     if not files:
         raise SystemExit(f'no test results in {directory}')
+    if module is not None:
+        expected = test_classes(module)
+        if len(files) < expected:
+            raise SystemExit(f'{module}: results look partial ({len(files)} suites, {expected} test classes in the sources). '
+                             f'Run the whole module, not a filtered --tests run.')
     total = failures = skipped = 0
     for f in files:
         suite = ET.parse(f).getroot()
@@ -69,7 +95,7 @@ def main():
     if '--fetch-app' in sys.argv:
         i = sys.argv.index('--fetch-app')
         fetch_app(sys.argv[i + 1] if len(sys.argv) > i + 1 and not sys.argv[i + 1].startswith('-') else 'repo')
-    out = {name: count(d) for name, d in MODULES.items()}
+    out = {name: count(d, name) for name, d in MODULES.items()}
     bad = {k: v for k, v in out.items() if v['failures']}
     if bad:
         raise SystemExit(f'failing tests, not writing counts: {bad}')
