@@ -65,6 +65,11 @@ data class CoachConfig(
     val departureMinTripMin: Int = 20,
     /** 서 있는 동안 남은 거리가 이만큼 넘게 바뀌면 새 목적지다 (m). 같은 경로의 재탐색은 이보다 덜 바뀐다. 근거: 설계값 */
     val departureNewRouteM: Double = 2_000.0,
+    /**
+     * 경로 위 화장실 기회가 이 거리 안에 있으면 일상 정차 후보(CoachInput.nearby)를 쓰지 않는다 (m). 고속도로에서는 휴게소가 대개 이 안에
+     * 있고 길가 화장실에는 갈 수 없다. 근거: 설계값 (도심 공중화장실은 대개 1km 안에 있다)
+     */
+    val nearbyPreferRouteM: Double = 5_000.0,
     /** 엔진이 먼저 거는 질문 상한 (시간당). 근거: AI §9-3 */
     val maxPromptsPerHour: Int = 3,
 

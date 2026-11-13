@@ -288,6 +288,11 @@ class CoachEngine(
         val lastChanceIsNearest = lastChance != null && nearestRestroom != null && lastChance.opp.stop.id == nearestRestroom.stop.id
         val nowRestroom =
             if (restroom.level == Level.NOW && !lastChanceIsNearest && accepted == null && urgentList == null) nearestRestroom else null
+        // 일상 길: 경로 위 화장실 기회가 가까이 없으면 차 가까이의 일상 정차 후보를 쓴다 (CityNearbyTest). 고속도로의 공백 판단에는 넣지 않는다
+        val nearbyUsable = if (restroomOpps.any { it.distanceM <= config.nearbyPreferRouteM }) emptyList() else input.nearby.filter(::usableNearby)
+        val nearbyBest = if (nearbyUsable.isEmpty()) null
+        else ranker.rank(nearbyUsable, input.now, local, needs.has(OccupantType.INFANT), speed, 1, route).firstOrNull()?.stop
+        val nowNearby = if (restroom.level == Level.NOW && nowRestroom == null && lastChance == null && accepted == null && urgentList == null) nearbyBest else null
 
         // 6. 질문 (사용자 응답 먼저, 그다음 엔진이 먼저 거는 질문을 우선순위 순으로).
         // 사용자의 말에 답할 곳이 이미 들르기로 한 곳이면 '들를까요?'를 다시 묻지 않고 그렇게만 답한다 ([goingThere])
@@ -317,10 +322,17 @@ class CoachEngine(
             val fresh = !needAnswer.offered
             val here = if (stops.parked) parkedPlace(input.candidates, restroom = p == Purpose.RESTROOM) else null
             val t = if (stops.parked) restroomOpps.firstOrNull { it.distanceM >= PromptPolicy.CANCEL_NEAR_M } else nearestRestroom
+            // 일상 길: 경로 위 기회가 멀면(도심에서 수십 km 밖 휴게소) 가까운 일상 화장실로 답한다
+            val city = if (p == Purpose.RESTROOM && (t == null || t.distanceM > config.nearbyPreferRouteM)) nearbyBest else null
             addCand(
                 when {
                     here != null ->
                         ask(PromptKind.INFO, if (p == Purpose.RESTROOM) texts.restroomHere(here.name) else texts.careHere(here.name), user = true, fresh = fresh)
+                    city != null -> goingThere(city, null, fresh) ?: ask(
+                        PromptKind.LAST_CHANCE, texts.restroomRequested(city.name, nearbyDistanceM(city)), city, null, restroom.level,
+                        user = true, fresh = fresh, purposes = purposesFor(city, Purpose.RESTROOM, ctx),
+                        reasons = listOf(Reason("NEXT_REQUESTED_RESTROOM", texts.reasonNextRequestedRestroom())), cooldownOnExpiry = moving,
+                    )
                     t == null -> ask(PromptKind.INFO, texts.restroomRequestedNone(), user = true, fresh = fresh)
                     else -> goingThere(t.stop, t.distanceM, fresh) ?: run {
                         val lc = lastChance?.takeIf { it.opp.stop.id == t.stop.id }
@@ -424,6 +436,16 @@ class CoachEngine(
                     ),
                     null,
                 )
+            } else if (nowNearby != null) {
+                // 도심 길의 가까운 화장실: 고속도로처럼 '진입로 2km 전'에 묻지 않는다(골목으로 바로 들어갈 수 있다). 그래서 거리 창을 쓰지 않게
+                // 질문의 거리는 비운다 (문장에는 넣는다)
+                addCand(
+                    ask(
+                        PromptKind.LAST_CHANCE, texts.restroomNowSuggestion(nowNearby.name, nearbyDistanceM(nowNearby)),
+                        nowNearby, null, Level.NOW, purposes = purposesFor(nowNearby, Purpose.RESTROOM, ctx), reasons = listOf(nearbyReason()),
+                    ),
+                    null,
+                )
             }
             if (fatigueGauge.level == Level.NOW) {
                 val t = restTarget
@@ -471,7 +493,7 @@ class CoachEngine(
         }
 
         // 7. 다음 추천. 질문을 정한 뒤에 낸다: 화장실 질문이 떠 있으면 추천은 그 질문의 장소와 이유다
-        val next = recommend(ctx, urgentList, lastChance, lastChanceIsNearest, nowRestroom, wantsRest, restTarget, mealTarget, input.candidates, speed)
+        val next = recommend(ctx, urgentList, lastChance, lastChanceIsNearest, nowRestroom, wantsRest, restTarget, mealTarget, input.candidates, speed, nearbyUsable, nearbyBest)
 
         // 8. 공조 (피로와 별개인 편의 기능. 앱은 사용자가 허용했을 때만 실행하고, 외기는 1~2분 뒤 되돌린다)
         val coolDown = !freshAir && fatigueGauge.level >= Level.SOON && input.cabin.hvacOn == true &&
@@ -948,6 +970,8 @@ class CoachEngine(
         mealTarget: Opportunity?,
         candidates: List<StopCandidate>,
         speed: Float?,
+        nearbyUsable: List<StopCandidate> = emptyList(),
+        nearbyBest: StopCandidate? = null,
     ): Recommendation? {
         askedRestroomStop(speed)?.let { return it }
         accepted?.let { a ->
@@ -959,10 +983,12 @@ class CoachEngine(
         // 여유가 없을 때(NOW): 가장 가까운 화장실이 마지막 기회이기도 하면 그 이유로 낸다 (질문도 그 문구로 묻는다).
         // 아니면 가장 빨리 갈 수 있는 화장실이 먼 마지막 기회보다 먼저다
         if (ctx.restroom == Level.NOW && !(lastChance != null && lastChanceIsNearest)) {
-            val best = ranker.rank(candidates, ctx.wallNow, local, needs.has(OccupantType.INFANT), speed, 1, route).firstOrNull()
+            val pool = if (nearbyUsable.isEmpty()) candidates else candidates + nearbyUsable
+            val best = ranker.rank(pool, ctx.wallNow, local, needs.has(OccupantType.INFANT), speed, 1, route).firstOrNull()
             val stop = best?.stop ?: nowRestroom?.stop
             if (stop != null) {
-                return rec(stop, purposesFor(stop, Purpose.RESTROOM, ctx), listOf(nearestRestroomReason()))
+                val why = if (nearbyUsable.any { it.id == stop.id }) nearbyReason() else nearestRestroomReason()
+                return rec(stop, purposesFor(stop, Purpose.RESTROOM, ctx), listOf(why))
             }
         }
         if (lastChance != null) {
@@ -974,10 +1000,23 @@ class CoachEngine(
         if (mealWantedAt != NONE && mealTarget != null) {
             return rec(mealTarget.stop, purposesFor(mealTarget.stop, Purpose.MEAL, ctx), listOf(Reason("NEXT_MEAL", texts.reasonNextMeal())))
         }
+        // 일상 길: 경로 위 화장실 기회가 멀면 가까운 일상 화장실을 다음 화장실로 둔다 (도심에서 수십 km 밖 휴게소가 보였다)
+        if (nearbyBest != null) return rec(nearbyBest, purposesFor(nearbyBest, Purpose.RESTROOM, ctx), listOf(nearbyReason()))
         return null
     }
 
     private fun nearestRestroomReason() = Reason("NEXT_NEAREST_RESTROOM", texts.reasonNextNearestRestroom())
+
+    private fun nearbyReason() = Reason("NEXT_NEARBY_RESTROOM", texts.reasonNextNearbyRestroom())
+
+    /** 일상 정차 후보로 쓸 수 있는 곳: 화장실이 있고, 차를 세울 수 있고, 닫히지 않았고, 진행 방향이고, 거리를 안다 */
+    private fun usableNearby(c: StopCandidate): Boolean {
+        val d = nearbyDistanceM(c)
+        return c.facilities.restroom && c.parkable && c.openNow != false && c.directionOk != false && d.isFinite() && d > 0.0
+    }
+
+    /** 일상 정차 후보까지의 거리: 경로 거리를 알면 그것, 아니면 직선거리 × 도로 계수 */
+    private fun nearbyDistanceM(c: StopCandidate): Double = route.distanceOf(c)
 
     /**
      * 떠 있는 화장실 질문(마지막 기회, 여유 없음, "화장실 가고 싶대"의 답, 급해 결과)의 장소와 이유. 그런 질문이 없거나 그 장소가 지금

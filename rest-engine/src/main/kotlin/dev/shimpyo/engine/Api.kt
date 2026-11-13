@@ -184,6 +184,13 @@ data class CoachInput(
      * 모르는 id와 아이가 아닌 탑승자는 무시한다. 판단 마감(마지막 기회·계획)은 바뀌지 않는다
      */
     val asleepOccupantIds: Set<String> = emptySet(),
+    /**
+     * (일상 확장) 차 가까이의 일상 정차 후보: 공중화장실, 화장실 있는 주유소, 화장실 가까운 공영주차장 (지금 연 곳, 진행 방향, 가까운 순).
+     * [candidates]와 달리 고속도로의 화장실 공백 판단에는 쓰지 않는다(빠짐없는 목록이 아니고, 고속도로에서는 길가 화장실에 못 간다).
+     * 경로 위 화장실 기회가 [CoachConfig.nearbyPreferRouteM] 안에 없을 때 다음 화장실, NOW 질문, "화장실 가고 싶대"의 답에 쓴다.
+     * 앱은 고속도로 경로(길안내 TBT에 휴게소)나 빠른 주행에서는 비워 넣는다 (CityNearbyTest)
+     */
+    val nearby: List<StopCandidate> = emptyList(),
 )
 
 // ---------- 엔진 출력 ----------

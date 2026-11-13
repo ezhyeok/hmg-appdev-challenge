@@ -21,13 +21,14 @@ internal object InputSanitizer {
         val samples = samples(input.samples)
         val route = input.route?.let(::route)
         val cands = candidates(input.candidates)
+        val nearby = candidates(input.nearby)
         val range = nonNegative(input.rangeKm)
         val setTemp = input.cabin.setTempC?.takeIf { it.isFinite() }
         if (speed == input.speedKph && samples === input.samples && route === input.route && cands === input.candidates &&
-            range == input.rangeKm && setTemp == input.cabin.setTempC
+            nearby === input.nearby && range == input.rangeKm && setTemp == input.cabin.setTempC
         ) return input
         return input.copy(
-            speedKph = speed, samples = samples, route = route, candidates = cands, rangeKm = range,
+            speedKph = speed, samples = samples, route = route, candidates = cands, nearby = nearby, rangeKm = range,
             cabin = if (setTemp == input.cabin.setTempC) input.cabin else input.cabin.copy(setTempC = setTemp),
         )
     }

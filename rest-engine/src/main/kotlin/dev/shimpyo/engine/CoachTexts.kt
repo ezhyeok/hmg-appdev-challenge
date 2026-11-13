@@ -255,6 +255,8 @@ open class CoachTexts {
     open fun reasonLastChancePreference(gapMin: Int, limitMin: Int): String =
         "다음 화장실까지 ${duration(gapMin)}, 기준 ${duration(limitMin)}보다 길어요"
     open fun reasonNextRest(): String = "쉬어 가기 좋은 가장 가까운 곳이에요"
+    /** 일상 길에서 고른 가까운 화장실 (CoachInput.nearby) */
+    open fun reasonNextNearbyRestroom(): String = "가까운 화장실이에요"
     open fun reasonNextMeal(): String = "식사할 수 있는 가장 가까운 곳이에요"
 
     // ---------------- 피트스톱 계획 메모 ----------------

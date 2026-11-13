@@ -77,6 +77,7 @@ class CoachCore(private val d: CoachDeps) {
     private val freshAir = FreshAirGate()
     private val memorySaver = MemorySaver()
     private val travel = TravelHeading()
+    private val nearbyStops = NearbyStops(d.stops)
     private val crew = Crew(worlds, d.settings, d.voice, desk, d.interpreter, d.ui, d.log)
 
     private var started = false
@@ -307,6 +308,8 @@ class CoachCore(private val d: CoachDeps) {
                 intent = if (waiting) null else if (urgent.takeEngineIntent()) VoiceIntent.UrgentRestroom else pendingIntents.removeFirstOrNull(),
                 cabinAutoAllowed = d.settings.autoFreshAir,
                 asleepOccupantIds = crew.asleepIds,
+                // 일상 길의 가까운 화장실 (NearbyStops). 길안내 경로 위 휴게소가 보이면 고속도로라 비운다
+                nearby = nearbyStops.current(pos, heading, navi.guiding && ahead.isNotEmpty(), speed, t, el),
             ),
         )
         d.loopInputs.request = CandidateRequest(CoreRules.searchFix(pos, real, heading), navi, a.world.candidatePolicy)
@@ -663,6 +666,7 @@ class CoachCore(private val d: CoachDeps) {
                 lastPlan = null
                 enterWorld(a)
                 d.candidates.reset()
+                nearbyStops.reset()
                 val shown = shownHistory(now)
                 ui.update {
                     copy(
