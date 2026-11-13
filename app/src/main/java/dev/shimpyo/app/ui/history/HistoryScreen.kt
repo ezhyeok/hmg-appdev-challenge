@@ -76,12 +76,19 @@ fun historyStats(history: List<StopLog>): HistoryStats {
     return HistoryStats(sorted.size, sorted.count { it.restroom }, stints.takeLast(CHART_BARS))
 }
 
+/**
+ * 기록 화면의 '지금'. 기록 시각은 코치 시각(시연이면 가상 시각)이라 코치가 화면 상태에 싣는 시각([coachMinuteMs])으로 센다.
+ * 아직 모르면(첫 틱 전) 실제 시각. 어느 쪽이든 가장 최근 기록보다 앞서지 않게 한다 ('방금'이 음수가 되지 않게).
+ * 예전에는 실제 시각만 써서, 실제보다 늦은 시연 시각(오후 2시 반에 12:40 시연)으로 방금 끝낸 정차가 "1시간 27분 전"으로 보였다
+ */
+fun historyNow(coachMinuteMs: Long?, wallMs: Long, history: List<StopLog>): Long =
+    maxOf(coachMinuteMs ?: wallMs, history.maxOfOrNull { it.end } ?: 0L)
+
 @Composable
-fun HistoryScreen(history: List<StopLog>, modifier: Modifier = Modifier, lastStop: StopLog? = null) {
-    // 기록 시각은 서비스 시계(시연 중에는 빨리 갈 수 있다)라서 '오늘'은 실제 시각과 가장 최근 기록 중 늦은 쪽으로 정한다
-    // 기록이 그대로면 이 화면은 다시 그려지지 않으므로(강한 건너뛰기) 시계는 1분마다 따로 갱신한다
+fun HistoryScreen(history: List<StopLog>, modifier: Modifier = Modifier, lastStop: StopLog? = null, coachMinuteMs: Long? = null) {
+    // 코치 시각을 아직 모를 때만 실제 시각을 쓴다. 기록이 그대로면 이 화면은 다시 그려지지 않으므로(강한 건너뛰기) 1분마다 따로 갱신한다
     val wallMs by produceState(System.currentTimeMillis()) { while (true) { delay(60_000); value = System.currentTimeMillis() } }
-    val nowMs = maxOf(wallMs, history.maxOfOrNull { it.end } ?: 0L)
+    val nowMs = historyNow(coachMinuteMs, wallMs, history)
     val layout = LocalLayout.current
     val stats = remember(history) { historyStats(history) }
     if (history.isEmpty()) {

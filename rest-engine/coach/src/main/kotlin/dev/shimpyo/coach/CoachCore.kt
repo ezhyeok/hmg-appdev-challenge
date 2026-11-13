@@ -382,6 +382,7 @@ class CoachCore(private val d: CoachDeps) {
                 sttAvailable = stt,
                 demo = world.name,
                 llm = llm,
+                clockMinuteMs = input.now / MINUTE_MS * MINUTE_MS,
             )
         }
     }
@@ -805,5 +806,7 @@ class CoachCore(private val d: CoachDeps) {
         const val MAX_PENDING_INTENTS = 4
         /** 재시작 전에 들르기로 한 곳이 후보에 다시 보이기를 기다리는 시간 (후보는 20초 안에 다시 만든다) */
         const val ACCEPT_RESTORE_MS = 2 * 60_000L
+        /** 화면에 싣는 코치 시각의 단위 (CoachUiState.clockMinuteMs) */
+        const val MINUTE_MS = 60_000L
     }
 }

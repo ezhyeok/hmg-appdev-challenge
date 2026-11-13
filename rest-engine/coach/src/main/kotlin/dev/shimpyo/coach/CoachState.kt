@@ -89,6 +89,12 @@ data class CoachUiState(
     val occupants: List<Occupant> = emptyList(),
     val lastStop: StopLog? = null,
     val history: List<StopLog> = emptyList(),
+    /**
+     * 코치 시각(시연이면 가상 시각)을 분 단위로 내린 값. 기록 화면의 '몇 분 전'은 이것으로 센다: 정차 기록의 시각이 코치 시각이기
+     * 때문이다. 예전에는 실제 시계를 써서 오후 2시 반에 12:40 시연으로 방금 끝낸 정차가 "1시간 27분 전"으로 보였다 (2026-11-13 영상 녹화).
+     * 분이 바뀔 때만 바뀌어 화면을 매초 다시 그리게 하지 않는다. 첫 틱 전에는 null
+     */
+    val clockMinuteMs: Long? = null,
     val voice: VoiceState = VoiceState.IDLE,
     /** 음성 출력·인식을 쓸 수 있는지 (연결 실패면 false). 설정의 음성 끄기와는 별개다 */
     val ttsAvailable: Boolean = false,

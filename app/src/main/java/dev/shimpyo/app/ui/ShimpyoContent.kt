@@ -324,7 +324,7 @@ fun ShimpyoContent(
                                             onDescribe = { actions.describe(describe) },
                                         )
                                     }
-                                    Screen.HISTORY -> HistoryScreen(state.history, lastStop = state.lastStop)
+                                    Screen.HISTORY -> HistoryScreen(state.history, lastStop = state.lastStop, coachMinuteMs = state.clockMinuteMs)
                                     Screen.SETTINGS -> SettingsScreen(
                                         status = SettingsStatus(state.serviceRunning, state.status, state.llm, state.cabinSupported),
                                         occupants = state.occupants,

@@ -118,6 +118,25 @@ class CoachCoreTest {
     }
 
     @Test
+    fun theScreenGetsTheCoachClockByTheMinuteSoDemoHistoryAgesInDemoTime() = runTest {
+        // 기록 화면은 이 시각으로 '몇 분 전'을 센다 (HistoryNowTest). 정차 시연은 12:40(가상)이다: 실제 시계로 세면 오후 2시 반에
+        // 방금 끝낸 정차가 "1시간 27분 전"이었다 (2026-11-13 영상 녹화)
+        val rig = CoreRig(this)
+        rig.start()
+        rig.command(UiCommand.Demo("stop"))
+        rig.run(2_000)
+        val clock = checkNotNull(rig.state.clockMinuteMs) { "틱이 돌면 코치 시각이 실린다" }
+        assertEquals("분 단위로 내린다 (매초 화면을 다시 그리지 않게)", 0L, clock % 60_000L)
+        val local = java.time.Instant.ofEpochMilli(clock).atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalTime()
+        assertEquals("시연 시각을 싣는다", 12, local.hour)
+        assertTrue("12:40 시연 ($local)", local.minute in 40..41)
+        // 10배속: 실제 1분이면 가상 10분이 흐른다
+        rig.run(60_000)
+        val later = java.time.Instant.ofEpochMilli(checkNotNull(rig.state.clockMinuteMs)).atZone(java.time.ZoneId.of("Asia/Seoul")).toLocalTime()
+        assertTrue("가상 시각으로 흐른다 ($later)", later.minute in 50..51)
+    }
+
+    @Test
     fun voiceOffMeansNoSpeechAtAllButTheCardStillShows() = runTest {
         val rig = CoreRig(this, settings = FakeSettings(listOf(DRIVER, KID), voiceEnabled = false))
         rig.drive(100f)
