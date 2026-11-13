@@ -1,12 +1,12 @@
 {
   "engine": {
-    "tests": 422,
+    "tests": 427,
     "failures": 0,
     "skipped": 0,
     "suites": 38
   },
   "coach": {
-    "tests": 659,
+    "tests": 663,
     "failures": 0,
     "skipped": 0,
     "suites": 51
@@ -23,6 +23,6 @@
     "skipped": 0,
     "suites": 3
   },
-  "passed": 1326,
-  "commit": "fb08f0f"
+  "passed": 1335,
+  "commit": "cd8c6a8"
 }
