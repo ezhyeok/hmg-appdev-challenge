@@ -1,9 +1,9 @@
 {
   "engine": {
-    "tests": 427,
+    "tests": 433,
     "failures": 0,
     "skipped": 0,
-    "suites": 38
+    "suites": 39
   },
   "coach": {
     "tests": 663,
@@ -12,7 +12,7 @@
     "suites": 51
   },
   "app": {
-    "tests": 222,
+    "tests": 223,
     "failures": 0,
     "skipped": 0,
     "suites": 27
@@ -23,6 +23,6 @@
     "skipped": 0,
     "suites": 3
   },
-  "passed": 1335,
-  "commit": "cd8c6a8"
+  "passed": 1342,
+  "commit": "92fa804"
 }

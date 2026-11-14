@@ -1,5 +1,6 @@
 package dev.shimpyo.app.ui.drive
 
+import dev.shimpyo.app.ui.components.ShimpyoIcons
 import dev.shimpyo.coach.CandidatesState
 import dev.shimpyo.coach.CoachUiState
 import dev.shimpyo.coach.GoToFailure
@@ -205,6 +206,25 @@ class DriveModelsTest {
         val unguided = stopCard(running.copy(next = rec(park, nearby)), driving = true)
         assertEquals("진행 방향 가까운 화장실", unguided.context)
         assertFalse("같은 말 두 번: ${unguided.chips}", unguided.chips.contains("가까운 화장실"))
+    }
+
+    @Test
+    fun theFatigueLastChanceSaysRestStopAndShowsTheFatigueChip() {
+        // 졸음의 마지막 기회 (엔진 FatigueLastChanceTest): 화장실이 아니라 쉼터를 묻는다. 맥락 줄·아이콘·단계가 피로의 것이다
+        val oksan = stop("oksan", "옥산휴게소", 4.0)
+        val gap = Reason("FATIGUE_LAST_CHANCE_GAP", "다음 쉼터까지 57분, 쉬실 때는 30분 뒤예요")
+        val p = Prompt("f", PromptKind.LAST_CHANCE, "옥산휴게소를 지나면 57분 동안 쉴 곳이 없고, 그 전에 쉬실 때가 와요. 여기서 쉬어 갈까요?", oksan, Long.MAX_VALUE)
+        val tired = running.copy(fatigue = Gauge(30, Level.WATCH, emptyList()), restroom = Gauge(140, Level.OK, emptyList()))
+        val card = stopCard(tired.copy(prompt = p, promptReasons = listOf(gap), next = rec(oksan, gap)), driving = true)
+        assertEquals("쉼터 공백 전 마지막 기회", card.context)
+        assertEquals(Level.WATCH, card.askingLevel)
+        assertEquals(ShimpyoIcons.Rest, card.icon)
+        assertTrue("피로 칩: ${card.chips}", card.chips.contains("쉴 때 30분 뒤"))
+        assertEquals("정체 전 마지막 쉼터", restroomQuestionContext(listOf("FATIGUE_LAST_CHANCE_CONGESTION"), "들를까요?"))
+        // 화장실과 졸음이 같은 곳이면 둘 다 말한다
+        assertEquals("정체 전 마지막 화장실·쉼터", restroomQuestionContext(listOf("LAST_CHANCE_CONGESTION", "FATIGUE_LAST_CHANCE_CONGESTION"), "들를까요?"))
+        assertEquals("공백 전 마지막 화장실·쉼터", restroomQuestionContext(listOf("LAST_CHANCE_GAP", "FATIGUE_LAST_CHANCE_GAP"), "들를까요?"))
+        assertEquals("정체 전 마지막 화장실·쉼터", restroomQuestionContext(emptyList(), "앞에 1시간 정체가 있어요. 옥산휴게소가 정체 전 마지막 화장실이자 쉼터예요. 들러서 쉬어 갈까요?"))
     }
 
     @Test

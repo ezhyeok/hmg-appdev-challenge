@@ -659,7 +659,7 @@ FS = 15.0
 RED_TEXT = "#B4321A"          # dark red for text on light backgrounds (warning meaning only)
 CALM = "#BFD6FF"              # light accent for 'fine' segments
 HERO_SCREEN = None            # set by --hero-screen; else emu/drive.png, else screen-drive.png
-HERO_OKSAN_DISTANCE = "2.4km"   # the 옥산휴게소 distance on the captured drive screen; the navi schematic repeats it
+HERO_OKSAN_DISTANCE = "2.7km"   # the 옥산휴게소 distance on the captured drive screen; the navi schematic repeats it
 
 
 def TS(x, y, parts, size=FS, anchor="start"):
@@ -744,7 +744,7 @@ def _navi_window(ww, wh):
     # next guidance card and remaining distance
     o.append(R(10, 10, ww - 20, 44, 10, WHITE, LINE, 1))
     o.append(wc_marker(32, 32, 12, True))
-    # 옆의 쉼표 화면 캡처(emu/drive.png)가 보여 주는 옥산휴게소 거리와 같아야 한다 (2026-11-13 캡처: 2.4km)
+    # 옆의 쉼표 화면 캡처(emu/drive.png)가 보여 주는 옥산휴게소 거리와 같아야 한다 (2026-11-15 캡처: 2.7km)
     o.append(TS(52, 38, [(HERO_OKSAN_DISTANCE + "  ", 800, INK), ("옥산휴게소", 600, INK2)], 16))
     o.append(R(0, wh - 34, ww, 34, 0, WHITE))
     o.append(L(0, wh - 34, ww, wh - 34, LINE, 1))
@@ -791,9 +791,9 @@ def fig_hero(screen=None):
     colw = W - 12 - x0
     b.append(TS(x0, 44, [("차에는 주행가능거리,", 800, INK)], 23))
     b.append(TS(x0, 74, [("사람에게는 ", 800, INK), ("쉼표", 800, ACCENT)], 23))
-    sub = wrap("탑승자의 다음 화장실·휴식까지 남은 시간을 계산하는 차량용 휴식 코치", 15.5, colw)
+    sub = wrap("운전자의 졸음 한계와 탑승자의 화장실 시간을 계산하는 차량용 휴식 코치", 15.5, colw)
     b.append(ML(x0, 102, sub, 15.5, 21, 500, INK3))
-    props = [("Wc", "정체 전 마지막 화장실", "경로 위 휴게소·정체를 내비에서 읽어 화장실 공백 앞에서 먼저 묻는다"),
+    props = [("Rest", "졸음·화장실 전 마지막 쉼터", "경로 위 쉼터·정체를 내비에서 읽어, 쉴 곳이 끊기기 전에 먼저 묻는다"),
              ("Group", "탑승자별 화장실·피로 게이지", "아이·어르신·임신부마다 다른 시간, 정차 기록으로 우리 가족에게 맞춰진다"),
              ("Mic", "‘응’ 한마디", "화면 조작 없이 경유지 추가, 정차·휴식은 기어와 도어로 저절로 기록")]
     y = 102 + 21 * (len(sub) - 1) + 28
@@ -883,7 +883,7 @@ def fig_scene():
     b.append(R(bx, by, bw, bh, 14, TINT))
     b.append(R(bx, by, 5, bh, 2.5, ACCENT))
     b.append(T(bx + 20, by + 25, "쉼표라면 4km 전에 먼저 묻는다", 15.5, 800, ACCENT_D))
-    voice = wrap("“앞에 1시간 정체가 있어요. 옥산휴게소가 정체 전 마지막 화장실이에요. 들를까요?” → ‘응’ → 경유지",
+    voice = wrap("“앞에 1시간 정체가 있어요. 옥산휴게소가 정체 전 마지막 화장실이자 쉼터예요. 들러서 쉬어 갈까요?” → ‘응’ → 경유지",
                  15.5, bw - 36)
     b.append(ML(bx + 20, by + 49, voice, 15.5, 21, 500, INK))
     b.append(T(16, H - 12, "고속도로 2차 사고 치사율은 일반 사고의 약 6배 (한국도로공사)", 15, 500, INK3))
@@ -1081,8 +1081,8 @@ def fig_storyboard():
     cw = (W - 32 - gap * 3) / 4.0
     cards = [
         ("정체·휴게소 읽기", "회전 안내에서 옥산·죽암휴게소를, 경로 상태에서 정체 20km를 읽는다"),
-        ("마지막 기회 판정", "정체 안에 화장실이 없고, 죽암휴게소(63분 뒤)가 아이 게이지 50분보다 멀다"),
-        ("4km 전 음성 질문", "“앞에 1시간 정체가 있어요. 옥산휴게소가 정체 전 마지막 화장실이에요. 들를까요?”"),
+        ("마지막 기회 판정", "정체 안에 쉴 곳이 없다. 죽암휴게소(63분 뒤)가 아이 게이지 50분보다 멀고, 운전자 피로 한계도 정체 안에 온다"),
+        ("4km 전 음성 질문", "“앞에 1시간 정체가 있어요. 옥산휴게소가 정체 전 마지막 화장실이자 쉼터예요. 들러서 쉬어 갈까요?”"),
         ("“응” → 경유지", "addWaypoint로 경유지를 넣고, 정차하면 기록해 게이지를 되돌린다"),
     ]
     lines_all = [wrap(body, 15, cw - 28) for _, body in cards]

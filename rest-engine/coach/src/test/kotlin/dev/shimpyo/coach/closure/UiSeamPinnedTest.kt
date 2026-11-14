@@ -51,7 +51,9 @@ class UiSeamPinnedTest {
         rig.untilLastChanceCard()
         val key = rig.state.prompt!!.id
         val d0 = checkNotNull(rig.state.promptStop?.routeDistanceM) { "띄울 때 promptStop이 없다" }
-        assertEquals("띄울 때의 이유", listOf("LAST_CHANCE_CONGESTION"), rig.state.promptReasons.map { it.code })
+        // 귀성길 시연은 운전자도 46분째(오후 2시)라 피로가 60분 정체 안에서 바닥난다: 화장실이자 쉼터의 마지막 기회 (FatigueLastChanceTest)
+        val reasons = listOf("LAST_CHANCE_CONGESTION", "FATIGUE_LAST_CHANCE_CONGESTION")
+        assertEquals("띄울 때의 이유", reasons, rig.state.promptReasons.map { it.code })
         assertEquals("카드 장소와 promptStop은 같은 곳", rig.state.prompt!!.stop!!.id, rig.state.promptStop!!.id)
         val a0 = rig.state.ahead.first { it.id == "oksan" }.routeDistanceM!!
         rig.run(3_000)
@@ -61,7 +63,7 @@ class UiSeamPinnedTest {
         assertTrue("카드가 떠 있는 동안 1초에 50m: 3초 뒤 ${d0.toInt()} → ${d1.toInt()}", d1 <= d0 - moved + 30.0)
         // 앞쪽 후보(계획 타임라인·경로 띠)도 매초 준다 (UI #19: 예전에는 20초마다)
         assertTrue("ahead도 매 틱 줄어든다", rig.state.ahead.first { it.id == "oksan" }.routeDistanceM!! <= a0 - moved + 30.0)
-        assertEquals(listOf("LAST_CHANCE_CONGESTION"), rig.state.promptReasons.map { it.code })
+        assertEquals(reasons, rig.state.promptReasons.map { it.code })
         assertEquals("같은 카드", key, rig.state.prompt!!.id)
 
         // 엔진이 거두거나(500m 안) 카드 수명이 끝난다: 카드·이유·장소가 함께 사라지고, 늦은 '들르기'는 아무 일도 하지 않는다

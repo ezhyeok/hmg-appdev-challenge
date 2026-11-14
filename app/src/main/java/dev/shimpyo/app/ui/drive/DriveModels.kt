@@ -232,9 +232,12 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     val reasons: List<Reason> = state.promptReasons.ifEmpty {
         if (stop != null && prompt.kind == PromptKind.URGENT_RESULT) state.urgent?.firstOrNull { it.stop.id == stop.id }?.why.orEmpty() else emptyList()
     }
-    val restroomKind = prompt.kind == PromptKind.LAST_CHANCE || prompt.kind == PromptKind.URGENT_RESULT || prompt.kind == PromptKind.DEPARTURE
-    val level = (if (restroomKind) state.restroom?.level else state.fatigue?.level) ?: Level.WATCH
     val codes = reasons.map { it.code }
+    // 졸음만의 마지막 기회 (엔진 FatigueLastChanceTest): 화장실이 아니라 쉼터를 묻는다. 단계·아이콘·칩이 피로의 것이다
+    val fatigueOnly = prompt.kind == PromptKind.LAST_CHANCE && fatigueLastChanceOnly(codes, prompt.speech)
+    val restroomKind = !fatigueOnly &&
+        (prompt.kind == PromptKind.LAST_CHANCE || prompt.kind == PromptKind.URGENT_RESULT || prompt.kind == PromptKind.DEPARTURE)
+    val level = (if (restroomKind) state.restroom?.level else state.fatigue?.level) ?: Level.WATCH
     val context = when (prompt.kind) {
         PromptKind.LAST_CHANCE -> restroomQuestionContext(codes, prompt.speech)
         PromptKind.REST_SUGGESTION -> if ("NEXT_MEAL" in codes || prompt.speech.contains("식사")) "식사할 곳" else "쉬어 갈 곳"
@@ -249,6 +252,7 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     val icon = when (prompt.kind) {
         PromptKind.FRESH_AIR -> ShimpyoIcons.Air
         PromptKind.CHECK_IN, PromptKind.REST_SUGGESTION -> if (context == "식사할 곳") ShimpyoIcons.Restaurant else ShimpyoIcons.Rest
+        PromptKind.LAST_CHANCE -> if (fatigueOnly) ShimpyoIcons.Rest else ShimpyoIcons.Wc
         PromptKind.INFO -> ShimpyoIcons.Info
         else -> ShimpyoIcons.Wc
     }
@@ -257,7 +261,7 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
         reasons.forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.takeIf { it !in context }?.let(::add) }
         if (restroomKind) {
             Labels.companionChip(state.occupants.firstOrNull { it.id == state.restroom?.drivenBy })?.let(::add)
-        } else if (prompt.kind != PromptKind.INFO) {
+        } else if (prompt.kind != PromptKind.INFO && !fatigueOnly) {
             state.fatigue?.reasons?.let(::fatigueReason)?.let(::add)
         }
     }.distinct().take(maxChips)
@@ -279,6 +283,23 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
 /** 맥락 줄 문구 */
 private const val CONTEXT_JAM = "정체 전 마지막 화장실"
 private const val CONTEXT_GAP = "화장실 공백 전 마지막 기회"
+private const val CONTEXT_JAM_REST = "정체 전 마지막 쉼터"
+private const val CONTEXT_GAP_REST = "쉼터 공백 전 마지막 기회"
+private const val CONTEXT_JAM_BOTH = "정체 전 마지막 화장실·쉼터"
+private const val CONTEXT_GAP_BOTH = "공백 전 마지막 화장실·쉼터"
+
+/** 졸음의 마지막 기회 이유가 있는가 (엔진 CoachEngine.fatigueLastChanceReason). 이유가 비었으면 엔진 문장으로 본다 */
+private fun hasFatigueLastChance(codes: List<String>, speech: String): Boolean =
+    codes.any { it.startsWith("FATIGUE_LAST_CHANCE") } || speech.contains("쉴 곳이 없") || speech.contains("마지막 쉼터") ||
+        speech.contains("화장실이자 쉼터")
+
+private fun hasRestroomLastChance(codes: List<String>, speech: String): Boolean =
+    codes.any { it.startsWith("LAST_CHANCE_") } || speech.contains("화장실이 없어요") || speech.contains("마지막 화장실") ||
+        speech.contains("화장실도 쉴 곳도")
+
+/** 졸음만의 마지막 기회 (화장실의 마지막 기회와 같은 곳이 아니다) */
+internal fun fatigueLastChanceOnly(codes: List<String>, speech: String): Boolean =
+    hasFatigueLastChance(codes, speech) && !hasRestroomLastChance(codes, speech)
 private const val CONTEXT_NEAR = "가까운 화장실"
 private const val CONTEXT_REQUESTED_RESTROOM = "요청하신 화장실"
 private const val CONTEXT_REQUESTED_CARE = "요청하신 곳"
@@ -302,6 +323,17 @@ private val CONTEXT_LINE_CODES = setOf("NEXT_ACCEPTED", "NEXT_REQUESTED_RESTROOM
  * 5. 이유가 없으면 나머지 세 문장으로. 아는 문장이 아니면 '다음 화장실': 마지막 기회라고 하지 않는다.
  */
 internal fun restroomQuestionContext(codes: List<String>, speech: String): String = when {
+    // 졸음의 마지막 기회 (엔진 FatigueLastChanceTest): 쉼터만, 또는 화장실과 같은 곳이면 둘 다 말한다
+    hasFatigueLastChance(codes, speech) -> {
+        val jam = "LAST_CHANCE_CONGESTION" in codes || "FATIGUE_LAST_CHANCE_CONGESTION" in codes || speech.contains("정체가 있어요") || speech.contains("정체 전")
+        val both = hasRestroomLastChance(codes, speech)
+        when {
+            both && jam -> CONTEXT_JAM_BOTH
+            both -> CONTEXT_GAP_BOTH
+            jam -> CONTEXT_JAM_REST
+            else -> CONTEXT_GAP_REST
+        }
+    }
     "LAST_CHANCE_CONGESTION" in codes -> CONTEXT_JAM
     "LAST_CHANCE_GAP" in codes || "LAST_CHANCE_PREFERENCE" in codes -> CONTEXT_GAP
     // 장소 이름에 들어갈 수 있는 낱말("신정체육공원")이 아니라 엔진 문장의 구절로 가린다
@@ -415,6 +447,7 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
         code == "NEXT_REST" -> "쉬어 갈 곳"
         code == "NEXT_MEAL" -> "식사할 곳"
         // 질문 카드와 같은 순서: 마지막 기회가 먼저, 그다음 요청에 답한 곳. 이유가 놓인 순서와 관계없이 본다
+        codes.any { it.startsWith("FATIGUE_LAST_CHANCE") } -> restroomQuestionContext(codes, "")
         "LAST_CHANCE_CONGESTION" in codes -> CONTEXT_JAM
         codes.any { it.startsWith("LAST_CHANCE_") } -> CONTEXT_GAP
         "NEXT_REQUESTED_RESTROOM" in codes -> CONTEXT_REQUESTED_RESTROOM

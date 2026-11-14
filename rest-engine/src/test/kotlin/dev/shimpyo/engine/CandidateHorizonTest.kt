@@ -110,6 +110,7 @@ class CandidateHorizonTest {
     fun aCompleteListStillWarnsAboutARealGap() {
         // 목록이 목적지까지 다 넣은 것이면(null), 마지막 후보 뒤 2시간 넘는 공백은 진짜 공백이다 (예전 동작 그대로)
         val complete = output(candidatesUntilM = null)
-        assertEquals("LAST_CHANCE_GAP", complete.next?.reasons?.single()?.code)
+        // 2시간 넘는 공백은 운전자의 피로 한계도 넘는다: 같은 곳이 졸음의 마지막 기회이기도 하다 (SPEC 4.3a, FatigueLastChanceTest)
+        assertEquals(listOf("LAST_CHANCE_GAP", "FATIGUE_LAST_CHANCE_GAP"), complete.next?.reasons?.map { it.code })
     }
 }

@@ -60,6 +60,22 @@ open class CoachTexts {
     open fun lastChanceGap(stop: String, gapMin: Int): String =
         "$stop${obj(stop)} 지나면 ${duration(gapMin)} 동안 화장실이 없어요. 들를까요?"
 
+    /** 졸음의 마지막 기회 (공백): "안성휴게소를 지나면 50분 동안 쉴 곳이 없어요. 그 전에 쉬실 때가 와요. 쉬어 갈까요?" */
+    open fun fatigueLastChanceGap(stop: String, gapMin: Int): String =
+        "$stop${obj(stop)} 지나면 ${duration(gapMin)} 동안 쉴 곳이 없고, 그 전에 쉬실 때가 와요. 여기서 쉬어 갈까요?"
+
+    /** 화장실과 졸음의 마지막 기회가 같은 곳 (공백) */
+    open fun lastChanceBothGap(stop: String, gapMin: Int): String =
+        "$stop${obj(stop)} 지나면 ${duration(gapMin)} 동안 화장실도 쉴 곳도 없어요. 들러서 쉬어 갈까요?"
+
+    /** 화장실과 졸음의 마지막 기회가 같은 곳 (정체) */
+    open fun lastChanceBothCongestion(stop: String, congestionMin: Int): String =
+        "앞에 ${duration(congestionMin)} 정체가 있어요. $stop${subj(stop)} 정체 전 마지막 화장실이자 쉼터예요. 들러서 쉬어 갈까요?"
+
+    /** 졸음의 마지막 기회 (정체) */
+    open fun fatigueLastChanceCongestion(stop: String, congestionMin: Int): String =
+        "앞에 ${duration(congestionMin)} 정체가 있고 그 안에 쉴 곳이 없어요. $stop${subj(stop)} 정체 전 마지막 쉼터예요. 쉬어 갈까요?"
+
     /** 게이지가 NOW인데 마지막 기회 규칙이 없을 때 가장 가까운 화장실 */
     open fun restroomNowSuggestion(stop: String, distanceM: Double): String =
         "화장실 여유가 거의 없어요. ${distance(distanceM)} 앞 ${stop}에 들를까요?"
@@ -251,6 +267,10 @@ open class CoachTexts {
     open fun reasonLastChanceCongestion(congestionMin: Int): String =
         "이곳을 지나면 ${duration(congestionMin)} 정체 구간에 화장실이 없어요"
     open fun reasonLastChanceGap(gapMin: Int): String = "이곳을 지나면 다음 화장실까지 ${duration(gapMin)} 걸려요"
+    open fun reasonFatigueLastChanceGap(gapMin: Int, fatigueMin: Int): String =
+        "다음 쉼터까지 ${duration(gapMin)}, 쉬실 때는 ${duration(fatigueMin)} 뒤예요"
+    open fun reasonFatigueLastChanceCongestion(congestionMin: Int): String =
+        "${duration(congestionMin)} 정체 안에서 쉬실 때가 와요"
     open fun reasonLastChanceGroup(occupants: Int): String = "${occupants}명이 타서, 그 사이 누군가 필요해질 수 있어요"
     open fun reasonLastChancePreference(gapMin: Int, limitMin: Int): String =
         "다음 화장실까지 ${duration(gapMin)}, 기준 ${duration(limitMin)}보다 길어요"
