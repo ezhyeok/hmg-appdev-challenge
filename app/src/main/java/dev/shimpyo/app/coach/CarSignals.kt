@@ -4,6 +4,7 @@ import ai.pleos.playground.location.fused.model.LocationData
 import ai.pleos.playground.vehicle.api.model.area.SeatArea
 import ai.pleos.playground.vehicle.constant.area.TurnSignalValue
 import ai.pleos.playground.vehicle.constant.control.CruiseControl
+import android.car.FuelType
 import dev.hmg.pleoskit.CarState
 import dev.hmg.pleoskit.LocationKit
 import dev.hmg.pleoskit.PleosSdkException
@@ -22,6 +23,7 @@ import dev.shimpyo.coach.SignalLink
 import dev.shimpyo.coach.SignalSource
 import dev.shimpyo.coach.SignalWatch
 import dev.shimpyo.engine.Gear
+import dev.shimpyo.engine.EnergyKind
 import dev.shimpyo.engine.TurnSignal
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.first
@@ -82,7 +84,7 @@ class CarSignals(
         launch { car.drivingRestricted.collect { onRestriction(it) } }
     }
 
-    /** AAOS Car 서비스: 기어와 차속 */
+    /** AAOS Car 서비스: 기어·차속·잔여 거리·연료 종류 */
     private fun carLink() = object : SignalLink {
         override val name = "car"
 
@@ -100,6 +102,8 @@ class CarSignals(
             SignalGroup.of(car.gear().source()) { hub.gear = gearOf(it) },
             // CAR_SPEED 권한이 없으면 구독이 실패한다: 이 신호만 간격을 두고 다시 걸어서, 권한을 받으면 그때 걸린다
             SignalGroup.of(car.speedMps().source()) { hub.speedKph = it?.times(3.6f) },
+            SignalGroup.of(car.rangeRemainingM().source(reportReads = true)) { hub.rangeKm = rangeKmOf(it) },
+            SignalGroup.of(car.fuelTypes().source(reportReads = true)) { hub.energyKind = energyKindOf(it) },
         )
     }
 
@@ -169,6 +173,15 @@ class CarSignals(
     }
 
     companion object {
+        fun rangeKmOf(metres: Float?): Double? = metres?.takeIf { it.isFinite() && it >= 0f }?.toDouble()?.div(1000.0)
+
+        fun energyKindOf(types: IntArray?): EnergyKind? = when {
+            types == null || types.isEmpty() || FuelType.UNKNOWN in types -> null
+            types.all { it == FuelType.ELECTRIC } -> EnergyKind.ELECTRIC
+            FuelType.ELECTRIC in types -> null // PHEV: RANGE_REMAINING은 연료와 배터리의 합이다
+            else -> EnergyKind.FUEL
+        }
+
         // android.car.VehicleGear 값
         private const val GEAR_NEUTRAL = 1
         private const val GEAR_REVERSE = 2
@@ -186,7 +199,8 @@ class CarSignals(
         }
 
         /** kit 신호 하나를 coach 계층의 신호 출처로 */
-        private fun <T : Any> ReadSignal<T>.source(name: String = this.name) = SignalSource(name, read = { get() }, changes = { changes() })
+        private fun <T : Any> ReadSignal<T>.source(name: String = this.name, reportReads: Boolean = false) =
+            SignalSource(name, read = { get() }, changes = { changes() }, reportReads = reportReads)
 
         private fun LocationData.toFix() = Fix(latitude, longitude, heading.takeIf { it.isFinite() })
     }

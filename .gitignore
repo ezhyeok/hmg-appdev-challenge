@@ -22,3 +22,7 @@ secrets.properties
 
 # Python bytecode
 __pycache__/
+
+# 공공데이터포털 인증키(데이터를 다시 받을 때만 쓴다)와 내려받은 API 활용가이드 원본
+tools/data/.datagokr-key
+/한국환경공단_*.docx

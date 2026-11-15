@@ -39,6 +39,8 @@ class SignalSource<T : Any>(
     val read: suspend () -> T?,
     /** 바뀔 때마다 내는 흐름. 수집을 시작하면 리스너를 걸고 취소하면 푼다. 걸지 못하면 예외로 끝난다 */
     val changes: () -> Flow<T?>,
+    /** 수신 시각으로 신선도를 재는 신호: 값이 같아도 성공한 재조회는 전달한다. 실패한 조회는 갱신이 아니다. */
+    val reportReads: Boolean = false,
 )
 
 /** 지켜볼 신호 하나와 값을 받을 곳. 값을 모르게 되면(연결이 끊기면) null을 받는다 */
@@ -204,6 +206,7 @@ class SignalCollector(
                 w.onValue(fresh.value)
                 throw SignalStale("value changed without an event")
             }
+            if (w.source.reportReads) w.onValue(fresh.value)
             checked = events
         }
     }

@@ -67,6 +67,7 @@ internal class HighwaySim(
     var steering: (Long, Random) -> Float = ::normalSteer
     var cabin = CabinState()
     var speedNoise = 0.6
+    var transformInput: (CoachInput) -> CoachInput = { it }
     val outputs = ArrayList<Pair<Double, CoachOutput>>()
     val prompts = ArrayList<Triple<Double, Long, Prompt>>()
     private val seenPromptIds = HashSet<String>()
@@ -108,10 +109,10 @@ internal class HighwaySim(
             brake = false, turnSignal = TurnSignal.NONE, cruiseActive = false,
         )
         val out = engine.update(
-            CoachInput(
+            transformInput(CoachInput(
                 now = now, gear = gear, speedKph = v.toFloat(), samples = listOf(sample), doorOpened = door,
                 cabin = cabin, route = routeState(), candidates = candidates(), intent = intent,
-            ),
+            )),
         )
         last = out
         out.prompt?.let { p -> if (seenPromptIds.add(p.id)) prompts += Triple(posM, now, p) }

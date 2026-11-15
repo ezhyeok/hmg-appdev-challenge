@@ -7,15 +7,16 @@ import android.content.pm.PackageManager
 /**
  * 실행 중에 사용자에게 요청해야 하는(dangerous) 권한.
  *
- * `pleos.car.permission.*`의 대부분은 Manifest 선언만으로 되지만, 아래 둘은 선언만 하면 SecurityException이 난다
- * (에뮬레이터에서 확인). adb로 줄 때는 AAOS 포그라운드 사용자에게 줘야 한다:
+ * `pleos.car.permission.*`의 대부분은 Manifest 선언만으로 되지만, 차속·위치는 선언만 하면 SecurityException이 난다
+ * (에뮬레이터에서 확인). 차량 에너지도 AAOS API 34에서 dangerous다. adb로 줄 때는 AAOS 포그라운드 사용자에게 줘야 한다:
  * `adb shell pm grant --user current <패키지> <권한>`
  */
 object PleosPermissions {
     const val CAR_SPEED = "android.car.permission.CAR_SPEED"
+    const val CAR_ENERGY = "android.car.permission.CAR_ENERGY"
     const val FUSED_LOCATION = "pleos.car.permission.FUSED_LOCATION"
 
-    val RUNTIME = listOf(CAR_SPEED, FUSED_LOCATION)
+    val RUNTIME = listOf(CAR_SPEED, FUSED_LOCATION, CAR_ENERGY)
 
     /** [permissions] 중 Manifest에 선언했지만 아직 허용되지 않은 것. */
     fun missing(context: Context, permissions: List<String> = RUNTIME): List<String> {

@@ -334,7 +334,11 @@ internal class RouteContext(private val config: CoachConfig) {
             c.facilities.food && c.parkable && c.openNow != false && c.directionOk != false
 
         /** 주유·충전할 수 있는 곳 */
-        fun isFuelOpportunity(c: StopCandidate): Boolean =
-            (c.facilities.fuel || c.facilities.evCharger) && c.parkable && c.openNow != false && c.directionOk != false
+        fun isFuelOpportunity(c: StopCandidate, energy: EnergyKind? = null): Boolean =
+            (when (energy) {
+                EnergyKind.ELECTRIC -> c.facilities.evCharger
+                EnergyKind.FUEL -> c.facilities.fuel
+                null -> c.facilities.fuel || c.facilities.evCharger
+            }) && isRestOpportunity(c)
     }
 }

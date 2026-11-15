@@ -51,6 +51,7 @@ val DemoScenarios: List<DemoScenario> = listOf(
     DemoScenario("fatigue", "오후 휴식 권유", "오후 3시 · 95분째", ShimpyoIcons.Rest),
     DemoScenario("urgent", "도심 급해", "밤 11시 · 영아 동승", ShimpyoIcons.Wc),
     DemoScenario("stop", "휴게소 정차", "10배속 · 회복", ShimpyoIcons.Parking),
+    DemoScenario("charge", "차도 사람도", "옥산에서 화장실·충전", ShimpyoIcons.GasStation),
     // 일상 확장: 차가 서 있고 목적지가 있을 때의 '출발 전 한마디'
     DemoScenario("departure", "출발 전", "아침 · 아이와 1시간 거리", ShimpyoIcons.Car),
     DemoScenario(null, "시연 끝내기", "실제 신호로 돌아가기", ShimpyoIcons.Stop),

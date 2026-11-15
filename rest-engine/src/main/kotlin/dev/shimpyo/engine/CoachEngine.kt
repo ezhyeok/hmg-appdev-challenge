@@ -110,7 +110,9 @@ class CoachEngine(
     }
 
     private var accepted: Accepted? = null
-    /** 지난 update의 마지막 기회 ([noteAccepted]가 고른 곳이 묶음 때문에 앞당겨진 마지막 기회인지 보는 데 쓴다) */
+    private var energyKind: EnergyKind? = null
+    private var usableRangeM: Double? = null
+    /** 지난 update의 화장실 마지막 기회. 수락한 곳의 그룹 학습 제외 판정에 쓴다. */
     private var latestLastChance: GapAnalyzer.LastChance? = null
     private var restWantedAt = NONE
     private var mealWantedAt = NONE
@@ -171,6 +173,11 @@ class CoachEngine(
         }
         val mono = clock.mono
         currentCandidates = input.candidates
+        // 신호를 잃으면 이전 잔량을 근거로 묻던 자동 질문도 거둔다. 사용자가 직접 요청한 주유 응답은 유지한다.
+        policy.active?.takeIf { q -> !q.userInitiated && q.reasons.any { it.code == "RANGE_LAST_CHANCE" || it.code == "ENERGY_BUNDLE" } }
+            ?.takeIf { input.rangeKm == null || energyKind != input.energy }?.let { policy.withdraw(it.kind) }
+        energyKind = input.energy
+        usableRangeM = input.rangeKm?.let { (it - config.energyReserveKm(input.energy)) * 1000.0 }
 
         // 1. 표본
         val samples = input.samples
@@ -289,6 +296,23 @@ class CoachEngine(
             route.opportunities(input.candidates, fatigueOpps, RouteContext::isRestOpportunity)
             gap.analyze(fatigueOpps, route, fatigueGauge.minutes.toDouble(), sensitive = false, preferredMaxGapMin = null)
         } else null
+        route.opportunities(input.candidates, fuelOpps) { RouteContext.isFuelOpportunity(it, input.energy) }
+        val rangeLast = gap.analyzeRange(fuelOpps, route, usableRangeM)
+        val selectedLast = selectLastChance(buildList {
+            lastChance?.let { add(LastChanceOption(it, Purpose.RESTROOM, restroom.level, lastChanceReasons(it))) }
+            fatigueLast?.let { add(LastChanceOption(it, Purpose.REST, fatigueGauge.level, listOf(fatigueLastChanceReason(it, fatigueGauge)))) }
+            rangeLast?.let { lc ->
+                val reasons = buildList {
+                    add(Reason("RANGE_LAST_CHANCE", texts.reasonRangeLastChance(
+                        leftKm = input.rangeKm!! - lc.rangeEndM / 1000.0,
+                        gapKm = (lc.gapM / 1000).roundToInt(), energy = input.energy,
+                        lowerBound = lc.gapLowerBound, endIsDestination = lc.endIsDestination,
+                        reserveKm = config.energyReserveKm(input.energy))))
+                    if (lc.rangeTight) add(Reason("RANGE_TIGHT", texts.reasonRangeTight()))
+                }
+                add(LastChanceOption(lc, Purpose.FUEL, Level.SOON, reasons))
+            }
+        }, texts, input.energy)
         trackAccepted(mono)
 
         val urgentList = if (urgentRequested) {
@@ -436,11 +460,11 @@ class CoachEngine(
             addCand(
                 if (t != null) {
                     goingThere(t.stop, t.distanceM, fresh) ?: ask(
-                        PromptKind.REST_SUGGESTION, texts.fuelSuggestion(t.stop.name, t.distanceM), t.stop, t.distanceM,
+                        PromptKind.REST_SUGGESTION, texts.fuelSuggestion(t.stop.name, t.distanceM, input.energy), t.stop, t.distanceM,
                         fatigueGauge.level, user = true, fresh = fresh, purposes = purposesFor(t.stop, Purpose.FUEL, ctx),
                     )
                 } else {
-                    ask(PromptKind.INFO, texts.fuelNone(), user = true, fresh = fresh)
+                    ask(PromptKind.INFO, texts.fuelNone(input.energy), user = true, fresh = fresh)
                 },
                 fuelAnswer,
             )
@@ -486,31 +510,13 @@ class CoachEngine(
                     ),
                     null,
                 )
-            } else if (lastChance != null && (fatigueLast == null || fatigueLast.opp.stop.id == lastChance.opp.stop.id ||
-                    fatigueLast.opp.distanceM >= lastChance.opp.distanceM)
-            ) {
-                // 화장실과 졸음의 마지막 기회가 같은 곳이면 질문 하나에 이유 둘, 정차 목적도 둘이다
-                val both = fatigueLast != null && fatigueLast.opp.stop.id == lastChance.opp.stop.id
-                addCand(
-                    ask(
-                        PromptKind.LAST_CHANCE, if (both) lastChanceBothSpeech(lastChance) else lastChanceSpeech(lastChance),
-                        lastChance.opp.stop, lastChance.opp.distanceM, restroom.level,
-                        purposes = purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx) + (if (both) setOf(Purpose.REST) else emptySet()),
-                        reasons = lastChanceReasons(lastChance) + (if (both) listOf(fatigueLastChanceReason(fatigueLast!!, fatigueGauge)) else emptyList()),
-                        groupDriven = lastChance.groupDriven,
-                    ),
-                    null,
-                )
-            } else if (fatigueLast != null) {
-                // 졸음만의 마지막 기회, 또는 화장실의 것보다 앞에 있다 (지금 정해야 하는 것이 먼저다)
-                addCand(
-                    ask(
-                        PromptKind.LAST_CHANCE, fatigueLastChanceSpeech(fatigueLast), fatigueLast.opp.stop, fatigueLast.opp.distanceM,
-                        fatigueGauge.level, purposes = purposesFor(fatigueLast.opp.stop, Purpose.REST, ctx),
-                        reasons = listOf(fatigueLastChanceReason(fatigueLast, fatigueGauge)),
-                    ),
-                    null,
-                )
+            } else if (selectedLast != null) {
+                addCand(ask(
+                    PromptKind.LAST_CHANCE, selectedLast.speech, selectedLast.opp.stop, selectedLast.opp.distanceM,
+                    selectedLast.level,
+                    purposes = purposesFor(selectedLast.opp.stop, selectedLast.purposes.first(), ctx) + selectedLast.purposes,
+                    reasons = selectedLast.reasons, groupDriven = selectedLast.groupDriven,
+                ), null)
             }
             if (fatigueGauge.level == Level.NOW) {
                 val t = restTarget
@@ -566,7 +572,7 @@ class CoachEngine(
             routeFirst == null || nearbyRanked!!.totalTimeS + NOW_NEARBY_MARGIN_S < routeFirst.arriveS + ranker.parkWalkMin(routeFirst.stop) * 60.0
         }
         val next = recommend(ctx, urgentList, lastChance, lastChanceIsNearest, nowRestroom, wantsRest, restTarget, mealTarget, input.candidates, speed, nowNearby, nearbyFallback,
-            fatigueLast, fatigueGauge)
+            selectedLast)
 
         // 8. 공조 (피로와 별개인 편의 기능. 앱은 사용자가 허용했을 때만 실행하고, 외기는 1~2분 뒤 되돌린다)
         val coolDown = !freshAir && fatigueGauge.level >= Level.SOON && input.cabin.hvacOn == true &&
@@ -675,6 +681,7 @@ class CoachEngine(
             care = care,
             rangeM = input.rangeKm?.let { it * 1000.0 },
             sleepyCurveS = fe.sleepyCurveMin * 60.0,
+            energy = input.energy,
         )
         return planner.plan(opps, ctx, n, input.now, local)
     }
@@ -728,10 +735,11 @@ class CoachEngine(
             care = careAfter,
             rangeM = rangeM,
             sleepyCurveS = sleepyCurveS,
+            energy = input.energy,
         )
         val after = planner.plan(ahead, ctx, n, departWall, local)
-        val note = if (urgent) Reason("PLAN_HERE_NOW", texts.planHereNow(here.name, purposes, dwellMin))
-        else Reason("PLAN_HERE", texts.planHere(here.name, purposes))
+        val note = if (urgent) Reason("PLAN_HERE_NOW", texts.planHereNow(here.name, purposes, dwellMin, input.energy))
+        else Reason("PLAN_HERE", texts.planHere(here.name, purposes, input.energy))
         return after.copy(notes = listOf(note) + after.notes)
     }
 
@@ -1035,7 +1043,21 @@ class CoachEngine(
         return if (a.isFinite()) stop.copy(etaS = a) else stop
     }
 
-    private fun rec(stop: StopCandidate, purposes: Set<Purpose>, reasons: List<Reason>) = Recommendation(withEta(stop), purposes, reasons)
+    /** 함께 들르기는 실제 목적지가 가용 거리 밖이고, 그곳에 맞는 시설이 있을 때만 붙인다. */
+    private fun energyBundleReason(stop: StopCandidate, purposes: Set<Purpose>): Reason? {
+        val usable = usableRangeM ?: return null
+        if (Purpose.FUEL in purposes || (Purpose.RESTROOM !in purposes && Purpose.REST !in purposes)) return null
+        if (!route.guiding || !route.destM.isFinite() || route.destM <= usable || !RouteContext.isFuelOpportunity(stop, energyKind)) return null
+        val distance = route.distanceOf(stop)
+        if (!distance.isFinite() || distance < 0 || distance >= route.destM || usable - distance >= config.energyBundleWindowKm * 1000 - 1e-6) return null
+        return Reason("ENERGY_BUNDLE", texts.reasonEnergyBundle(energyKind))
+    }
+
+    private fun rec(stop: StopCandidate, purposes: Set<Purpose>, reasons: List<Reason>): Recommendation {
+        val bundle = energyBundleReason(stop, purposes)
+        return Recommendation(withEta(stop), if (bundle != null) purposes + Purpose.FUEL else purposes,
+            if (bundle != null) reasons + bundle else reasons)
+    }
 
     private fun ask(
         kind: PromptKind,
@@ -1050,7 +1072,16 @@ class CoachEngine(
         groupDriven: Boolean = false,
         cooldownOnExpiry: Boolean = true,
         city: Boolean = false,
-    ) = PromptPolicy.Candidate(kind, speech, stop?.let(::withEta), distanceM, level, user, purposes, fresh, reasons, groupDriven, cooldownOnExpiry, city)
+    ): PromptPolicy.Candidate {
+        val bundle = stop?.let { energyBundleReason(it, purposes) }
+        // 이유를 말하는 앞 문장은 지키고 마지막 질문만 바꾼다 (졸림 조언도 같은 규칙으로 남는다)
+        val combinedSpeech = if (bundle == null) speech else if (Purpose.REST in purposes && speech.startsWith(texts.sleepyAdvice(canSwapDriver())))
+            "${texts.sleepyAdvice(canSwapDriver())} ${texts.energyBundleAction(purposes, energyKind)}"
+        else texts.withEnergyBundle(speech, stop!!.name, purposes, energyKind)
+        return PromptPolicy.Candidate(kind, combinedSpeech, stop?.let(::withEta), distanceM, level, user,
+            if (bundle != null) purposes + Purpose.FUEL else purposes, fresh,
+            if (bundle != null) reasons + bundle else reasons, groupDriven, cooldownOnExpiry, city)
+    }
 
     /**
      * 사용자의 말에 답할 곳([stop])이 이미 들르기로 한 곳이면 '들를까요?' 대신 낼 안내, 아니면 null.
@@ -1101,10 +1132,9 @@ class CoachEngine(
         speed: Float?,
         nowNearby: StopCandidate? = null,
         nearbyBest: StopCandidate? = null,
-        fatigueLast: GapAnalyzer.LastChance? = null,
-        fatigueGauge: Gauge? = null,
+        selectedLast: LastChanceSelection? = null,
     ): Recommendation? {
-        askedRestroomStop(speed)?.let { return it }
+        askedStop(speed)?.let { return it }
         accepted?.let { a ->
             return rec(a.stop, a.purposes, listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())))
         }
@@ -1120,18 +1150,8 @@ class CoachEngine(
             val stop = best?.stop ?: nowRestroom?.stop
             if (stop != null) return rec(stop, purposesFor(stop, Purpose.RESTROOM, ctx), listOf(nearestRestroomReason()))
         }
-        // 졸음의 마지막 기회 (SPEC 4.3a): 질문과 같은 규칙으로, 같은 곳이면 이유·목적을 더하고, 더 가까우면 그곳이 먼저다
-        val fl = fatigueLast?.takeIf { fatigueGauge != null }
-        if (lastChance != null && (fl == null || fl.opp.stop.id == lastChance.opp.stop.id || fl.opp.distanceM >= lastChance.opp.distanceM)) {
-            val both = fl != null && fl.opp.stop.id == lastChance.opp.stop.id
-            return rec(
-                lastChance.opp.stop,
-                purposesFor(lastChance.opp.stop, Purpose.RESTROOM, ctx) + (if (both) setOf(Purpose.REST) else emptySet()),
-                lastChanceReasons(lastChance) + (if (both) listOf(fatigueLastChanceReason(fl!!, fatigueGauge!!)) else emptyList()),
-            )
-        }
-        if (fl != null) {
-            return rec(fl.opp.stop, purposesFor(fl.opp.stop, Purpose.REST, ctx), listOf(fatigueLastChanceReason(fl, fatigueGauge!!)))
+        selectedLast?.let { selected ->
+            return rec(selected.opp.stop, purposesFor(selected.opp.stop, selected.purposes.first(), ctx) + selected.purposes, selected.reasons)
         }
         if (wantsRest && restTarget != null) {
             return rec(restTarget.stop, purposesFor(restTarget.stop, Purpose.REST, ctx), listOf(Reason("NEXT_REST", texts.reasonNextRest())))
@@ -1195,9 +1215,9 @@ class CoachEngine(
      * 있어서 질문이 떠 있는 내내 맞춘다. 거리는 지금 후보의 값이다 (지금 목록에 없으면 물은 때의 거리를 지금 값처럼 내보내지 않는다).
      * 급해 결과의 도착 시간은 순위에 쓴 주행 시간이다 ([urgentStop]).
      */
-    private fun askedRestroomStop(speed: Float?): Recommendation? {
+    private fun askedStop(speed: Float?): Recommendation? {
         val q = policy.active ?: return null
-        if ((q.kind != PromptKind.LAST_CHANCE && q.kind != PromptKind.URGENT_RESULT) || q.reasons.isEmpty()) return null
+        if ((q.kind != PromptKind.LAST_CHANCE && q.kind != PromptKind.URGENT_RESULT && q.kind != PromptKind.REST_SUGGESTION) || q.reasons.isEmpty()) return null
         val id = q.targetId ?: return null
         val cur = findStop(id) ?: return null
         val d = route.distanceOf(cur)
@@ -1260,7 +1280,7 @@ class CoachEngine(
     }
 
     private fun pickFuelTarget(candidates: List<StopCandidate>): Opportunity? {
-        route.opportunities(candidates, fuelOpps, RouteContext::isFuelOpportunity)
+        route.opportunities(candidates, fuelOpps) { RouteContext.isFuelOpportunity(it, energyKind) }
         return fuelOpps.firstOrNull { it.distanceM >= config.askWindowNearM }
     }
 
@@ -1286,16 +1306,6 @@ class CoachEngine(
         else -> texts.lastChanceGap(lc.opp.stop.name, (lc.gapS / 60.0).roundToInt())
     }
 
-    private fun lastChanceBothSpeech(lc: GapAnalyzer.LastChance): String = when (lc.trigger) {
-        GapAnalyzer.Trigger.CONGESTION -> texts.lastChanceBothCongestion(lc.opp.stop.name, (lc.congestionS / 60.0).roundToInt())
-        else -> texts.lastChanceBothGap(lc.opp.stop.name, (lc.gapS / 60.0).roundToInt())
-    }
-
-    private fun fatigueLastChanceSpeech(lc: GapAnalyzer.LastChance): String = when (lc.trigger) {
-        GapAnalyzer.Trigger.CONGESTION -> texts.fatigueLastChanceCongestion(lc.opp.stop.name, (lc.congestionS / 60.0).roundToInt())
-        else -> texts.fatigueLastChanceGap(lc.opp.stop.name, (lc.gapS / 60.0).roundToInt())
-    }
-
     private fun fatigueLastChanceReason(lc: GapAnalyzer.LastChance, gauge: Gauge): Reason = when (lc.trigger) {
         GapAnalyzer.Trigger.CONGESTION ->
             Reason("FATIGUE_LAST_CHANCE_CONGESTION", texts.reasonFatigueLastChanceCongestion((lc.congestionS / 60.0).roundToInt()))
@@ -1310,6 +1320,7 @@ class CoachEngine(
     private fun lastChanceReason(lc: GapAnalyzer.LastChance): Reason = when (lc.trigger) {
         GapAnalyzer.Trigger.CONGESTION ->
             Reason("LAST_CHANCE_CONGESTION", texts.reasonLastChanceCongestion((lc.congestionS / 60.0).roundToInt()))
+        GapAnalyzer.Trigger.RANGE -> error("Range reasons are distance based")
         GapAnalyzer.Trigger.GAUGE -> Reason("LAST_CHANCE_GAP", texts.reasonLastChanceGap((lc.gapS / 60.0).roundToInt()))
         GapAnalyzer.Trigger.PREFERENCE -> Reason(
             "LAST_CHANCE_PREFERENCE",

@@ -268,6 +268,7 @@ class CoachCore(private val d: CoachDeps) {
         val pos = a.world.position(real)
         val gear = d.hub.gear
         val speed = d.hub.speedKph
+        val energy = d.hub.energySnapshot()
         val heading = travel.update(real, speed, gear)
         val (samples, door) = d.hub.drain(t)
 
@@ -308,6 +309,8 @@ class CoachCore(private val d: CoachDeps) {
                 now = t,
                 gear = gear,
                 speedKph = speed,
+                rangeKm = energy.rangeKm,
+                energy = energy.kind,
                 samples = samples,
                 doorOpened = door || (!waiting && doorWhileWaiting),
                 cabin = CabinState(hvacOn = d.hub.hvacOn, recirculation = d.hub.recirculation, setTempC = d.hub.setTempC),
@@ -384,6 +387,8 @@ class CoachCore(private val d: CoachDeps) {
                 parked = out?.parked ?: parked,
                 // 차속은 시연 패널이 정수로만 보여 준다. 소수점 흔들림으로 매초 상태가 바뀌지 않게 정수로 올린다
                 speedKph = input.speedKph?.let { truncate(it) },
+                rangeKm = input.rangeKm,
+                energy = input.energy,
                 guiding = r?.guiding == true,
                 destinationName = world.destinationName(navi.destination?.name),
                 remainDistanceM = r?.remainDistanceM,

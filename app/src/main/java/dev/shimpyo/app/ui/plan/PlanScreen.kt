@@ -235,7 +235,7 @@ fun PlanScreen(
             }
             Column(Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()).padding(bottom = layout.bottom)) {
                 Spacer(Modifier.height(layout.gap))
-                Timeline(rows, noOpportunityText(state), busy, onGoTo)
+                Timeline(rows, noOpportunityText(state), busy, state.energy, onGoTo)
             }
         }
     } else {
@@ -247,7 +247,7 @@ fun PlanScreen(
             Spacer(Modifier.height(layout.gap))
             StripCard(state)
             Spacer(Modifier.height(layout.gap))
-            Timeline(rows, noOpportunityText(state), busy, onGoTo)
+            Timeline(rows, noOpportunityText(state), busy, state.energy, onGoTo)
         }
     }
 }
@@ -355,7 +355,7 @@ private val RailColumn = 72.dp
 private const val ARRIVED_M = 100.0
 
 @Composable
-private fun Timeline(rows: List<TimelineRow>, emptyText: String, busy: GoToBusy?, onGoTo: (StopCandidate) -> Unit) {
+private fun Timeline(rows: List<TimelineRow>, emptyText: String, busy: GoToBusy?, energy: dev.shimpyo.engine.EnergyKind?, onGoTo: (StopCandidate) -> Unit) {
     val c = ShimpyoTheme.colors
     Column(Modifier.fillMaxWidth()) {
         if (rows.none { it is TimelineRow.Stop }) {
@@ -370,7 +370,7 @@ private fun Timeline(rows: List<TimelineRow>, emptyText: String, busy: GoToBusy?
                 TimelineRow.Now -> TimelineLine(RailKind.ROUTE, top = false, bottom = !last, marker = { NowMarker() }) {
                     RowText("지금", "0km", null, strong = true)
                 }
-                is TimelineRow.Stop -> StopLine(row, first, last, busy, onGoTo)
+                is TimelineRow.Stop -> StopLine(row, first, last, busy, energy, onGoTo)
                 is TimelineRow.Gap -> TimelineLine(RailKind.GAP, top = !first, bottom = !last, marker = {}) {
                     EventText(
                         "화장실 공백 ${Labels.duration(row.gap.minutes)}",
@@ -394,7 +394,7 @@ private fun Timeline(rows: List<TimelineRow>, emptyText: String, busy: GoToBusy?
 }
 
 @Composable
-private fun StopLine(row: TimelineRow.Stop, first: Boolean, last: Boolean, busy: GoToBusy?, onGoTo: (StopCandidate) -> Unit) {
+private fun StopLine(row: TimelineRow.Stop, first: Boolean, last: Boolean, busy: GoToBusy?, energy: dev.shimpyo.engine.EnergyKind?, onGoTo: (StopCandidate) -> Unit) {
     val c = ShimpyoTheme.colors
     val p = row.planned
     val pending = busy?.stopId == row.stop.id
@@ -424,7 +424,7 @@ private fun StopLine(row: TimelineRow.Stop, first: Boolean, last: Boolean, busy:
                 Spacer(Modifier.height(Dimens.Space.s))
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     ChipFlow(Modifier.weight(1f), spacing = Dimens.Space.xs, maxLines = 2) {
-                        Labels.sortedPurposes(p.purposes).forEach { SmallChip(Labels.purposeName(it), icon = Labels.purposeIcon(it)) }
+                        Labels.sortedPurposes(p.purposes).forEach { SmallChip(Labels.purposeName(it, energy), icon = Labels.purposeIcon(it)) }
                         SmallChip("${p.dwellMin}분", icon = ShimpyoIcons.Schedule, container = Color.Transparent, content = c.textSecondary)
                     }
                     Spacer(Modifier.width(Dimens.Space.s))

@@ -2,6 +2,7 @@ package dev.shimpyo.coach
 
 import dev.shimpyo.engine.CoachConfig
 import dev.shimpyo.engine.CoachEngine
+import dev.shimpyo.engine.EnergyKind
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.PersonalMemory
 import dev.shimpyo.engine.StopCandidate
@@ -36,6 +37,9 @@ fun interface ElapsedClock {
 }
 
 // ------------------------------------------------------------ 내비
+
+/** 차량 신호 경계의 최신 에너지 정보. 단위는 km; 읽지 못했거나 오래됐으면 각 값은 null. */
+data class VehicleEnergy(val rangeKm: Double? = null, val kind: EnergyKind? = null)
 
 interface NaviPort {
     suspend fun connect()

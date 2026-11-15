@@ -29,6 +29,8 @@
     <!-- AAOS 표준 Car API: 기어(normal), 차속(실행 중 요청) -->
     <uses-permission android:name="android.car.permission.CAR_POWERTRAIN" />
     <uses-permission android:name="android.car.permission.CAR_SPEED" />
+    <uses-permission android:name="android.car.permission.CAR_ENERGY" />
+    <uses-permission android:name="android.car.permission.CAR_INFO" />
 
     <application
         android:name=".ShimpyoApp"

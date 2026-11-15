@@ -142,10 +142,70 @@ open class CoachTexts {
     open fun careHere(stop: String): String = "지금 서 있는 ${stop}에서 잠깐 쉬어 갈 수 있어요."
 
     /** 주유 요청에 대한 응답 */
-    open fun fuelSuggestion(stop: String, distanceM: Double): String =
-        "${distance(distanceM)} 앞 ${stop}에서 주유할 수 있어요. 들를까요?"
+    open fun fuelSuggestion(stop: String, distanceM: Double, energy: EnergyKind? = null): String =
+        "${distance(distanceM)} 앞 ${stop}에서 ${energyWord(energy)}할 수 있어요. 들를까요?"
 
-    open fun fuelNone(): String = "경로 앞에서 주유할 수 있는 곳을 아직 찾지 못했어요."
+    open fun fuelNone(energy: EnergyKind? = null): String = "경로 앞에서 ${energyWord(energy)}할 수 있는 곳을 아직 찾지 못했어요."
+
+    open fun energyWord(energy: EnergyKind?): String = if (energy == EnergyKind.ELECTRIC) "충전" else "주유"
+
+    /** 에너지 단독 / 화장실 / 휴식 / 셋 모두: 두 문장 안에서 한 번 묻는다. */
+    open fun energyLastChance(stop: String, purposes: Set<Purpose>, energy: EnergyKind?, tight: Boolean = false): String {
+        val word = energyWord(energy)
+        val what = when {
+            Purpose.RESTROOM in purposes && Purpose.REST in purposes -> "화장실도 휴식도 ${word}도 되는"
+            Purpose.RESTROOM in purposes -> "화장실도 ${word}도 되는"
+            Purpose.REST in purposes -> "휴식도 ${word}도 되는"
+            else -> "${word}할 수 있는"
+        }
+        val head = if (tight) "주행가능거리가 빠듯해요." else "$stop${subj(stop)} $what 마지막 곳이에요."
+        val action = when {
+            Purpose.RESTROOM in purposes && Purpose.REST in purposes -> "화장실도 다녀오고 쉬어 갈까요?"
+            Purpose.RESTROOM in purposes -> "화장실 다녀올까요?"
+            else -> "쉬어 갈까요?"
+        }
+        val where = if (tight) "${stop}에서 " else ""
+        return if (energy == EnergyKind.ELECTRIC) "$head ${where}충전하는 동안 $action"
+        else "$head ${where}주유하고 $action"
+    }
+
+    open fun energyBundle(stop: String, purposes: Set<Purpose>, energy: EnergyKind?): String =
+        "${stop}에서 ${energyWord(energy)}도 함께 해요. ${energyBundleAction(purposes, energy)}"
+
+    /**
+     * 사람의 질문에 차의 목적을 더한다: 앞 문장(정체·공백·졸음 같은 이유)은 그대로 두고 마지막 질문만 '충전하는 동안 …?'으로 바꾼다.
+     * 질문으로 끝나지 않으면 고칠 곳을 모르니 묶음 문장을 따로 낸다.
+     */
+    open fun withEnergyBundle(speech: String, stop: String, purposes: Set<Purpose>, energy: EnergyKind?): String {
+        val s = speech.trim()
+        if (!s.endsWith("?")) return energyBundle(stop, purposes, energy)
+        val cut = s.dropLast(1).lastIndexOfAny(charArrayOf('.', '?', '!'))
+        val head = if (cut >= 0) s.substring(0, cut + 1).trim() + " " else ""
+        return head + energyBundleAction(purposes, energy)
+    }
+
+    open fun energyBundleAction(purposes: Set<Purpose>, energy: EnergyKind?): String {
+        val action = when {
+            Purpose.RESTROOM in purposes && Purpose.REST in purposes -> "화장실도 다녀오고 쉬어 갈까요?"
+            Purpose.RESTROOM in purposes -> "화장실 다녀올까요?"
+            else -> "쉬어 갈까요?"
+        }
+        return if (energy == EnergyKind.ELECTRIC) "충전하는 동안 $action" else "주유하고 $action"
+    }
+
+    /** 도착 시 잔여 km는 내림 표시하되, 도달 여부는 내림 전 값으로 판단한다. 숫자·km는 Labels 칩 파서 계약. */
+    open fun reasonRangeLastChance(
+        leftKm: Double, gapKm: Int, energy: EnergyKind?, lowerBound: Boolean, endIsDestination: Boolean, reserveKm: Double,
+    ): String {
+        if (lowerBound) return "확인된 경로 ${gapKm}km 동안 ${energyWord(energy)}할 곳이 없어요"
+        val end = if (endIsDestination) "목적지" else "다음 ${energyWord(energy)}할 곳"
+        if (leftKm <= 0.0) return "여기를 지나면 ${end}까지 닿지 못해요"
+        val arrival = if (endIsDestination) "목적지에 닿으면" else "${end}에서 주행가능거리가"
+        return "여기를 지나면 $arrival ${leftKm.toInt()}km 남아요 (예비 ${reserveKm.toString().removeSuffix(".0")}km 미만)"
+    }
+    open fun reasonRangeTight(): String = "주행가능거리가 빠듯해 가장 가까운 곳에 들러야 해요"
+    open fun reasonEnergyBundle(energy: EnergyKind?): String =
+        if (energy == EnergyKind.ELECTRIC) "목적지 전 충전이 필요해요. 충전하며 휴식해요" else "목적지 전 주유가 필요해요. 주유하며 함께 쉬어요"
 
     /**
      * 상태 확인. 졸림 자기보고가 카메라 없는 앱에서 가장 믿을 만한 신호다 (ai-science.md 1장).
@@ -314,33 +374,34 @@ open class CoachTexts {
     open fun departureAccepted(): String = "좋아요. 다녀오세요"
 
     /** 서 있는 곳에서 할 일 ("화장실·휴식·식사") */
-    open fun planHereWhat(purposes: Set<Purpose>): String = Purpose.entries.filter { it in purposes }.joinToString("·") {
+    open fun planHereWhat(purposes: Set<Purpose>, energy: EnergyKind? = null): String = Purpose.entries.filter { it in purposes }.joinToString("·") {
         when (it) {
             Purpose.RESTROOM -> "화장실"
             Purpose.REST -> "휴식"
             Purpose.MEAL -> "식사"
-            Purpose.FUEL -> "주유"
+            Purpose.FUEL -> energyWord(energy)
             Purpose.FEEDING -> "수유"
             Purpose.PET -> "반려견 산책"
         }
     }
 
     /** 지금 필요가 다음 후보보다 먼저 온다: 서 있는 곳에서 마치고 출발 */
-    open fun planHereNow(stop: String, purposes: Set<Purpose>, dwellMin: Int): String {
-        val what = planHereWhat(purposes)
+    open fun planHereNow(stop: String, purposes: Set<Purpose>, dwellMin: Int, energy: EnergyKind? = null): String {
+        val what = planHereWhat(purposes, energy)
         return "지금 쉬어야 할 때예요. 서 있는 ${stop}에서 ${what}${obj(what)} 마치고 출발하세요(${duration(dwellMin)})"
     }
 
     /** 급하지는 않다: 서 있는 곳에서 다녀온다고 보고 세운 계획 */
-    open fun planHere(stop: String, purposes: Set<Purpose>): String {
-        val what = planHereWhat(purposes)
+    open fun planHere(stop: String, purposes: Set<Purpose>, energy: EnergyKind? = null): String {
+        val what = planHereWhat(purposes, energy)
         return "서 있는 ${stop}에서 ${what}${obj(what)} 마치고 출발한다고 보고 세운 계획이에요"
     }
     open fun planNoneNeeded(hasDestination: Boolean): String =
         if (hasDestination) "목적지까지 쉬지 않고 가도 돼요" else "앞의 후보까지는 쉬지 않고 가도 돼요"
     open fun planMeal(stop: String): String = "식사 시간에 맞춰 ${stop}에서 식사해요"
-    open fun planFuel(stop: String): String = "${stop}에서 주유해요"
-    open fun planFuelShort(): String = "남은 주행가능거리 안에 경로 위 주유할 곳이 없어요. 가까운 주유소를 따로 찾아 주세요"
+    open fun planFuel(stop: String, energy: EnergyKind? = null): String = "${stop}에서 ${energyWord(energy)}해요"
+    open fun planFuelShort(energy: EnergyKind? = null): String =
+        "남은 주행가능거리 안에 경로 위 ${energyWord(energy)}할 곳이 없어요. 가까운 ${if (energy == EnergyKind.ELECTRIC) "충전소" else "주유소"}를 따로 찾아 주세요"
     open fun planNoDestination(): String = "목적지가 없어 앞의 후보까지만 계획했어요"
     open fun planPartial(km: Int): String = "앞 ${km}km 안의 휴게소까지만 계획했어요"
     open fun planSleepyTime(): String = "도착 전에 졸음이 오기 쉬운 시간에 들어가요. 쉬는 곳에서 커피와 짧은 낮잠을 계획해 보세요"

@@ -14,7 +14,7 @@ import org.junit.Test
  */
 class ReasonCoverageTest {
 
-    private val code = Regex("\"((?:RESTROOM|FATIGUE|STYLE|LAST_CHANCE|NEXT|URGENT|PLAN|CABIN)_[A-Z0-9_]+)\"")
+    private val code = Regex("\"((?:RESTROOM|FATIGUE|STYLE|LAST_CHANCE|RANGE|ENERGY|NEXT|URGENT|PLAN|CABIN)_[A-Z0-9_]+)\"")
 
     private fun engineCodes(): Set<String> {
         val roots = listOf(File("../rest-engine/src/main/kotlin"), File("../rest-engine/coach/src/main/kotlin"))

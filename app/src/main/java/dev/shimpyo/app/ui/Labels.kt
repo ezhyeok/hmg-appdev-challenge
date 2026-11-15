@@ -5,6 +5,7 @@ import dev.shimpyo.app.ui.components.ShimpyoIcons
 import dev.shimpyo.app.ui.theme.DriveLimits
 import dev.shimpyo.engine.CoachConfig
 import dev.shimpyo.engine.CoachTexts
+import dev.shimpyo.engine.EnergyKind
 import dev.shimpyo.engine.Level
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
@@ -166,11 +167,11 @@ object Labels {
         StopKind.PUBLIC_RESTROOM, StopKind.OTHER -> ShimpyoIcons.Wc
     }
 
-    fun purposeName(p: Purpose): String = when (p) {
+    fun purposeName(p: Purpose, energy: EnergyKind? = null): String = when (p) {
         Purpose.RESTROOM -> "화장실"
         Purpose.REST -> "휴식"
         Purpose.MEAL -> "식사"
-        Purpose.FUEL -> "주유"
+        Purpose.FUEL -> texts.energyWord(energy)
         Purpose.FEEDING -> "수유"
         Purpose.PET -> "반려견"
     }
@@ -214,6 +215,9 @@ object Labels {
      * 엔진이 내는 코드는 모두 여기나 [NOT_CHIP_CODES]에 있어야 한다(ReasonCoverageTest가 엔진 소스로 지킨다).
      */
     fun shortReason(r: Reason, who: String? = null): String? = when (r.code) {
+        "RANGE_LAST_CHANCE" -> rangeLastChanceChip(r.text)
+        "RANGE_TIGHT" -> "주행거리 빠듯"
+        "ENERGY_BUNDLE" -> if (r.text.contains("충전")) "충전하며 휴식" else "주유도 함께"
         "RESTROOM_ELAPSED" -> fitChip("${who ?: "탑승자"} 기준", "탑승자 기준")
         "RESTROOM_VOICED" -> fitChip("${who ?: "탑승자"} 요청", "탑승자 요청")
         "RESTROOM_PERSONAL" -> firstNumber(r.text, "번")?.let { "기록 ${it}번 반영" } ?: "내 기록 반영"
@@ -277,6 +281,29 @@ object Labels {
         "PLAN_NO_CANDIDATES", "PLAN_NOW", "PLAN_HERE_NOW", "PLAN_HERE", "PLAN_GAP", "PLAN_FUEL_SHORT", "PLAN_NONE_NEEDED", "PLAN_MEAL", "PLAN_FUEL",
         "PLAN_SLEEPY_TIME", "PLAN_NO_DESTINATION", "PLAN_PARTIAL", "URGENT_TIME",
     )
+
+    /** 현재 잔량·정차지 사이 간격이 아닌, 이곳을 지나친 뒤 도착할 때의 잔여 거리. */
+    private fun rangeLastChanceChip(text: String): String {
+        val normalized = text.trim().replace(Regex("\\s+"), " ")
+        val reserve = " \\(예비 \\d+(?:\\.\\d+)?\\s*km 미만\\)"
+        val next = Regex("여기를 지나면 다음 (충전|주유)할 곳에서 주행가능거리가 (\\d+)\\s*km 남아요$reserve").matchEntire(normalized)
+        val destination = Regex("여기를 지나면 목적지에 닿으면 (\\d+)\\s*km 남아요$reserve").matchEntire(normalized)
+        val unreachable = Regex("여기를 지나면 다음 (충전|주유)할 곳까지 닿지 못해요").matchEntire(normalized)
+        val horizon = Regex("확인된 경로 (\\d+)\\s*km 동안 (충전|주유)할 곳이 없어요").matchEntire(normalized)
+        val fallback = "주행거리 확인"
+        val chip = when {
+            next != null -> {
+                val (word, km) = next.destructured
+                fitChip("다음 $word 때 ${km}km 남음", fitChip("$word 때 ${km}km 남음", fallback))
+            }
+            destination != null -> "도착 때 ${destination.groupValues[1]}km 남음"
+            unreachable != null -> "다음 ${unreachable.groupValues[1]} 못 닿음"
+            normalized == "여기를 지나면 목적지까지 닿지 못해요" -> "도착 못 함"
+            horizon != null -> "${horizon.groupValues[1]}km ${horizon.groupValues[2]} 없음"
+            else -> fallback
+        }
+        return fitChip(chip, fallback)
+    }
 
     /** [text]가 칩 길이를 넘으면 [fallback] */
     private fun fitChip(text: String, fallback: String): String = if (text.length <= DriveLimits.MAX_CHIP_CHARS) text else fallback

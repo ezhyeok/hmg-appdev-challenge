@@ -2,6 +2,7 @@ package dev.shimpyo.coach
 
 import dev.shimpyo.engine.CoachInput
 import dev.shimpyo.engine.CongestionSegment
+import dev.shimpyo.engine.EnergyKind
 import dev.shimpyo.engine.Occupant
 import dev.shimpyo.engine.OccupantType
 import dev.shimpyo.engine.RouteDestination
@@ -54,6 +55,8 @@ class DemoScenario internal constructor(
      * (2026-11-13 감사: 귀성길 시연에서 시속 60이면 98m 옆 마을 주유소를 다음 화장실로 냈다)
      */
     val city: Boolean = false,
+    val initialRangeKm: Double? = null,
+    val energy: EnergyKind? = null,
 ) {
     /** 경로 위 정체 한 구간: 경로 시작점 기준 시작 거리(m), 길이(m), 지나는 데 걸리는 시간(초) */
     data class Jam(val startM: Double, val lengthM: Double, val durationS: Double)
@@ -67,7 +70,7 @@ class DemoScenario internal constructor(
 
     companion object {
         /** 화면 시연 패널·adb `--es demo`가 쓰는 이름 */
-        val NAMES: List<String> = listOf("holiday", "fatigue", "urgent", "stop", "departure")
+        val NAMES: List<String> = listOf("holiday", "fatigue", "urgent", "stop", "departure", "charge")
 
         /** 이보다 느리면 달리는 시나리오가 아니다 (엔진이 받는 자유 속도의 아래 끝, 시속 10km) */
         private const val MIN_CRUISE_MPS = 10 / 3.6
@@ -77,6 +80,7 @@ class DemoScenario internal constructor(
         /** 이름으로 시나리오를 만든다. 모르는 이름이나 null이면 null (= 시연 끄기) */
         fun byName(name: String?): DemoScenario? = when (name) {
             "holiday" -> DemoScenarios.holiday()
+            "charge" -> DemoScenarios.charge()
             "fatigue" -> DemoScenarios.fatigue()
             "urgent" -> DemoScenarios.urgent()
             "stop" -> DemoScenarios.stop()
@@ -192,7 +196,8 @@ class DemoRun private constructor(
             // '서 있는 동안 정한 새 목적지'로 보고 귀성길 한가운데서 출발 전 한마디를 했다 (2026-11-13 검증)
             destination = RouteDestination(s.destinationName ?: s.name, null, null),
         )
-        return input.copy(route = route)
+        // 실제 차의 잔량은 시연에 섞지 않는다. holiday를 비롯한 기존 장면은 계속 에너지 모름이다.
+        return input.copy(route = route, rangeKm = s.initialRangeKm?.let { (it - travelled / 1000).coerceAtLeast(0.0) }, energy = s.energy)
     }
 
     /**
@@ -306,6 +311,19 @@ private object DemoScenarios {
             congestion = listOf(DemoScenario.Jam(jamStart, jamLength, 60 * 60.0)),
             routeTotalM = 310_000.0,
             destinationName = "부산",
+        )
+    }
+
+    fun charge(): DemoScenario {
+        val base = holiday()
+        return DemoScenario(
+            name = "charge", path = base.path, metersPerSecond = base.metersPerSecond, timeScale = base.timeScale,
+            occupants = base.occupants, timeOfDay = base.timeOfDay,
+            // 아이는 귀성길과 같은 46분 전 화장실. 운전자는 20분째라 이번 질문은 화장실·충전 두 마감이다.
+            drivenMin = 20, lastRestroomMin = base.lastRestroomMin, congestion = base.congestion,
+            routeTotalM = base.routeTotalM, destinationName = base.destinationName,
+            // 가용 30km: 옥산(약 18km)은 닿고 죽암(약 38km)은 예비 거리 안에 닿지 않는다.
+            initialRangeKm = 50.0, energy = EnergyKind.ELECTRIC,
         )
     }
 

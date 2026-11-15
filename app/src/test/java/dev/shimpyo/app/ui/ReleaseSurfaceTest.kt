@@ -45,6 +45,8 @@ class ReleaseSurfaceTest {
         "pleos.car.permission.LLM_SERVICE" to "규칙으로 못 알아들은 말 해석 (ON_DEVICE): PleosLlmInterpreter",
         "android.car.permission.CAR_POWERTRAIN" to "기어 (정차·주행 판정): CarState",
         "android.car.permission.CAR_SPEED" to "차속 (주행 거리, 운전 패턴): CarState",
+        "android.car.permission.CAR_ENERGY" to "차의 남은 주행가능거리 (주유·충전의 마지막 기회, 함께 들르기): CarState.rangeRemainingM",
+        "android.car.permission.CAR_INFO" to "연료 종류 (주유/충전, 맞는 시설만 후보): CarState.fuelTypes",
     )
 
     /** 개발용 점검(KitSelfTest)만 쓰는 권한: debug 빌드에만 */

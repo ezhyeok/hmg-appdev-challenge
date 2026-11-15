@@ -22,6 +22,7 @@ composeCompiler {
 android {
     namespace = "dev.shimpyo.app"
     compileSdk = 34
+    useLibrary("android.car")
 
     defaultConfig {
         applicationId = "dev.shimpyo.app"

@@ -20,6 +20,7 @@ import kotlinx.coroutines.withContext
  *
  * 필요한 권한
  * - 기어: `android.car.permission.CAR_POWERTRAIN` (normal)
+ * - 잔여 거리: `android.car.permission.CAR_ENERGY` (dangerous). 연료 종류: `android.car.permission.CAR_INFO` (normal)
  * - 차속: `android.car.permission.CAR_SPEED` (dangerous, 실행 중 요청 필요). 없으면 [speedMps]의 조회·구독이 실패한다
  *
  * 실패는 삼키지 않는다 (리뷰 R-F5, 서비스 감사 SV-D13). 예전에는 `Car.createCar` 실패와 구독 실패를 로그만 남기고 넘어가서,
@@ -118,13 +119,21 @@ class CarState(context: Context) {
     fun speedMps(): ReadSignal<Float> =
         property("speed", VehiclePropertyIds.PERF_VEHICLE_SPEED, CarPropertyManager.SENSOR_RATE_NORMAL) { it as? Float }
 
+    /** AAOS API 34: Float metres, CAR_ENERGY(dangerous). 같은 등록 결과 확인·재연결 경로를 쓴다. */
+    fun rangeRemainingM(): ReadSignal<Float> =
+        property("range", VehiclePropertyIds.RANGE_REMAINING, CarPropertyManager.SENSOR_RATE_NORMAL) { it as? Float }
+
+    /** AAOS API 34: Integer[] FuelType, CAR_INFO(normal). STATIC 속성도 구독 시 현재 값이 온다. */
+    fun fuelTypes(): ReadSignal<IntArray> =
+        property("fuelTypes", VehiclePropertyIds.INFO_FUEL_TYPE, CarPropertyManager.SENSOR_RATE_ONCHANGE, ::intVector)
+
     private fun <T : Any> property(name: String, propertyId: Int, rateHz: Float, cast: (Any?) -> T?) = ReadSignal(
         name = name,
         getter = {
             withContext(Dispatchers.IO) {
                 val pm = manager(name)
                 try {
-                    cast(pm.getProperty<Any>(propertyId, 0)?.value)
+                    pm.getProperty<Any>(propertyId, 0)?.takeIf { it.status == CarPropertyValue.STATUS_AVAILABLE }?.let { cast(it.value) }
                 } catch (e: Exception) {
                     throw PleosSdkException(name, e.message ?: e.javaClass.simpleName, e)
                 }
@@ -135,10 +144,13 @@ class CarState(context: Context) {
                 val pm = manager(name)
                 val callback = object : CarPropertyManager.CarPropertyEventCallback {
                     override fun onChangeEvent(value: CarPropertyValue<*>) {
-                        trySend(cast(value.value))
+                        trySend(if (value.status == CarPropertyValue.STATUS_AVAILABLE) cast(value.value) else null)
                     }
 
-                    override fun onErrorEvent(propId: Int, zone: Int) = KitLog.w("$name error zone=$zone")
+                    override fun onErrorEvent(propId: Int, zone: Int) {
+                        trySend(null)
+                        KitLog.w("$name error zone=$zone")
+                    }
                 }
                 val registered = try {
                     withContext(Dispatchers.IO) { pm.registerCallback(callback, propertyId, rateHz) }
@@ -172,6 +184,13 @@ class CarState(context: Context) {
     }
 
     companion object {
+        /** CarPropertyValue의 INT32_VEC는 Integer[]다. 테스트/차종 어댑터의 int[]도 받아 같은 값으로 준다. */
+        internal fun intVector(value: Any?): IntArray? = when (value) {
+            is IntArray -> value
+            is Array<*> -> if (value.all { it is Int }) IntArray(value.size) { value[it] as Int } else null
+            else -> null
+        }
+
         /** Car 서비스가 아직 뜨지 않았을 때 [connect]가 기다리는 시간 */
         const val CONNECT_WAIT_MS = 5_000L
     }

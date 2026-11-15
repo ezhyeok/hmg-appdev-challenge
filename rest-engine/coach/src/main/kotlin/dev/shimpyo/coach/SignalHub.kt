@@ -2,6 +2,7 @@ package dev.shimpyo.coach
 
 import dev.shimpyo.engine.DrivingSample
 import dev.shimpyo.engine.Gear
+import dev.shimpyo.engine.EnergyKind
 import dev.shimpyo.engine.TurnSignal
 
 /**
@@ -18,6 +19,20 @@ import dev.shimpyo.engine.TurnSignal
 class SignalHub(private val elapsed: ElapsedClock = ElapsedClock { System.nanoTime() / 1_000_000 }) {
     @Volatile var gear: Gear = Gear.UNKNOWN
     @Volatile var speedKph: Float? = null
+    private data class Reading<T>(val value: T?, val at: Long)
+    @Volatile private var rangeReading = Reading<Double>(null, 0L)
+    @Volatile private var kindReading = Reading<EnergyKind>(null, 0L)
+    var rangeKm: Double?
+        get() = fresh(rangeReading)
+        set(value) { rangeReading = Reading(value?.takeIf { it.isFinite() && it >= 0.0 }, elapsed.elapsedMs()) }
+    var energyKind: EnergyKind?
+        get() = fresh(kindReading)
+        set(value) { kindReading = Reading(value, elapsed.elapsedMs()) }
+
+    private fun <T> fresh(reading: Reading<T>): T? =
+        reading.value.takeIf { elapsed.elapsedMs() - reading.at in 0..ENERGY_FRESH_MS }
+
+    fun energySnapshot(): VehicleEnergy = VehicleEnergy(rangeKm, energyKind)
     @Volatile var steeringDeg: Float? = null
         private set
     @Volatile var brake: Boolean? = null
@@ -86,5 +101,7 @@ class SignalHub(private val elapsed: ElapsedClock = ElapsedClock { System.nanoTi
 
     private companion object {
         const val MAX_BUFFER = 2_000
+        // SignalCollector는 30초마다 재조회한다. 세 번의 조회 동안 갱신되지 않은 잔량으로 정차를 권하지 않는다.
+        const val ENERGY_FRESH_MS = 90_000L
     }
 }

@@ -75,6 +75,9 @@ data class CoachUiState(
      */
     val drivingRestricted: Boolean = true,
     val speedKph: Float? = null,
+    /** 차에서 읽은 주행가능거리. 예비 거리를 빼기 전이며 모르면 화면에서 숨긴다. */
+    val rangeKm: Double? = null,
+    val energy: dev.shimpyo.engine.EnergyKind? = null,
     val guiding: Boolean = false,
     val destinationName: String? = null,
     val remainDistanceM: Double? = null,

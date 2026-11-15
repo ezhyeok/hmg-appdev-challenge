@@ -93,14 +93,26 @@ fun DriveScreen(
     val primaryFocus = remember { FocusRequester() }
     val urgentFocus = remember { FocusRequester() }
     val gauges: @Composable (Modifier, Boolean) -> Unit = { m, tall ->
-        Row(m, horizontalArrangement = Arrangement.spacedBy(Dimens.Layout.gutter)) {
-            val r = restroomGauge(state)
-            val f = fatigueGauge(state)
-            val cell = if (tall) Modifier.weight(1f).fillMaxHeight() else Modifier.weight(1f)
-            HumanGauge("화장실", ShimpyoIcons.Wc, r.minutes, r.level, r.fraction, r.tick, r.reason, layout.compact, cell, tall = tall)
-            HumanGauge("피로", ShimpyoIcons.Rest, f.minutes, f.level, f.fraction, f.tick, f.reason, layout.compact, cell, tall = tall)
+        Column(m) {
+            Row(if (tall) Modifier.fillMaxWidth().weight(1f) else Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(Dimens.Layout.gutter)) {
+                val r = restroomGauge(state)
+                val f = fatigueGauge(state)
+                val cell = if (tall) Modifier.weight(1f).fillMaxHeight() else Modifier.weight(1f)
+                HumanGauge("화장실", ShimpyoIcons.Wc, r.minutes, r.level, r.fraction, r.tick, r.reason, layout.compact, cell, tall = tall)
+                HumanGauge("피로", ShimpyoIcons.Rest, f.minutes, f.level, f.fraction, f.tick, f.reason, layout.compact, cell, tall = tall)
+            }
+            energyReadout(state)?.let { energy ->
+                Row(Modifier.fillMaxWidth().padding(top = Dimens.Space.s), verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(Dimens.Space.s)) {
+                    Icon(ShimpyoIcons.Car, contentDescription = null, modifier = Modifier.size(32.dp), tint = ShimpyoTheme.colors.textSecondary)
+                    Text(energy.label, Modifier.weight(1f), style = DriveType.Minimum, color = ShimpyoTheme.colors.textSecondary,
+                        maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Text("${energy.value} ${energy.unit}", style = DriveType.StopMeta, color = ShimpyoTheme.colors.textPrimary, maxLines = 1)
+                }
+            }
         }
     }
+
     val focus = driveFocus(actions)
     val focusKey = focus.key
     val actionRow: @Composable () -> Unit = {

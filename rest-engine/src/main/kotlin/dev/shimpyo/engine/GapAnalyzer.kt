@@ -33,7 +33,7 @@ package dev.shimpyo.engine
  */
 internal class GapAnalyzer(private val config: CoachConfig) {
 
-    enum class Trigger { CONGESTION, GAUGE, PREFERENCE }
+    enum class Trigger { CONGESTION, GAUGE, PREFERENCE, RANGE }
 
     class LastChance(
         val opp: Opportunity,
@@ -45,8 +45,33 @@ internal class GapAnalyzer(private val config: CoachConfig) {
         val congestionS: Double,
         /** 가장 급한 한 사람만 봤다면 여기가 아니었다: 여럿이 타서 앞당겨진 마지막 기회 */
         val groupDriven: Boolean = false,
+        val gapM: Double = 0.0,
+        val rangeTight: Boolean = false,
+        /** 목록을 자른 곳까지만 아는 공백. 그 너머에 시설이 없다고 말하지 않는다. */
+        val gapLowerBound: Boolean = false,
+        /** RANGE: 현재 위치에서 다음 에너지 기회 또는 알려진 경로 끝까지의 거리. */
+        val rangeEndM: Double = Double.NaN,
+        val endIsDestination: Boolean = false,
     ) {
         fun groupDriven(): LastChance = if (groupDriven) this else LastChance(opp, index, trigger, gapS, congestionS, groupDriven = true)
+    }
+
+    /** SPEC 4.3b: 정체 시간과 독립인 거리 마감. 진입로를 놓친 곳은 제외하고, 아는 경로 안에서만 판정한다. */
+    fun analyzeRange(opps: List<Opportunity>, route: RouteContext, usableM: Double?): LastChance? {
+        if (usableM == null || !usableM.isFinite() || route.knownEndM <= usableM) return null
+        val ahead = opps.withIndex().filter { it.value.distanceM >= config.askWindowNearM && it.value.distanceM <= route.knownEndM }
+        val first = ahead.firstOrNull() ?: return null
+        val tight = usableM <= first.value.distanceM
+        val chosen = if (tight) first else ahead.lastOrNull { it.value.distanceM <= usableM } ?: return null
+        val next = ahead.firstOrNull { it.index > chosen.index }?.value
+        val endM = next?.distanceM ?: route.knownEndM
+        if (!endM.isFinite() || endM <= usableM || endM <= chosen.value.distanceM) return null
+        val o = chosen.value
+        return LastChance(o, chosen.index, Trigger.RANGE,
+            route.arrivalAtDistance(endM) - route.arrivalAtDistance(o.distanceM), 0.0,
+            gapM = endM - o.distanceM, rangeTight = tight,
+            gapLowerBound = next == null && !route.horizonM.isNaN(),
+            rangeEndM = endM, endIsDestination = next == null && route.horizonM.isNaN())
     }
 
     fun analyze(

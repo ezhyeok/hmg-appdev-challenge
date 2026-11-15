@@ -23,7 +23,7 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
               Pleos Connect SDK (Vehicle, NaviHelper, TTS, STT, FusedLocation, LLM) + AAOS Car API
 ```
 
-- **rest-engine**: "언제 무엇을 권할지"를 정하는 엔진. 입력(신호·경로·후보·의도) → 출력(게이지·추천·질문). JVM 테스트 382개 (코치 계층 624, 앱 217, pleos-kit 23).
+- **rest-engine**: "언제 무엇을 권할지"를 정하는 엔진. 입력(신호·경로·후보·의도) → 출력(게이지·추천·질문). 엔진·코치 JVM 테스트는 서버에서, 앱·pleos-kit 테스트는 Android SDK가 있는 노트북에서 실행한다.
 - **rest-engine/coach**: 엔진을 차에서 돌리는 실행 계층. 안드로이드에 의존하지 않고 바깥은 모두 포트(`Ports.kt`) 뒤에 있어서, 서비스 전체 흐름
   (귀성길 시연 → 질문 → '응' → 내비 경유지)을 가짜 포트와 가상 시간으로 JVM에서 끝까지 돌린다(`CoachCoreTest`). 부품별 설계는
   `docs/design/coach-layer/`(navi, candidates, prompt, world, data, core, ui).
@@ -33,12 +33,13 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
 
 ## 2. 실행 흐름
 
-1. `MainActivity`가 실행 중 권한(차속, 위치)을 받고 `CoachService`(포그라운드 서비스)를 시작한다. 포그라운드여야 내비가 앞에 와도 얼려지지 않는다.
+1. `MainActivity`가 실행 중 권한(차속, 위치, 차량 에너지)을 받고 `CoachService`(포그라운드 서비스)를 시작한다. 포그라운드여야 내비가 앞에 와도 얼려지지 않는다.
    권한을 나중에 받으면 `PermissionsChanged`로 신호 수집을 다시 잇는다. 주행 중 UX 제한은 화면이 직접 구독한다(모르면 제한).
-2. `CarSignals`가 신호를 `SignalHub`(기어·차속·조향·제동·방향지시등·크루즈·문·공조)와 `PositionTracker`(위치 SDK, 끊기면 내비 위치)에 모은다.
+2. `CarSignals`가 신호를 `SignalHub`(기어·차속·잔여 거리·에너지 종류·조향·제동·방향지시등·크루즈·문·공조)와 `PositionTracker`(위치 SDK, 끊기면 내비 위치)에 모은다.
    연결 셋(Car API, Vehicle SDK, 위치 SDK)을 신호 목록으로 선언하고, 받는 방법은 coach 모듈의 `SignalCollector` 하나가 맡는다: 연결·기능 확인·
    신호마다 따로 다시 시도(`Retry`/`Backoff`, 2초부터 최대 1분), 리스너 값이 없을 때만 한 번 읽기, 30초마다 다시 읽어 조용한 신호가 멎은 것인지
    확인(`SignalHealth`), 읽기가 모두 실패하고 이벤트도 없으면 연결을 버리고 새로 맺기(`LinkHealth`, Vehicle 서비스가 강제 종료된 경우).
+   에너지는 `VehicleEnergy` 값으로 포트 경계를 넘고, 성공한 동일 값 재조회도 `reportReads`로 전달한다. `SignalHub`는 90초 넘게 갱신되지 않으면 잔량·종류를 각각 null로 돌린다. `CoachWorld`만 시연 잔량을 덧씌운다.
    끊긴 동안 그 신호는 '모름'(null)이다. 조향 표본은 받은 순간의 단조 시계로 찍고 틱에서 엔진 시계로 옮긴다(시연 배속과 무관).
 3. `NaviTracker`가 내비 조회를 혼자 한다: 경로 상태·목적지 15초, 길안내 중 TBT 5~20초(다음 화장실·회전 거리와 주행 거리 보정에 따라), 내비 이벤트와
    경유지 추가 뒤에는 곧바로. 경로가 바뀔 때마다 epoch를 올리고 옛 TBT를 새 경로와 섞지 않는다. 결과는 불변 `NaviSnapshot` 하나.
@@ -61,6 +62,7 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
 | 운전 스타일 분석 | 조향각, 차속, 제동 | 이번 주행 초반을 기준선으로 한 편차 점수(0~1) | 피로 단계 조정, 이유 문구 |
 | 피로 모델 | 연속 주행 시간, 시간대, 수면, 운전 스타일, 내기순환 | 규칙 기반 (기준 시간 × 가중치) | 피로 게이지(분), 환기 권유 |
 | 마지막 기회 | 경로 앞 화장실 기회·쉴 수 있는 곳, 정체 구간 | 정체·공백으로 늘어난 도착 시간과 판단 마감 비교. 같은 계산을 피로 게이지(남은 분)로 한 번 더 해 졸음의 마지막 기회를 찾는다(같은 곳이면 질문 하나, SPEC 4.3a). 마감이 지났으면 아직 들를 수 있는 가장 가까운 기회(다음 기회·목적지까지 공백을 알 때). 게이지가 NOW면 가장 가까운 화장실이 먼 마지막 기회보다 먼저다 | 마지막 기회 질문, 여유 없을 때의 가까운 화장실 질문 |
+| 차량 마지막 기회·함께 들르기 | 주행가능 km·EnergyKind, 목적지·후보 한계, 시설 | `GapAnalyzer.analyzeRange`: 예비 거리(연료 50km, EV 20km)를 뺀 거리 안 마지막 기회. `selectLastChance` 순수 함수가 화장실·피로·차량을 선택·병합해 질문과 카드에 함께 쓴다. 사람 정차 뒤 가용 거리 <100km이고 목적지 전 에너지 정차가 필요하면 함께 권한다(SPEC 4.3b). EV/연료/모름별 시설 필터를 계획·음성 응답도 공유 | RANGE_LAST_CHANCE·RANGE_TIGHT·ENERGY_BUNDLE, FUEL 목적 |
 | 급해 모드 | 경로 후보 + 반경 5km 후보, 경로의 정체 | 주행 시간(내비 ETA → 길안내 경로 위면 엔진 도착 시간 → 거리 ÷ 평균 속도. 순위·음성·카드가 같은 값) + 주차·도보 + 유턴 + 영업 여부 + 야간 안전 | 순위 |
 | 피트스톱 플래너 | 경로 앞 후보, 제약(한 사람 기준 화장실 마감, 2시간 휴식 리듬, 수유·주유) | 동적 계획법 (정차 수·시간 최소화). 기어 P이고 300m 안에 화장실이 있는 곳에 서 있으면 그곳에서 화장실(필요하면 휴식·식사)을 마치고 출발한다고 보고 그 뒤를 계획한다(`PLAN_HERE_NOW`/`PLAN_HERE`, `PlanFromHereTest`) | 정차 계획 |
 | 출발 전 한마디 (일상) | 기어 P, 내비 남은 시간(정체 포함)·목적지(`RouteState.destination`), 이번 여정에서 실제로 움직였는지(`tripMoved`, 재시작은 `TripProfile.tripMoved`), 이 정차의 문 열림 | 도착까지 ≥ 20분, 게이지보다 길고, 지금 다녀오면 게이지가 20분 이상 늘 때. 아직 움직이지 않았거나, 여정 중간 정차에서 문이 열렸고 목적지가 바뀌었을 때(재탐색은 같은 목적지). 서 있으면 회전·제동 조용한 때 규칙을 쓰지 않고, 시간당 상한에 세지 않는다. 출발하면 거둔다. `DepartureCheckTest`, `DepartureEdgeTest` | 출발 전 질문(`DEPARTURE`, 경유지 없음, 이유 `DEPARTURE_TRIP`) |
@@ -103,7 +105,7 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
 - 차량 신호: Virtual Console HTTP API를 `tools/vc/vc.sh`로 조작 (`shimpyo-*.vc` 시나리오).
 - 위치·시각·정체·경로: 시연 세계(`CoachWorld.Demo` + 불변 `DemoRun`)가 덧씌운다. 실제 위치는 계속 받으므로 시연을 끄면 바로 실제 위치다.
 - 시연 경로는 앱에 든 실제 휴게소·졸음쉼터 좌표를 잇는다. 그래서 후보와 공백은 실제 데이터에서 나온다(귀성길: 옥산휴게소 → 죽암휴게소 21km 공백에 20km·60분 정체).
-  시연은 다섯 장면이다: 귀성길(holiday), 오후 졸음(fatigue), 밤 급해(urgent), 정차(stop), 출발 전(departure: 08:10 분당 아파트 앞, 1시간 전에 화장실에
+  시연은 여섯 장면이다: 차도 사람도(charge: EV 50km, 아이 화장실과 차량 충전을 옥산에서 한 번에), 귀성길(holiday), 오후 졸음(fatigue), 밤 급해(urgent), 정차(stop), 출발 전(departure: 08:10 분당 아파트 앞, 1시간 전에 화장실에
   다녀온 7살 아이, 정체 포함 1시간 3분 거리 → "출발 전에 다녀오세요". Virtual Console 기어를 P로 둔다).
 - 질문 카드가 떠 있는 동안 시연의 시각과 위치가 함께 0.25배로 흐른다(가상 속도는 그대로라 판단은 같다). `CoachWorld.questionShown`이 빠르기만 바꾼
   `DemoRun`을 만들고 `WorldSwitch`가 같은 엔진·여정·세대로 세계만 바꿔 끼운다(세계 전환이 아니다). PT에서 카드를 설명하고 누를 시간이다.
@@ -115,3 +117,5 @@ PT 기술 질의응답용 정리. 제품 사양은 `docs/product/SPEC.md`, 판�
 - 좌석 점유 값은 에뮬레이터에서 믿을 수 없어서 탑승자는 사용자가 정한다(말로 설정 가능).
 - 에뮬레이터를 오디오 없이 띄우므로 음성 인식은 녹음 입력(`sendAudio`)으로 확인한다(`tools/laptop/stt-pcm-check.sh`).
 - 그 밖의 확인 결과는 `docs/kit-selftest.md`와 SPEC 8장.
+
+AAOS 에너지 계약(API 34): [Android 14 VehiclePropertyIds](https://android.googlesource.com/platform/packages/services/Car/+/refs/heads/android14-release/car-lib/src/android/car/VehiclePropertyIds.java), [권한 선언](https://android.googlesource.com/platform/packages/services/Car/+/refs/heads/android14-release/service/AndroidManifest.xml). `RANGE_REMAINING`은 Float 미터, `INFO_FUEL_TYPE`은 Integer[]이며 kit은 int[]도 정규화한다. `CarPropertyValue.STATUS_AVAILABLE`일 때만 값을 전달하고 등록 실패(false)·오류·미지원은 기존 재연결 경로로 처리한다.

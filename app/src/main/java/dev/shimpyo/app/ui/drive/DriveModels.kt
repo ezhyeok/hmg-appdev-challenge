@@ -16,6 +16,7 @@ import dev.shimpyo.coach.GoToFailure
 import dev.shimpyo.coach.GoToOutcome
 import dev.shimpyo.coach.GoToResult
 import dev.shimpyo.engine.Level
+import dev.shimpyo.engine.EnergyKind
 import dev.shimpyo.engine.Prompt
 import dev.shimpyo.engine.PromptKind
 import dev.shimpyo.engine.Purpose
@@ -31,6 +32,20 @@ import dev.shimpyo.engine.StopCandidate
 /** 게이지 카드 값 */
 @Immutable
 data class GaugeModel(val minutes: Int?, val level: Level?, val fraction: Float?, val tick: Float?, val reason: String?)
+
+@Immutable
+data class EnergyReadout(val value: String, val unit: String, val label: String)
+
+/** 차가 보내 준 실제 남은 거리. 이유 칩의 '예비 거리 제외' 숫자와 구분하며 모르면 숨긴다. */
+fun energyReadout(state: CoachUiState): EnergyReadout? {
+    val km = state.rangeKm?.takeIf { state.serviceRunning && it.isFinite() && it >= 0.0 } ?: return null
+    val label = when (state.energy) {
+        EnergyKind.ELECTRIC -> "충전 주행가능거리"
+        EnergyKind.FUEL -> "주유 주행가능거리"
+        null -> "차 주행가능거리"
+    }
+    return EnergyReadout(km.toInt().toString(), "km", label)
+}
 
 /** 화장실 게이지: 막대 = 남은 분 ÷ 게이지를 정한 탑승자의 기준 간격(개인 간격 우선), 눈금 = SOON 경계(20분) */
 fun restroomGauge(state: CoachUiState): GaugeModel {
@@ -233,12 +248,16 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
         if (stop != null && prompt.kind == PromptKind.URGENT_RESULT) state.urgent?.firstOrNull { it.stop.id == stop.id }?.why.orEmpty() else emptyList()
     }
     val codes = reasons.map { it.code }
+    val purposes = next?.takeIf { it.stop.id == stop?.id }?.purposes.orEmpty()
+    val energyContext = energyContext(codes, prompt.speech, state.energy, purposes)
+    val energyOnly = hasRangeLastChance(codes, prompt.speech) && !hasRestroomLastChance(codes, prompt.speech) &&
+        !hasFatigueLastChance(codes, prompt.speech) && Purpose.RESTROOM !in purposes && Purpose.REST !in purposes
     // 졸음만의 마지막 기회 (엔진 FatigueLastChanceTest): 화장실이 아니라 쉼터를 묻는다. 단계·아이콘·칩이 피로의 것이다
     val fatigueOnly = prompt.kind == PromptKind.LAST_CHANCE && fatigueLastChanceOnly(codes, prompt.speech)
-    val restroomKind = !fatigueOnly &&
+    val restroomKind = !fatigueOnly && !energyOnly &&
         (prompt.kind == PromptKind.LAST_CHANCE || prompt.kind == PromptKind.URGENT_RESULT || prompt.kind == PromptKind.DEPARTURE)
-    val level = (if (restroomKind) state.restroom?.level else state.fatigue?.level) ?: Level.WATCH
-    val context = when (prompt.kind) {
+    val level = if (energyOnly) Level.SOON else (if (restroomKind) state.restroom?.level else state.fatigue?.level) ?: Level.WATCH
+    val context = energyContext ?: when (prompt.kind) {
         PromptKind.LAST_CHANCE -> restroomQuestionContext(codes, prompt.speech)
         PromptKind.REST_SUGGESTION -> if ("NEXT_MEAL" in codes || prompt.speech.contains("식사")) "식사할 곳" else "쉬어 갈 곳"
         PromptKind.URGENT_RESULT -> "가장 빠른 화장실"
@@ -252,16 +271,16 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     val icon = when (prompt.kind) {
         PromptKind.FRESH_AIR -> ShimpyoIcons.Air
         PromptKind.CHECK_IN, PromptKind.REST_SUGGESTION -> if (context == "식사할 곳") ShimpyoIcons.Restaurant else ShimpyoIcons.Rest
-        PromptKind.LAST_CHANCE -> if (fatigueOnly) ShimpyoIcons.Rest else ShimpyoIcons.Wc
+        PromptKind.LAST_CHANCE -> if (energyOnly) ShimpyoIcons.GasStation else if (fatigueOnly) ShimpyoIcons.Rest else ShimpyoIcons.Wc
         PromptKind.INFO -> ShimpyoIcons.Info
         else -> ShimpyoIcons.Wc
     }
     val chips = buildList {
         // 맥락 줄이 이미 말한 이유(요청하신 화장실 등)는 칩으로 되풀이하지 않는다
-        reasons.forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.takeIf { it !in context }?.let(::add) }
+        energyFirst(reasons).forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.takeIf { it !in context }?.let(::add) }
         if (restroomKind) {
             Labels.companionChip(state.occupants.firstOrNull { it.id == state.restroom?.drivenBy })?.let(::add)
-        } else if (prompt.kind != PromptKind.INFO && !fatigueOnly) {
+        } else if (prompt.kind != PromptKind.INFO && !fatigueOnly && !energyOnly) {
             state.fatigue?.reasons?.let(::fatigueReason)?.let(::add)
         }
     }.distinct().take(maxChips)
@@ -287,15 +306,40 @@ private const val CONTEXT_JAM_REST = "정체 전 마지막 쉼터"
 private const val CONTEXT_GAP_REST = "쉼터 공백 전 마지막 기회"
 private const val CONTEXT_JAM_BOTH = "정체 전 마지막 화장실·쉼터"
 private const val CONTEXT_GAP_BOTH = "공백 전 마지막 화장실·쉼터"
+private const val CONTEXT_RANGE = "마지막 기회"
+private const val CONTEXT_ENERGY_BUNDLE = "함께"
+
+private fun hasRangeLastChance(codes: List<String>, speech: String): Boolean =
+    "RANGE_LAST_CHANCE" in codes || speech.contains("충전도 되는 마지막 곳이에요") || speech.contains("주유도 되는 마지막 곳이에요") ||
+        speech.contains("충전할 수 있는 마지막 곳이에요") || speech.contains("주유할 수 있는 마지막 곳이에요")
+
+/** 구조화된 이유 우선. 장소 이름의 '충전소'·'정체'를 이유로 읽지 않는다. 함께 들르기는 마지막 기회라고 부르지 않는다. */
+private fun energyContext(codes: List<String>, speech: String, energy: EnergyKind?, purposes: Set<Purpose>): String? {
+    val last = hasRangeLastChance(codes, speech)
+    if (!last && "ENERGY_BUNDLE" !in codes) return null
+    val human = buildList {
+        if (Purpose.RESTROOM in purposes || hasRestroomLastChance(codes, speech) || "NEXT_NEAREST_RESTROOM" in codes ||
+            "NEXT_REQUESTED_RESTROOM" in codes || "NEXT_NEARBY_RESTROOM" in codes) add("화장실")
+        if (Purpose.REST in purposes || hasFatigueLastChance(codes, speech) || "NEXT_REST" in codes) add("휴식")
+        add(if (energy == EnergyKind.ELECTRIC) "충전" else "주유")
+    }.joinToString("·")
+    return "$human ${if (last) CONTEXT_RANGE else CONTEXT_ENERGY_BUNDLE}"
+}
+
+/** 주행 중 칩 두 개 안에도 차량 이유가 남아야 한다. 나머지 이유의 순서는 보존한다. */
+private fun energyFirst(reasons: List<Reason>): List<Reason> = reasons.sortedBy {
+    if (it.code == "RANGE_LAST_CHANCE" || it.code == "ENERGY_BUNDLE") 0 else 1
+}
 
 /** 졸음의 마지막 기회 이유가 있는가 (엔진 CoachEngine.fatigueLastChanceReason). 이유가 비었으면 엔진 문장으로 본다 */
 private fun hasFatigueLastChance(codes: List<String>, speech: String): Boolean =
     codes.any { it.startsWith("FATIGUE_LAST_CHANCE") } || speech.contains("쉴 곳이 없") || speech.contains("마지막 쉼터") ||
-        speech.contains("화장실이자 쉼터")
+        speech.contains("화장실이자 쉼터") || speech.contains("휴식도 충전도 되는") || speech.contains("휴식도 주유도 되는")
 
 private fun hasRestroomLastChance(codes: List<String>, speech: String): Boolean =
     codes.any { it.startsWith("LAST_CHANCE_") } || speech.contains("화장실이 없어요") || speech.contains("마지막 화장실") ||
-        speech.contains("화장실도 쉴 곳도")
+        speech.contains("화장실도 쉴 곳도") || speech.contains("화장실도 충전도 되는") || speech.contains("화장실도 주유도 되는") ||
+        speech.contains("화장실도 휴식도")
 
 /** 졸음만의 마지막 기회 (화장실의 마지막 기회와 같은 곳이 아니다) */
 internal fun fatigueLastChanceOnly(codes: List<String>, speech: String): Boolean =
@@ -419,7 +463,7 @@ private fun planCard(state: CoachUiState, maxChips: Int): StopCardModel {
         first.etaS?.let { "${Labels.minutesOf(it)} 뒤 도착" },
         "${first.planned.dwellMin}분 정차",
     ).joinToString(" · ")
-    val chips = Labels.sortedPurposes(first.planned.purposes).map(Labels::purposeName).take(maxChips)
+    val chips = Labels.sortedPurposes(first.planned.purposes).map { Labels.purposeName(it, state.energy) }.take(maxChips)
     return StopCardModel("다음 계획", first.stop.name, meta, chips, ShimpyoIcons.Route, askingLevel = null)
 }
 
@@ -440,10 +484,12 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
     val codes = next.reasons.map { it.code }
     val code = codes.firstOrNull()
     val result = state.goToResult?.takeIf { it.stop.id == next.stop.id && it.outcome != GoToOutcome.FAILED }
+    val energyContext = energyContext(codes, "", state.energy, next.purposes)
     val context = when {
         result != null -> goToContext(result.outcome)
         // 엔진은 '들르기'를 받은 순간 기록한다. 내비에 실제로 들어갔는지는 goToResult가 알려 준다
         code == "NEXT_ACCEPTED" -> "들르기로 한 곳"
+        energyContext != null -> energyContext
         code == "NEXT_REST" -> "쉬어 갈 곳"
         code == "NEXT_MEAL" -> "식사할 곳"
         // 질문 카드와 같은 순서: 마지막 기회가 먼저, 그다음 요청에 답한 곳. 이유가 놓인 순서와 관계없이 본다
@@ -458,12 +504,14 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
     val drivenBy = state.occupants.firstOrNull { it.id == state.restroom?.drivenBy }
     val chips = buildList {
         // 들르기로 한 곳·요청하신 곳은 맥락 줄이 이미 말한다: 같은 말을 칩으로 되풀이하지 않는다
-        next.reasons.forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.takeIf { it !in context }?.let(::add) }
+        energyFirst(next.reasons).forEach { r -> if (r.code !in CONTEXT_LINE_CODES) Labels.shortReason(r, who)?.takeIf { it !in context }?.let(::add) }
         if (restroom) Labels.companionChip(drivenBy)?.let(::add)
         if (Purpose.REST in next.purposes) state.fatigue?.reasons?.let(::fatigueReason)?.let(::add)
     }.distinct().take(maxChips)
     val icon = when {
+        Purpose.FUEL in next.purposes && !restroom && Purpose.REST !in next.purposes -> ShimpyoIcons.GasStation
         code == "NEXT_MEAL" || (Purpose.MEAL in next.purposes && !restroom) -> ShimpyoIcons.Restaurant
+        Purpose.FUEL in next.purposes && Purpose.REST in next.purposes && !restroom -> ShimpyoIcons.Rest
         code == "NEXT_REST" -> ShimpyoIcons.Rest
         else -> ShimpyoIcons.Wc
     }

@@ -56,6 +56,7 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
         val rangeM: Double?,
         /** 졸림 사전 곡선이 NOW에 닿을 때까지 (초). 계획 안에 들어오면 메모를 단다 */
         val sleepyCurveS: Double = Double.POSITIVE_INFINITY,
+        val energy: EnergyKind? = null,
     )
 
     private class Label(
@@ -94,7 +95,7 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
             hasDest && !route.destM.isNaN() -> route.destM
             else -> opps[n - 1].distanceM
         }
-        val fuelLimitM = needs.rangeM?.let { it - config.fuelReserveKm * 1000.0 }
+        val fuelLimitM = needs.rangeM?.let { it - config.energyReserveKm(needs.energy) * 1000.0 }
         val fuelNeeded = fuelLimitM != null && horizonM > fuelLimitM
         val mealPossible = opps.any { it.stop.facilities.food && inMeal(local, wallNow + (it.arriveS * 1000).toLong()) }
 
@@ -129,7 +130,7 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
                         na = 1
                     }
                     var nf = f
-                    if (f == 0 && (o.stop.facilities.fuel || o.stop.facilities.evCharger)) {
+                    if (f == 0 && RouteContext.isFuelOpportunity(o.stop, needs.energy)) {
                         purposes += Purpose.FUEL
                         nf = 1
                     }
@@ -194,10 +195,10 @@ internal class PitStopPlanner(private val config: CoachConfig, private val texts
                 notes += Reason("PLAN_NOW", texts.planNow(first.stop.name))
             else -> notes += Reason("PLAN_GAP", texts.planGapTooLong())
         }
-        if (end.fuelViolS > 0.5) notes += Reason("PLAN_FUEL_SHORT", texts.planFuelShort())
+        if (end.fuelViolS > 0.5) notes += Reason("PLAN_FUEL_SHORT", texts.planFuelShort(needs.energy))
         if (stops.isEmpty() && end.violS <= 0.5) notes += Reason("PLAN_NONE_NEEDED", texts.planNoneNeeded(hasDest && !cut))
         stops.firstOrNull { Purpose.MEAL in it.purposes }?.let { notes += Reason("PLAN_MEAL", texts.planMeal(it.stop.name)) }
-        stops.firstOrNull { Purpose.FUEL in it.purposes }?.let { notes += Reason("PLAN_FUEL", texts.planFuel(it.stop.name)) }
+        stops.firstOrNull { Purpose.FUEL in it.purposes }?.let { notes += Reason("PLAN_FUEL", texts.planFuel(it.stop.name, needs.energy)) }
         if (needs.sleepyCurveS < horizonS + end.accDwellS) notes += Reason("PLAN_SLEEPY_TIME", texts.planSleepyTime())
         if (!hasDest) notes += Reason("PLAN_NO_DESTINATION", texts.planNoDestination())
         else if (cut) notes += Reason("PLAN_PARTIAL", texts.planPartial((route.horizonM / 1000.0).roundToInt()))

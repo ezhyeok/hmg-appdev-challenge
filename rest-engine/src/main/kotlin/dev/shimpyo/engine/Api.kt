@@ -198,6 +198,9 @@ sealed interface VoiceIntent {
 
 // ---------- 엔진 입력 ----------
 
+/** null은 모름 또는 플러그인 하이브리드: 주유·충전 중 어느 시설이든 쓸 수 있다. */
+enum class EnergyKind { FUEL, ELECTRIC }
+
 data class CoachInput(
     val now: Long,
     val gear: Gear,
@@ -211,7 +214,7 @@ data class CoachInput(
     /** 앱이 진행 방향으로 추린 후보 (경로 거리·시간을 아는 만큼 채움) */
     val candidates: List<StopCandidate> = emptyList(),
     val intent: VoiceIntent? = null,
-    /** (v0.2 추가) 차의 남은 주행가능거리(km). 모르면 null → 피트스톱 계획에서 주유를 고려하지 않는다 */
+    /** 차의 남은 주행가능거리(km). 모르면 null → 자동 추천에 에너지를 고려하지 않는다 */
     val rangeKm: Double? = null,
     /** (v0.2 추가) 사용자가 공조 자동 조작을 허용했는지. true면 FRESH_AIR를 묻지 않고 cabinAction만 낸다 */
     val cabinAutoAllowed: Boolean = false,
@@ -228,6 +231,8 @@ data class CoachInput(
      * 앱은 길가 화장실에 갈 수 없는 길(고속도로 차로 위, 제한속도 70 이상, 시속 80 이상, 고속도로 휴게소 안)에서는 비워 넣는다 (CityNearbyTest)
      */
     val nearby: List<StopCandidate> = emptyList(),
+    /** 차량 에너지 종류. null은 모름 또는 PHEV로 두 시설을 모두 허용한다. */
+    val energy: EnergyKind? = null,
 )
 
 // ---------- 엔진 출력 ----------

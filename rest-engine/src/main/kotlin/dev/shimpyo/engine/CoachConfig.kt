@@ -254,6 +254,10 @@ data class CoachConfig(
     val stopOverheadMin: Int = 5,
     /** 남은 주행가능거리에서 남겨 둘 여유 (km). 근거: 엔진 v0 */
     val fuelReserveKm: Double = 50.0,
+    /** EV 예비 거리(설계값): 적은 잔량에서 50km 전부를 예비로 묶지 않고 고속 약 12분(20km)의 여유를 둔다. 실차 도달 보장값은 아니다. */
+    val electricReserveKm: Double = 20.0,
+    /** 정차 뒤 가용 거리가 100km 미만이면 함께 들르기: 고속 약 1시간 안에 또 설 일을 줄이는 설계값. 목적지 전 에너지 정차가 필요할 때만. */
+    val energyBundleWindowKm: Double = 100.0,
 
     // ---------------- 화장실 문맥 보정 (모두 기본값이 있다. 배수 1.0이면 그 보정을 끈다) ----------------
     // 근거: docs/research/need-covariates.md ('NC §n'). 배수 m은 '필요해지는 시간'에 곱한다(m < 1이면 더 빨리).
