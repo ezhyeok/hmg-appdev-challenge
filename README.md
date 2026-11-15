@@ -84,3 +84,7 @@ python3 -I tools/plan/figures.py         # 기획서 그림 → docs/plan/assets
 - `pleos-kit/` Pleos SDK를 코루틴으로 감싼 공통 모듈 — 설명: `pleos-kit/README.md`
 - `app/` 안드로이드 껍데기 (`dev.shimpyo.app`): 화면(Compose), 포그라운드 서비스, 코치 계층의 포트를 SDK로 구현한 어댑터 — 구조: `docs/ARCHITECTURE.md`, 사양: `docs/product/SPEC.md`
 - 데이터 출처와 라이선스: `tools/data/README.md`
+
+## 라이선스
+
+모든 권리 보유. 공모전 심사와 열람을 위해 공개한다 ([LICENSE](LICENSE)). 내장 데이터와 제3자 구성요소의 라이선스는 [NOTICE.md](NOTICE.md)에 있다. 개발 중 참고한 공모전·Pleos 문서 원문(`docs/contest/`)은 저작권자의 자료라 저장소에 넣지 않았다.
