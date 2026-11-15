@@ -97,7 +97,7 @@
 | 카카오내비 | 길안내, 탐색 태그(주유소·주차장·충전소·음식점·약국), 안전점수 기반 보험료 할인 | 공식 소개에서 휴게소·화장실·휴식 알림 기능을 확인하지 못했다 | https://www.kakaocorp.com/page/service/service/KakaoNavi |
 | Google 지도 경로 중 검색(CarPlay) | 주유소·식당·마트·카페를 경로 위에서 검색, 우회 시간·유가 표시 | 도움말에 화장실·휴게소 범주가 없다. 사용자가 직접 찾아야 한다 | https://support.google.com/maps/answer/9432062?hl=en |
 | Flush Toilet Finder | 전 세계 20만 곳 이상 화장실 DB, 장애인 접근·유료·열쇠 여부, 사용자 추가·평가. 평점 4.7(1.1만 건) | 내 위치 주변 검색이다. 경로·시간·정체 개념이 없다 | https://apps.apple.com/us/app/955254528 |
-| RestMap (미국) | 경로 위 화장실·식사·연료·충전 정차 제안, 우회 시간(예: +3분), "warnings for long gaps", 가족·기저귀 교환대 필터 | 가장 가까운 선례. 출발 전 계획 중심이고 실시간 정체, 탑승자 상태 추정, 차량 연동이 없다. 아직 평점 수가 적다 | https://apps.apple.com/au/app/restmap/id6756338728 |
+| RestMap (2026-11-15 App Store 소개) | 경로 위 화장실·식사·연료·충전 정차, 긴 공백 경고, 가족 요구·기저귀 교환대 필터, CarPlay 안내·실시간 교통 연동 | 가까운 선례. CarPlay 표시 연동과 AAOS 차량 신호 접근은 구분한다. 공개 소개에서 AAOS 신호·탑승자별 권유 시점의 결합은 확인하지 못했으며 직접 설치 비교는 하지 않음 | https://apps.apple.com/au/app/restmap/id6756338728 |
 | ABRP 'Restroom Break' | 2026-11-11 조사 기록에는 '경로 위 다음 화장실' 요청이 Planned로 표시됨 | 2026-11-15 페이지 접근 실패로 현재 구현 상태는 미확인. 요청 1건을 시장 수요나 기능 부재의 근거로 쓰지 않음 | https://abrp.featurebase.app/p/restroom-break-display-is-not-confidence-inspiring |
 | 도요타 화장실 찾기 앱 (일본) | 휴게소 장애인 화장실 정보, T-Connect 내비 목적지·경유지로 설정 | 접근성 특화, 도카이 3현 한정(2015). 시간 예측이 없다 | https://media.toyota.co.uk/?p=40289 (2015-05-14) |
 | NEXCO 중일본 휴게시설 혼잡 정보판 | 도메이·신도메이 분기 전 "○○JCT까지" SA·PA 주차 혼잡(空有·混雑) 표시. 기사 제목이 "トイレが心配" | 도로 운영사도 화장실 걱정을 의식한다. 차 안 개인화는 없다 | https://trafficnews.jp/post/545201 (2025-05-04) |

@@ -1271,7 +1271,7 @@ def fig_effect():
     W = 850
     b = []
     b.append(T(16, 32, "화장실 위기: 급해진 뒤 30분 넘게 화장실에 못 간 여정", 19, 800, INK))
-    b.append(T(16, 58, "운전자 + 7살 아이 · 명절 정체 · 정책마다 같은 여정 {:,}번 (엔진 코드 시뮬레이션)".format(main["trips"]),
+    b.append(T(16, 58, "이전 엔진 모형 · 현재 APK 효과 아님 · 운전자 + 7살 아이 · 같은 여정 {:,}번".format(main["trips"]),
                15.5, 500, INK3))
     pol = [("nowLike", "급할 때만 서기", MUTED), ("every2h", "2시간마다 휴게소", MUTED),
            ("shimpyoP07", "쉼표 (수락 70%)", "#5E98FF"), ("shimpyoP10", "쉼표 (수락 100%)", ACCENT)]
@@ -1336,7 +1336,7 @@ def fig_effect():
                    for c in d["conditions"] if c["traffic"] == "free" for k in c["policies"])
     free_note = ("정체가 없으면 네 정책 모두 0%. " if free_max == 0
                  else "정체가 없을 때 위기는 정책에 관계없이 %d%% 이하. " % round(free_max * 100 + 0.499))
-    foot = ("막대는 위기 비율, 선은 95%% 구간(윌슨). %s실제 사용 결과가 아니라 엔진 코드를 그대로 돌린 시뮬레이션이다"
+    foot = ("막대는 위기 비율, 선은 95%% 구간(윌슨). %s이전 엔진 모형이며 현재 APK의 효과가 아니다"
             "(경부고속도로 서울→부산, 오전 9시 출발, 정체 1~3개 무작위, 사람마다 실제 간격이 사전값과 다름, 개인 기록 없음)."
             % free_note)
     fl = wrap(foot, FS, W - 32)
