@@ -192,7 +192,8 @@ def prompt_rate_line():
             "시간당 약 %.1f회였다." % (SIM['tripHM'], SIM['prompts'], SIM['promptsPerHour']))
 
 
-GITHUB_PLACEHOLDER = "[[GitHub 저장소 링크: 제출 전에 계정명이 드러나지 않는 주소로 기입]]"
+# 저장소 주소에는 계정명이 들어가므로(접수양식: 첨부·링크에 계정정보 노출 금지) 기획서에는 적지 않고 접수 메일에 적는다
+GITHUB_PLACEHOLDER = "접수 메일 본문에 저장소 주소와 심사 기준 커밋 해시를 적었다"
 VIDEO_PLACEHOLDER = "저장소 `docs/demo/shimpyo-demo.mp4`"
 
 # ---------------------------------------------------------------------------- 1

@@ -379,7 +379,7 @@ MAU는 그 달에 질문에 답했거나 급해·계획·탑승자 설정을 직
 
 | 자료 | 내용 | 위치 |
 |---|---|---|
-| GitHub 저장소 | 전체 소스(app, pleos-kit, rest-engine, tools), README(앱 이름·한 줄 소개, 실행 방법, 테스트 환경과 필요한 설정, APK 위치), 구조 문서(docs/ARCHITECTURE.md), 에뮬레이터 점검 결과, 근거 자료와 분석 코드 | **GitHub 저장소 링크: 제출 전에 계정명이 드러나지 않는 주소로 기입** |
+| GitHub 저장소 | 전체 소스(app, pleos-kit, rest-engine, tools), README(앱 이름·한 줄 소개, 실행 방법, 테스트 환경과 필요한 설정, APK 위치), 구조 문서(docs/ARCHITECTURE.md), 에뮬레이터 점검 결과, 근거 자료와 분석 코드 | 접수 메일 본문에 저장소 주소와 심사 기준 커밋 해시를 적었다 |
 | APK | 실행 가능한 release 빌드. 공모전 규칙에 따라 저장소 `apk/` 폴더 | 저장소 `apk/` 폴더 |
 | 시연 영상 | Pleos Connect Emulator + Virtual Console 화면 녹화, 2분 36초, 자막(소리 없음). 귀성길 마지막 화장실 질문 → ‘들르기’ → 내비 길안내, 휴게소 정차의 계획(‘여기서 쉬고 출발하세요’)·자동 기록, 일상의 출발 전 한마디(‘다녀올게요’ → 게이지 회복)와 도심 다음 화장실 | 저장소 `docs/demo/shimpyo-demo.mp4` |
 | 화면 | Pleos Connect Emulator에서 캡처한 실제 앱 화면(시연 모드, 1번 항목의 그림, 그림 4·9·12) | 이 문서 |

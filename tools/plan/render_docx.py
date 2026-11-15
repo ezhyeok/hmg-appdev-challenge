@@ -112,7 +112,8 @@ def render_callout(b, width=X.BOX_CONTENT_DXA):
     c = X.cell(''.join(inner), width, fill=fill,
                borders={'top': None, 'bottom': None, 'right': None, 'left': ('single', 24, bar)},
                margins=(110, 180, 110, 160))
-    t = X.table([X.row([c], cant_split=False)], [width], borders={'top': None, 'left': None, 'bottom': None,
+    # 제목이 있는 짧은 상자는 쪽 끝에 제목만 남지 않게 나누지 않는다 (2026-11-15 14쪽 '주장하지 않는 것')
+    t = X.table([X.row([c], cant_split=bool(b.title))], [width], borders={'top': None, 'left': None, 'bottom': None,
                                                                    'right': None, 'insideH': None, 'insideV': None},
                 cell_margins=(0, 0, 0, 0))
     return t + _spacer(6)
