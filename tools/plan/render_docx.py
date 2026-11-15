@@ -38,9 +38,9 @@ def _spacer(pt=4):
              X.rpr(size=2)))
 
 
-def render_heading(b):
+def render_heading(b, keep_next=True):
     return X.para(X.run(b.text, size=11, bold=True, color=X.INK),
-                  before=220, after=90, line=252, keep_next=True, keep_lines=True,
+                  before=220, after=90, line=252, keep_next=keep_next, keep_lines=True,
                   border_left=(X.ACCENT, 24, 6), ind_left=150, page_break_before=b.page_break)
 
 
@@ -126,7 +126,7 @@ def render_keynumbers(b, width=X.BOX_CONTENT_DXA):
     widths = []
     cells = []
     for i, (value, label, source) in enumerate(b.items):
-        content = (X.para(X.run(value, size=17, bold=True, color=X.ACCENT), before=0, after=30, line=240) +
+        content = (X.para(X.run(value, size=22 if n == 3 else 17, bold=True, color=X.ACCENT), before=0, after=30, line=240) +
                    X.para(X.inline(label, size=8, color=X.INK), before=0, after=40, line=240) +
                    X.para(X.run(source, size=7, color=X.INK3), before=0, after=0, line=240))
         cells.append(X.cell(content, tile, fill=X.ACCENT_TINT, margins=(110, 130, 110, 110)))
@@ -257,9 +257,12 @@ def render_note(b):
 
 def render_blocks(blocks, media, resolve):
     out = []
-    for b in blocks:
+    for i, b in enumerate(blocks):
         if isinstance(b, H):
-            out.append(render_heading(b))
+            # 박스의 첫 소제목과 그림 바로 앞 소제목은 다음 블록과 묶지 않는다: Word가 박스 전체를 다음 쪽으로 미는 것을 막는다
+            # (2026-11-15 Word 3쪽이 '2. 기획 배경' 제목만 남고 비었다)
+            before_figure = i + 1 < len(blocks) and isinstance(blocks[i + 1], (Figure, Annotated, Storyboard, KeyNumbers))
+            out.append(render_heading(b, keep_next=i > 0 and not before_figure))
         elif isinstance(b, P):
             out.append(render_p(b))
         elif isinstance(b, Bullets):

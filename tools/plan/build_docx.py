@@ -197,7 +197,16 @@ def fill_box(doc, section, inner_xml):
     head = doc[tbl:s]
     if section.number not in (1, 8):
         head = head.replace('<w:cantSplit/>', '', 1)   # long boxes may break across pages
-    return doc[:tbl] + head + new + doc[e:]
+    prefix = doc[:tbl]
+    if section.number == 2:
+        # Keep the official box-2 title with its opening on a fresh page after the hero.
+        # A break inside the content control would leave the form's title on the prior page.
+        heading_xml = doc[hs:he]
+        for prop in ('pageBreakBefore', 'keepNext'):
+            if '<w:' + prop not in heading_xml:
+                heading_xml = heading_xml.replace('</w:pPr>', '<w:%s/></w:pPr>' % prop, 1)
+        prefix = doc[:hs] + heading_xml + doc[he:tbl]
+    return prefix + head + new + doc[e:]
 
 
 # ------------------------------------------------------------------ other parts
