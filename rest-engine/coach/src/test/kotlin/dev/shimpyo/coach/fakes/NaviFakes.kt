@@ -72,7 +72,9 @@ class FakeNaviPort(private val clock: ElapsedClock) : NaviPort {
         }
     }
 
-    override suspend fun routeStatus(): NaviRouteStatus = answer("routeStatus") { NaviRouteStatus(mode(), congestion()) }
+    var congestionAvailable = true
+
+    override suspend fun routeStatus(): NaviRouteStatus = answer("routeStatus") { NaviRouteStatus(mode(), congestion(), congestionAvailable = congestionAvailable) }
     override suspend fun destination(): NaviDestination = answer("destination") { destination.invoke() }
     override suspend fun tbt(): List<TbtItem> = answer("tbt") { tbt.invoke() }
     override suspend fun currentLocation(): Fix = answer("currentLocation") { location() }

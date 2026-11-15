@@ -4,6 +4,7 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -38,10 +39,10 @@ import dev.shimpyo.engine.Level
 import kotlin.math.max
 
 /**
- * 사람 게이지: 연료 게이지처럼 생긴 '사람의 주행가능시간' (screens.md 1.4).
+ * 사람 게이지: 연료 게이지처럼 생긴 '화장실 예상·휴식 권고까지 시간' (screens.md 1.4).
  *
  *  [아이콘] 화장실            [곧]
- *  38 분
+ *  약 38 분
  *  ██████████▌░░░░|░░░░░
  *  아이 기준
  *
@@ -74,11 +75,17 @@ fun HumanGauge(
             .clearAndSetSemantics { contentDescription = spoken },
         contentPadding = padding,
     ) {
-        Row(Modifier.fillMaxWidth().height(if (compact) 40.dp else Dimens.Icon.base), verticalAlignment = Alignment.CenterVertically) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(if (compact) Dimens.Icon.small else Dimens.Icon.base), tint = c.iconSecondary)
-            Spacer(Modifier.width(if (compact) Dimens.Space.xs else Dimens.Space.s))
-            Text(title, style = DriveType.GaugeLabel, color = c.textSecondary, maxLines = 1, modifier = Modifier.weight(1f))
-            LevelBadge(level)
+        // 840dp 분할 창의 카드 안쪽은 304dp: 추정 라벨과 배지를 우선하고 장식 아이콘은 넓을 때만.
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val showIcon = maxWidth >= 400.dp
+            Row(Modifier.fillMaxWidth().height(if (compact) 40.dp else Dimens.Icon.base), verticalAlignment = Alignment.CenterVertically) {
+                if (showIcon) {
+                    Icon(icon, contentDescription = null, modifier = Modifier.size(if (compact) Dimens.Icon.small else Dimens.Icon.base), tint = c.iconSecondary)
+                    Spacer(Modifier.width(if (compact) Dimens.Space.xs else Dimens.Space.s))
+                }
+                Text(title, style = DriveType.GaugeLabel, color = c.textSecondary, maxLines = 1, modifier = Modifier.weight(1f))
+                LevelBadge(level)
+            }
         }
         // tall: 가로 윈도에서 카드가 세로로 늘어나면 숫자를 가운데, 막대와 이유를 아래에 둔다
         if (tall) Spacer(Modifier.weight(1f)) else Spacer(Modifier.height(if (compact) 0.dp else Dimens.Space.xxs))

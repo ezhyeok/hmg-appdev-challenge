@@ -55,26 +55,31 @@ fun restroomGauge(state: CoachUiState): GaugeModel {
     val tick = (Labels.config.restroomSoonMin / baseline).coerceIn(0f, 1f)
     if (g != null && !state.serviceRunning) return stoppedGauge(tick)
     val whoName = who?.let { Labels.publicName(it) }
+    val personalInterval = who?.intervalOverrideMin?.let { it.isFinite() && it > 0.0 } == true
     return GaugeModel(
         minutes = g?.minutes,
         level = g?.takeIf { it.minutes != null }?.level,
         fraction = g?.minutes?.let { (it / baseline).coerceIn(0f, 1f) },
         tick = tick,
-        reason = g?.reasons?.let { restroomReason(it, whoName) }
-            ?: whoName?.takeIf { g?.minutes != null }?.let { "$it 기준" },
+        reason = g?.reasons?.let { restroomReason(it, whoName, personalInterval) }
+            ?: if (g?.minutes != null) {
+                if (personalInterval) "설정 간격 기준" else "기본 간격 기준"
+            } else null,
     )
 }
 
 /**
- * 화장실 이유 한 줄: 직접 요청 > 정차 간 상한(숫자를 정한 이유) > 자는 중 > 식사 뒤 > 누구 기준 > 개인 기록 > 설정 필요.
+ * 화장실 이유 한 줄: 직접 요청 > 정차 간 상한(숫자를 정한 이유) > 자는 중 > 식사 뒤 > 개인 기록 > 기본/설정 간격 > 설정 필요.
  * '누구 기준'은 늘 붙는 기본 이유라, 숫자가 평소와 다른 이유(잠든 아이는 여유를 더, 식사 뒤에는 조금 일찍)를 먼저 보인다
  */
-fun restroomReason(reasons: List<Reason>, who: String?): String? {
+fun restroomReason(reasons: List<Reason>, who: String?, personalInterval: Boolean = false): String? {
     val order = listOf(
-        "RESTROOM_VOICED", "RESTROOM_CAP", "RESTROOM_ASLEEP", "RESTROOM_AFTER_MEAL", "RESTROOM_ELAPSED", "RESTROOM_PERSONAL", "RESTROOM_NONE",
+        "RESTROOM_VOICED", "RESTROOM_CAP", "RESTROOM_ASLEEP", "RESTROOM_AFTER_MEAL", "RESTROOM_PERSONAL", "RESTROOM_ELAPSED", "RESTROOM_NONE",
     )
     return reasons.sortedBy { r -> order.indexOf(r.code).let { if (it < 0) order.size else it } }
-        .firstNotNullOfOrNull { Labels.shortReason(it, who) }
+        .firstNotNullOfOrNull {
+            if (it.code == "RESTROOM_ELAPSED" && !personalInterval) "기본 간격 기준" else Labels.shortReason(it, who)
+        }
 }
 
 /** 피로 게이지: 막대 = 남은 분 ÷ 120분, 눈금 = SOON 경계(연속 100분 = 남은 20분) */

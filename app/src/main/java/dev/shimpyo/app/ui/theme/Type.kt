@@ -91,7 +91,7 @@ object DriveType {
     val GaugeValueCompact = PleosType.HeadlineSmall.copy(fontFeatureSettings = "tnum")
     /** "분" (32: 4.2mm, 보조) */
     val GaugeUnit = PleosType.TitleSmall
-    /** "화장실", "피로" (28: 3.7mm, 보조) */
+    /** "화장실 예상", "휴식 권고까지" (28: 3.7mm, 보조) */
     val GaugeLabel = PleosType.BodyMediumStrong
     /** 추천 장소 이름 (40: 한글 5.3mm, 중요) */
     val StopName = PleosType.TitleLarge

@@ -62,7 +62,7 @@ data class NaviSnapshot(
         val sinceTbt = moved(tbtOdometerM, odometerM)
         return r.copy(
             remainDistanceM = r.remainDistanceM?.let { (it - sinceRoute).coerceAtLeast(0.0) },
-            congestion = if (sinceRoute <= 0.0) r.congestion
+            congestion = if (!r.congestionBasisKnown) emptyList() else if (sinceRoute <= 0.0) r.congestion
             else r.congestion.map { it.copy(startDistanceM = it.startDistanceM - sinceRoute) }.filter { it.startDistanceM + it.lengthM > 0 },
             nextManeuverDistanceM = if (tbtEpoch == epoch) nextManeuverM?.let { (it - sinceTbt).coerceAtLeast(0.0) } else null,
         )

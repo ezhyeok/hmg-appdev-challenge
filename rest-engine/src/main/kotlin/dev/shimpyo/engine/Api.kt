@@ -146,6 +146,8 @@ data class RouteState(
     val destination: RouteDestination? = null,
     /** 전국 에너지 후보 검색의 별도 범위. null이면 candidatesUntilM을 따른다. TBT만으로 시내 충전소 공백을 단정하지 않는다. */
     val energyCandidatesUntilM: Double? = null,
+    /** 정체 목록을 받았고 offset 기준·필요한 출발점이 확인됐는지. false의 빈 목록은 '정체 없음'이 아니다. */
+    val congestionBasisKnown: Boolean = false,
 )
 
 /** 길안내 목적지. 좌표를 모르면 lat·lon이 null */

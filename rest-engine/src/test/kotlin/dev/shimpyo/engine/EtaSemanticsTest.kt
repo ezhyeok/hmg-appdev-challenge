@@ -34,7 +34,7 @@ class EtaSemanticsTest {
         gear = Gear.DRIVE,
         speedKph = 100f,
         route = RouteState(
-            guiding = true,
+            guiding = true, congestionBasisKnown = true,
             remainDistanceM = 300 * km,
             remainTimeS = 4 * 3_600.0,
             congestion = listOf(CongestionSegment(startDistanceM = 5.4 * km, lengthM = 18.4 * km, durationS = 3_600.0, roadName = "경부고속도로")),

@@ -12,14 +12,14 @@ import kotlin.random.Random
  * - 묻지 않는 때 (엔진이 먼저 거는 질문만. 사용자의 말에 대한 응답 — 급해 결과, 정보, "쉬고 싶어" — 는 바로 답한다):
  *   다음 회전 500m 안 또는 지금 속도로 30초 안, 최근 10초 안의 제동·방향지시등·큰 조향(엔진이 판정),
  *   질문·음성 대화 뒤 30초 (음성 작업 뒤 인지 분산이 최대 27초 남는다, AAA 2015).
- * - 같은 종류는 물은 뒤 20분 쉰다. 거절하면 2배씩(40, 60분 상한). 단계가 오르면 바로 풀린다.
+ * - 같은 종류는 물은 뒤 20분 쉰다. 거절하면 2배씩(40, 60분 상한). 새 이유로 단계가 오르면 쉼은 풀린다.
  *   마지막 기회는 그곳을 지나면 풀린다 (다음 공백은 새 결정이다, SPEC 4.6). 환기 권유는 60분.
- * - 엔진이 먼저 거는 질문은 최근 60분에 3번까지. 이 상한은 자기와 같거나 높은 우선순위의 질문만 센다:
- *   환기·상태 확인 같은 낮은 질문 몇 번이 마지막 기회(이 앱의 핵심)를 한 시간 막지 못하게 (감사 P9). 높은 질문은 낮은 질문의 몫도 쓴다.
- *   NOW 단계 질문(지금 쉬기 권고, 화장실 여유 없음)은 상한에서 뺀다. 조용한 때·30초·쉼 규칙은 그대로 받는다.
+ * - 일반 선제 질문은 최근 60분 총 3회. 아직 마지막 기회를 묻지 않았으면 1회를 남긴다. 우선순위는 총량을 바꾸지 않는다.
+ *   NOW·사용자 요청·정차 중 출발 질문은 별도로 센다. NOW도 조용한 때·30초·쉼을 지킨다.
+ *   같은 장소/이유(숫자가 달라져도 이유 코드가 같으면 같음)는 한 시간에 한 번만 묻는다. 장소가 없으면 종류/이유로 가린다.
  * - 활성 질문보다 우선순위가 높은 급한 질문(마지막 기회, NOW 단계)은 활성 질문을 밀어낸다. 진입로를 놓치지 않게.
  * - 사용자의 말에 대한 응답: 새로 들어온 말이면 바로 답하고, 대답 전의 엔진 질문을 끊는다. 끊긴 질문은 무시한 것으로 치지 않고
- *   물은 것도 되돌려(쉼·시간당 횟수) 응답이 끝나면 다시 물을 수 있다 ("얼마나 남았어?"가 마지막 기회를 지우던 것, 감사 P1).
+ *   쉼은 되돌리지만 이미 운전자에게 건 질문의 횟수와 반복 방지 기록은 유지한다. 추천 카드는 계속 남는다.
  *   같은 때 응답이 둘이면 하나를 먼저 하고 나머지는 지금 질문이 끝난 뒤에 한다 (버리지 않는다, 감사 P10).
  * - 질문 대상이 후보 목록에서 잠깐 빠져도(내비 목록이 깜빡인다) 마지막으로 본 거리에서 최고 속도로 달려도 아직 500m 밖일
  *   동안은 질문을 유지한다. 예전에는 한 번 빠지면 바로 내리고 무시한 것으로 쳤다(감사 P11).
@@ -84,10 +84,9 @@ internal class PromptPolicy(
         var answered: Boolean = false
             internal set
 
-        // 끊겼을 때 되돌릴 것: 물으면서 건 쉼, 그 전의 쉼, 시간당 횟수 기록
+        // 끊겼을 때 되돌릴 것: 물으면서 건 쉼, 그 전의 쉼
         internal var ownCooldown: Cooldown? = null
         internal var prevCooldown: Cooldown? = null
-        internal var mark: IssueMark? = null
 
         // 대상이 목록에서 빠졌을 때 쓰는 마지막으로 본 거리 (m)와 시각
         internal var lastSeenD: Double = Double.NaN
@@ -98,8 +97,46 @@ internal class PromptPolicy(
 
     internal class Cooldown(val atMono: Long, val targetId: String?, val level: Level, val durationMs: Long)
 
-    /** 시간당 상한용 기록: 언제, 어떤 우선순위의 질문을 물었는지 */
-    internal class IssueMark(val mono: Long, val rank: Int)
+    private enum class BudgetKind { PROACTIVE, NOW, USER_REQUESTED, DEPARTURE }
+    private data class IssueMark(val mono: Long, val budget: BudgetKind, val lastChance: Boolean, val key: String?)
+
+    internal data class BudgetUsage(val proactive: Int = 0, val now: Int = 0, val userRequested: Int = 0, val departure: Int = 0)
+
+    internal fun budgetUsage(mono: Long): BudgetUsage {
+        pruneMarks(mono)
+        return BudgetUsage(
+            issueMarks.count { it.budget == BudgetKind.PROACTIVE },
+            issueMarks.count { it.budget == BudgetKind.NOW },
+            issueMarks.count { it.budget == BudgetKind.USER_REQUESTED },
+            issueMarks.count { it.budget == BudgetKind.DEPARTURE },
+        )
+    }
+
+    private fun pruneMarks(mono: Long) {
+        while (issueMarks.isNotEmpty() && mono - issueMarks.first().mono >= HOUR_MS) issueMarks.removeFirst()
+    }
+
+    private fun budgetKind(c: Candidate) = when {
+        c.userInitiated -> BudgetKind.USER_REQUESTED
+        c.kind == PromptKind.DEPARTURE -> BudgetKind.DEPARTURE
+        c.level == Level.NOW || c.kind == PromptKind.URGENT_RESULT -> BudgetKind.NOW
+        else -> BudgetKind.PROACTIVE
+    }
+
+    private fun repeatKey(c: Candidate): String? {
+        if (c.userInitiated || c.kind == PromptKind.DEPARTURE) return null
+        val reason = c.reasons.map { it.code }.distinct().sorted().joinToString(",").ifEmpty { c.kind.name }
+        return "${c.stop?.id ?: c.kind.name}|$reason"
+    }
+
+    private fun budgetBlocked(c: Candidate): Boolean {
+        val key = repeatKey(c)
+        if (key != null && issueMarks.any { it.key == key }) return true
+        if (budgetKind(c) != BudgetKind.PROACTIVE) return false
+        val used = issueMarks.count { it.budget == BudgetKind.PROACTIVE }
+        val reserve = c.kind != PromptKind.LAST_CHANCE && issueMarks.none { it.budget == BudgetKind.PROACTIVE && it.lastChance }
+        return used >= (config.maxPromptsPerHour - if (reserve) 1 else 0).coerceAtLeast(0)
+    }
 
     var active: Issued? = null
         private set
@@ -170,7 +207,7 @@ internal class PromptPolicy(
         if (active == null) for (c in cands) if (c.userInitiated) return issue(c, null, now, mono).prompt
         if (quiet) return active?.prompt
         if (lastInteraction != Long.MIN_VALUE && mono - lastInteraction < config.quietAfterInteractionS * 1000L) return active?.prompt
-        while (issueMarks.isNotEmpty() && mono - issueMarks.first().mono >= HOUR_MS) issueMarks.removeFirst()
+        pruneMarks(mono)
         if (bucketChoice.size > 64) bucketChoice.clear()
 
         for (c in cands) {
@@ -178,8 +215,8 @@ internal class PromptPolicy(
             val act = active
             // 활성 질문이 있으면 더 급한 질문(마지막 기회, NOW 단계)만 그것을 밀어낼 수 있다. 후보는 우선순위 순이다
             if (act != null && !(urgentKind(c) && rank(c.kind) < rank(act.kind))) break
-            // 시간당 상한은 달리는 동안의 말 걸기를 줄이려는 것이다: 서 있을 때만 묻는 출발 전 질문은 세지도 막히지도 않는다
-            if (c.level != Level.NOW && c.kind != PromptKind.DEPARTURE && issuedAtOrAbove(rank(c.kind)) >= config.maxPromptsPerHour) continue
+            // 시간당 상한은 달리는 동안의 말 걸기를 줄이려는 것이다: 서 있을 때만 묻는 출발 전 질문은 별도 집계하며 일반 총량으로 막지 않는다
+            if (budgetBlocked(c)) continue
             if (blocked(c, mono, distanceOf)) continue
             var statKey: String? = null
             val e = edgesFor(c.kind)
@@ -209,7 +246,6 @@ internal class PromptPolicy(
             ?: return memory to null
         if (rec.answered) return memory to null
         rec.answered = true
-        rec.mark = null // 대답한 질문은 끊긴 것으로 되돌리지 않는다
         if (active === rec) active = null
         noteInteraction(mono)
         var mem = memory
@@ -234,14 +270,13 @@ internal class PromptPolicy(
 
     /**
      * 운전자가 다른 정차지를 직접 골랐다 (CoachEngine.noteAccepted): 대답 전의 이 질문은 그 선택으로 끝났다.
-     * 무시한 것으로 치지 않는다. 사용자의 말에 끊긴 질문처럼 물으면서 건 쉼과 시간당 횟수를 되돌리고([interrupt]),
+     * 무시한 것으로 치지 않는다. 사용자의 말에 끊긴 질문처럼 물으면서 건 쉼을 되돌리고([interrupt]),
      * 뒤늦게 오는 대답(늦게 인식된 '응', 화면이 함께 보낸 거절)은 받지 않는다.
      */
     fun supersede(a: Issued) {
         if (a.answered) return
         if (active === a) interrupt(a)
         a.answered = true
-        a.mark = null
     }
 
     /** 테스트용: 톰프슨 샘플링으로 구간 하나를 뽑는다 */
@@ -312,8 +347,8 @@ internal class PromptPolicy(
     }
 
     /**
-     * 사용자의 새 말이 대답 전의 질문을 끊었다. 엔진 질문이면 무시한 것으로 치지 않고, 물으면서 건 쉼과 시간당 횟수도 되돌린다
-     * (응답이 끝나면 같은 질문을 다시 물을 수 있게. 이미 들은 내용이라도 진입로 앞에서 결정을 다시 받는 편이 낫다)
+     * 사용자의 새 말이 대답 전의 질문을 끊었다. 엔진 질문이면 무시한 것으로 치지 않고 물으면서 건 쉼을 되돌린다.
+     * 이미 한 말의 시간당 횟수·반복 방지는 유지한다
      */
     private fun interrupt(a: Issued) {
         active = null
@@ -322,8 +357,6 @@ internal class PromptPolicy(
             val prev = a.prevCooldown
             if (prev != null) cooldowns[a.kind] = prev else cooldowns.remove(a.kind)
         }
-        a.mark?.let { issueMarks.remove(it) }
-        a.mark = null
     }
 
     /**
@@ -332,13 +365,6 @@ internal class PromptPolicy(
      */
     private fun booksCooldown(a: Issued): Boolean =
         !a.userInitiated || (a.kind == PromptKind.LAST_CHANCE && a.targetId != null)
-
-    /** 최근 60분에 물은 질문 중 우선순위가 r 이상(숫자가 작거나 같은)인 것의 수 */
-    private fun issuedAtOrAbove(r: Int): Int {
-        var n = 0
-        for (m in issueMarks) if (m.rank <= r) n++
-        return n
-    }
 
     private fun issue(c: Candidate, statKey: String?, now: Long, mono: Long): Issued {
         val ttl = config.promptTtlS * 1000L
@@ -356,12 +382,9 @@ internal class PromptPolicy(
         lastIssued = c
         recent.addFirst(iss)
         while (recent.size > RECENT_MAX) recent.removeLast()
+        pruneMarks(mono)
+        issueMarks.addLast(IssueMark(mono, budgetKind(c), c.kind == PromptKind.LAST_CHANCE, repeatKey(c)))
         if (!c.userInitiated) {
-            if (c.kind != PromptKind.DEPARTURE) {
-                val mark = IssueMark(mono, rank(c.kind))
-                issueMarks.addLast(mark)
-                iss.mark = mark
-            }
             iss.prevCooldown = cooldowns[c.kind]
             val cd = Cooldown(mono, c.stop?.id, c.level, baseCooldownMin(c.kind) * 60_000L)
             cooldowns[c.kind] = cd
@@ -375,7 +398,7 @@ internal class PromptPolicy(
     /** 시간이 지나면 의미가 없어지는 질문: 마지막 기회, NOW 단계 */
     /**
      * [kind]의 활성 질문을 거둔다: 뜻이 없어졌다 (출발 전 질문인데 달리기 시작했다). 대답 없이 지나간 것으로 치지 않아
-     * 쉼·시간당 횟수를 남기지 않는다
+     * 쉼을 남기지 않는다. 이미 한 말의 횟수는 유지한다
      */
     fun withdraw(kind: PromptKind) {
         val a = active ?: return

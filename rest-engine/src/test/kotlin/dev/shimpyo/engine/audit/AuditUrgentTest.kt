@@ -96,7 +96,7 @@ class AuditUrgentTest {
 
     /** 1km 앞부터 18km·60분 정체. 목적지 200km */
     private val jammed = RouteState(
-        guiding = true, remainDistanceM = 200 * KM, remainTimeS = 182 * KM / V100 + 3_600.0,
+        guiding = true, congestionBasisKnown = true, remainDistanceM = 200 * KM, remainTimeS = 182 * KM / V100 + 3_600.0,
         congestion = listOf(CongestionSegment(startDistanceM = 1 * KM, lengthM = 18 * KM, durationS = 3_600.0)), nextManeuverDistanceM = 100 * KM,
     )
     private val inTheJam = listOf(stop("shelter", 6 * KM, kind = StopKind.DROWSY_SHELTER, name = "가졸음쉼터"), stop("rest", 10 * KM, name = "나휴게소"))

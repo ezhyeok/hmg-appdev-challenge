@@ -100,7 +100,7 @@ internal class GapAnalyzer(private val config: CoachConfig) {
         val thresholdS = (if (sensitive) config.congestionAlertSensitiveMin else config.congestionAlertMin) * 60.0
         val h = route.horizonM
         var j = 0
-        while (j < route.jamN) {
+        while (route.congestionBasisKnown && j < route.jamN) {
             val s = route.jamStart[j]
             var e = route.jamEnd[j]
             var k = j + 1

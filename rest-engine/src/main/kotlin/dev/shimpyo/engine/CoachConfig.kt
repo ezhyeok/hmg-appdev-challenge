@@ -79,7 +79,7 @@ data class CoachConfig(
      * 타는 중에 연 문은 화장실 정차로 세지 않는다. 근거: 설계값 (시동 → 출발은 대개 1~2분)
      */
     val boardingWindowMin: Int = 2,
-    /** 엔진이 먼저 거는 질문 상한 (시간당). 근거: AI §9-3 */
+    /** 일반 선제 질문의 최근 60분 총량. 이 중 1회는 마지막 기회용으로 예약. NOW·사용자 응답·출발 전 질문은 별도 집계 */
     val maxPromptsPerHour: Int = 3,
 
     // 급해 모드 (분). 근거: SPEC v0

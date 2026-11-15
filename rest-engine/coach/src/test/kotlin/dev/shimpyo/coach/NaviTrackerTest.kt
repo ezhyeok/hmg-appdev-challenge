@@ -68,6 +68,38 @@ class NaviTrackerTest {
 
     private fun every(stepMs: Long, fromMs: Long, toMs: Long) = (fromMs..toMs step stepMs).toList()
 
+    @Test
+    fun unknownCongestionBasisKeepsTbtAndLosingTrafficDataClearsConfidence() = runTest {
+        val r = Rig(this)
+        r.guide()
+        r.tbtAhead(20_000.0, 30_000.0)
+        r.navi.congestion = { listOf(NaviCongestion(50_000.0 - r.odo.meters, 10_000.0, 2_400.0, "JAM", "경부", "청주", "남이")) }
+        r.start()
+        advanceTimeBy(1_001)
+        assertFalse(r.snap.route!!.congestionBasisKnown)
+        assertTrue(r.snap.route!!.congestion.isEmpty())
+        assertTrue(r.snap.tbtReceived)
+        assertTrue(r.snap.opportunities.isNotEmpty())
+        advanceTimeBy(120_000)
+        assertTrue(r.snap.route!!.congestionBasisKnown)
+        assertTrue(r.snap.liveRoute(r.odo.meters)!!.congestionBasisKnown)
+        r.navi.congestionAvailable = false
+        r.navi.congestion = { emptyList() }
+        r.navi.faults["destination"] = Fault.THROW
+        advanceTimeBy(30_000)
+        assertFalse(r.snap.route!!.congestionBasisKnown)
+        assertTrue(r.snap.route!!.congestion.isEmpty())
+        assertTrue(r.snap.opportunities.isNotEmpty())
+        r.navi.faults.remove("destination")
+        r.navi.congestionAvailable = true // 확인한 기준 + 실제 빈 응답은 정체 없음
+        advanceTimeBy(30_000)
+        assertTrue(r.snap.route!!.congestionBasisKnown)
+        r.navi.faults["routeStatus"] = Fault.THROW
+        advanceTimeBy(20_000)
+        assertFalse(r.snap.route!!.congestionBasisKnown)
+        assertTrue(r.snap.tbtReceived)
+    }
+
     // ------------------------------------------------------------ 조회 간격
 
     @Test

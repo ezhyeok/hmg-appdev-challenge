@@ -14,7 +14,7 @@ class NaviSnapshotTest {
     private val snap = NaviSnapshot(
         epoch = 3,
         mode = NaviMode.ROUTE_GUIDING,
-        route = RouteState(guiding = true, remainDistanceM = 100_000.0, remainTimeS = 4_000.0, congestion = listOf(CongestionSegment(500.0, 1_000.0, 300.0), CongestionSegment(20_000.0, 2_000.0, 600.0))),
+        route = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 100_000.0, remainTimeS = 4_000.0, congestion = listOf(CongestionSegment(500.0, 1_000.0, 300.0), CongestionSegment(20_000.0, 2_000.0, 600.0))),
         routeOdometerM = 1_000.0,
         opportunities = listOf(RouteOpportunity("옥산휴게소", StopKind.HIGHWAY_REST_AREA, 4_000.0), RouteOpportunity("죽암휴게소", StopKind.HIGHWAY_REST_AREA, 25_000.0)),
         tbtReceived = true,
@@ -33,6 +33,15 @@ class NaviSnapshotTest {
         assertEquals("지나간 정체는 빠진다", listOf(18_000.0), live.congestion.map { it.startDistanceM })
         assertEquals(listOf(2_000.0, 23_000.0), snap.liveOpportunities(3_000.0).map { it.routeDistanceM })
         assertEquals(78_000.0, snap.liveTbtCoverageM(3_000.0)!!, 1e-9)
+    }
+
+    @Test
+    fun basisConfidenceSurvivesProjectionAndUnknownSegmentsAreNotLocated() {
+        assertTrue(snap.liveRoute(3_000.0)!!.congestionBasisKnown)
+        val unknown = snap.copy(route = snap.route!!.copy(congestionBasisKnown = false))
+        assertTrue(!unknown.liveRoute(3_000.0)!!.congestionBasisKnown)
+        assertTrue(unknown.liveRoute(3_000.0)!!.congestion.isEmpty())
+        assertTrue(unknown.liveOpportunities(3_000.0).isNotEmpty())
     }
 
     @Test

@@ -79,7 +79,9 @@ class PromptPolicyTest {
         p.onResult(q.id, accepted = false, mono = t + 5 * SEC, memory = PersonalMemory())
         t += 39 * MIN
         assertNull(p.ask(listOf(simple(PromptKind.CHECK_IN, Level.WATCH)), t), "첫 거절 → 40분")
-        assertNotNull(p.ask(listOf(simple(PromptKind.CHECK_IN, Level.SOON)), t), "단계가 오르면 바로 풀린다")
+        val changedReason = PromptPolicy.Candidate(PromptKind.CHECK_IN, "운전 패턴 변화", level = Level.SOON,
+            reasons = listOf(Reason("FATIGUE_STYLE", "새 운전 패턴 변화")))
+        assertNotNull(p.ask(listOf(changedReason), t), "새 이유로 단계가 오르면 쉼은 풀린다")
         val q2 = p.active!!.prompt
         p.onResult(q2.id, accepted = false, mono = t + 5 * SEC, memory = PersonalMemory())
         assertNull(p.ask(listOf(simple(PromptKind.CHECK_IN, Level.SOON)), t + 59 * MIN), "두 번째 거절 → 60분 (상한)")
@@ -101,8 +103,7 @@ class PromptPolicyTest {
 
     @Test
     fun atMostThreeEnginePromptsPerHourExceptNowLevel() {
-        // 상한은 같거나 높은 우선순위 질문만 센다(감사 P9): 높은 질문 셋 뒤의 낮은 질문은 막힌다.
-        // 예전 순서(상태 확인·환기·휴식 뒤 마지막 기회가 막힘)는 낮은 질문이 핵심 질문을 막는 결함이라 AuditPromptPolicyTest로 옮겼다
+        // 마지막 기회를 포함한 일반 질문 셋 뒤에는 우선순위와 무관하게 총량을 막는다.
         val p = policy()
         val kinds = listOf(PromptKind.LAST_CHANCE, PromptKind.REST_SUGGESTION, PromptKind.CHECK_IN, PromptKind.FRESH_AIR)
         var issued = 0
@@ -118,8 +119,67 @@ class PromptPolicyTest {
         }
         assertEquals(3, cfg.maxPromptsPerHour)
         assertEquals(cfg.maxPromptsPerHour, issued, "네 번째는 막힌다")
-        val now = p.ask(listOf(simple(PromptKind.REST_SUGGESTION, Level.NOW)), t)
-        assertEquals(PromptKind.REST_SUGGESTION, now?.kind, "NOW 단계 휴식 권고는 상한에서 뺀다")
+        assertNull(p.ask(listOf(simple(PromptKind.REST_SUGGESTION, Level.NOW)), t), "NOW라도 같은 이유를 반복하지 않는다")
+        val urgent = p.ask(listOf(simple(PromptKind.URGENT_RESULT, Level.NOW)), t)
+        assertEquals(PromptKind.URGENT_RESULT, urgent?.kind, "새 긴급 이유는 총량과 별도")
+    }
+
+    @Test
+    fun totalBudgetReservesLastChanceThenCountsNowSeparately() {
+        val p = policy()
+        fun askAndAnswer(c: PromptPolicy.Candidate, minute: Int): Prompt {
+            val t = t0 + minute * MIN
+            val q = assertNotNull(p.ask(listOf(c), t))
+            p.onResult(q.id, true, t + SEC, PersonalMemory())
+            return q
+        }
+        askAndAnswer(simple(PromptKind.FRESH_AIR), 0)
+        askAndAnswer(simple(PromptKind.CHECK_IN), 2)
+        assertNull(p.ask(listOf(simple(PromptKind.REST_SUGGESTION)), t0 + 4 * MIN), "마지막 기회 몫 1회를 남긴다")
+        askAndAnswer(lastChance(d = 2_100.0), 6)
+        distances.remove(anchor.id)
+        assertNull(p.ask(listOf(lastChance(other, 2_100.0)), t0 + 8 * MIN), "우선순위와 무관하게 일반 질문 총 3회")
+        askAndAnswer(simple(PromptKind.REST_SUGGESTION, Level.NOW), 10)
+        assertNull(p.ask(listOf(simple(PromptKind.REST_SUGGESTION, Level.NOW)), t0 + 31 * MIN), "NOW도 같은 이유를 반복하지 않는다")
+        askAndAnswer(simple(PromptKind.URGENT_RESULT, user = true), 32)
+        assertEquals(PromptPolicy.BudgetUsage(proactive = 3, now = 1, userRequested = 1), p.budgetUsage(t0 + 33 * MIN))
+        assertEquals(PromptPolicy.BudgetUsage(), p.budgetUsage(t0 + 93 * MIN))
+    }
+
+    @Test
+    fun aNoPlaceQuestionInterruptedByTheUserIsNotRepeatedInTheSameHour() {
+        val p = policy()
+        assertNotNull(p.ask(listOf(simple(PromptKind.FRESH_AIR)), t0))
+        val info = assertNotNull(p.ask(listOf(simple(PromptKind.INFO, user = true)), t0 + SEC))
+        p.onResult(info.id, true, t0 + 2 * SEC, PersonalMemory())
+        assertNull(p.ask(listOf(simple(PromptKind.FRESH_AIR)), t0 + 2 * MIN))
+        assertEquals(1, p.budgetUsage(t0 + 2 * MIN).proactive)
+    }
+
+    @Test
+    fun numericalUpdatesAndNowEscalationDoNotRepeatTheSamePlaceAndReason() {
+        val p = policy()
+        distances[anchor.id] = 2_100.0
+        fun candidate(minutes: Int, level: Level) = PromptPolicy.Candidate(
+            PromptKind.LAST_CHANCE, "다음 화장실까지 ${minutes}분", anchor, 2_100.0, level,
+            reasons = listOf(Reason("LAST_CHANCE_GAP", "다음 화장실까지 ${minutes}분 걸려요")),
+        )
+        val q = assertNotNull(p.ask(listOf(candidate(40, Level.WATCH)), t0))
+        p.onResult(q.id, true, t0 + SEC, PersonalMemory())
+        assertNull(p.ask(listOf(candidate(39, Level.NOW)), t0 + 21 * MIN))
+        assertNotNull(p.ask(listOf(candidate(38, Level.NOW)), t0 + 61 * MIN))
+    }
+
+    @Test
+    fun samePlaceAndReasonDoesNotRepeatAfterCooldownOrUserInterruption() {
+        val p = policy()
+        val c = lastChance(d = 2_100.0)
+        assertNotNull(p.ask(listOf(c), t0))
+        val info = assertNotNull(p.ask(listOf(simple(PromptKind.INFO, user = true)), t0 + SEC))
+        p.onResult(info.id, true, t0 + 2 * SEC, PersonalMemory())
+        assertNull(p.ask(listOf(c), t0 + 21 * MIN))
+        assertEquals(1, p.budgetUsage(t0 + 21 * MIN).proactive, "이미 건 질문은 취소해도 횟수를 돌려주지 않는다")
+        assertNotNull(p.ask(listOf(c), t0 + 61 * MIN))
     }
 
     @Test

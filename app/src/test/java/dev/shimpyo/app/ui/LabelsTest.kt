@@ -152,9 +152,9 @@ class LabelsTest {
     @Test
     fun readoutAndParticles() {
         assertEquals(Labels.Readout("--", "분"), Labels.readout(null))
-        assertEquals(Labels.Readout("119", "분"), Labels.readout(119))
-        assertEquals(Labels.Readout("2", "시간+"), Labels.readout(120))
-        assertEquals(Labels.Readout("0", "분"), Labels.readout(0))
+        assertEquals(Labels.Readout("약 119", "분"), Labels.readout(119))
+        assertEquals(Labels.Readout("약 2", "시간+"), Labels.readout(120))
+        assertEquals(Labels.Readout("약 0", "분"), Labels.readout(0))
         assertEquals("안성휴게소를", Labels.withObject("안성휴게소"))
         assertEquals("옥산휴게소(부산방향)를", Labels.withObject("옥산휴게소(부산방향)"))
         assertEquals("죽암을", Labels.withObject("죽암"))

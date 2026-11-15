@@ -71,6 +71,14 @@ class CoachTextsTest {
     }
 
     @Test
+    fun howLongDescribesAnEstimatedRecommendationNotASafeDrivingLimit() {
+        val answer = t.howLong(50, "운전자", 40, null, null)
+        assertTrue(answer.contains("화장실 여유는 약 50분"))
+        assertTrue(answer.contains("휴식 권고까지는 약 40분"))
+        assertFalse(answer.contains("운전할 수 있는 시간"))
+    }
+
+    @Test
     fun textsCanBeOverridden() {
         val custom = object : CoachTexts() {
             override fun checkIn(drivenMin: Int, byStyle: Boolean) = "Feeling sleepy?"

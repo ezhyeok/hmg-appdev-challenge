@@ -19,7 +19,7 @@ class AuditRouteTest {
         // 목적지 50km, 정체 40~60km(40분). 내비 남은 시간 = 40km 자유 + 정체 절반 20분 = 2,640초
         val ctx = RouteContext(cfg).apply {
             prepare(
-                RouteState(guiding = true, remainDistanceM = 50 * KM, remainTimeS = 40 * KM / V100 + 1_200.0, congestion = listOf(jam(40.0, 20.0, 40.0))),
+                RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 50 * KM, remainTimeS = 40 * KM / V100 + 1_200.0, congestion = listOf(jam(40.0, 20.0, 40.0))),
                 100f,
             )
         }
@@ -33,7 +33,7 @@ class AuditRouteTest {
         val dup = CongestionSegment(startDistanceM = 10 * KM, lengthM = 10 * KM, durationS = 1_200.0)
         val ctx = RouteContext(cfg).apply {
             prepare(
-                RouteState(guiding = true, remainDistanceM = 300 * KM, remainTimeS = 290 * KM / V100 + 1_200.0, congestion = listOf(dup, dup)),
+                RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 300 * KM, remainTimeS = 290 * KM / V100 + 1_200.0, congestion = listOf(dup, dup)),
                 100f,
             )
         }
@@ -70,7 +70,7 @@ class AuditRouteTest {
         // 101km 안 29항목 2,480m·385초 → 1,110m·200초, 97~101km는 19항목 1,640m·220초 → 440m·79초.
         // 먼 정체일수록 줄어들어, 여러 항목으로 오는 긴 정체는 가까이 가기 전에는 20·30분 기준에 못 미칠 수 있었다
         val segs = measuredSegments()
-        val ctx = RouteContext(cfg).apply { prepare(RouteState(guiding = true, remainDistanceM = 383 * KM, congestion = segs), 90f) }
+        val ctx = RouteContext(cfg).apply { prepare(RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 383 * KM, congestion = segs), 90f) }
         val (jamLen, jamTime) = ctx.jamTotals()
         approx(segs.sumOf { it.lengthM }, jamLen, 1e-6, "길이 2,480m를 그대로")
         approx(segs.sumOf { it.durationS }, jamTime, 1e-6, "통과 시간 385초를 그대로")
@@ -89,7 +89,7 @@ class AuditRouteTest {
         val b = jam(15.0, 10.0, 30.0)
         for (items in listOf(listOf(a, b), listOf(b, a))) { // 받은 순서가 달라도 같다
             val ctx = RouteContext(cfg).apply {
-                prepare(RouteState(guiding = true, remainDistanceM = 300 * KM, remainTimeS = 280 * KM / V100 + 3_000.0, congestion = items), 100f)
+                prepare(RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 300 * KM, remainTimeS = 280 * KM / V100 + 3_000.0, congestion = items), 100f)
             }
             val (len, time) = ctx.jamTotals()
             approx(20 * KM, len, 1e-6)
@@ -107,7 +107,7 @@ class AuditRouteTest {
         // 같은 시작·길이여도 통과 시간이나 이름이 다르면 다른 구간이다 (실측: 98000/100이 다섯 개, 평균 속도만 다르다)
         val base = CongestionSegment(startDistanceM = 10 * KM, lengthM = 5 * KM, durationS = 600.0, roadName = "경부고속도로", startName = "가IC", endName = "나IC")
         fun totals(vararg items: CongestionSegment) =
-            RouteContext(cfg).apply { prepare(RouteState(guiding = true, remainDistanceM = 300 * KM, congestion = items.toList()), 100f) }.jamTotals()
+            RouteContext(cfg).apply { prepare(RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 300 * KM, congestion = items.toList()), 100f) }.jamTotals()
         assertEquals(5 * KM to 600.0, totals(base, base.copy()), "모든 값이 같으면 한 번")
         assertEquals(5 * KM to 600.0, totals(base, base.copy(type = "HEAVY")), "종류 표기만 다른 것도 같은 항목")
         assertEquals(10 * KM to 1_500.0, totals(base, base.copy(durationS = 900.0)), "통과 시간이 다르다")
@@ -120,7 +120,7 @@ class AuditRouteTest {
     fun itemsPushedPastTheDestinationOrAlreadyPassedAreClipped() {
         // 목적지 20km. 15~19km 8분, 같은 시작의 다른 항목 4km 8분은 19~23km로 밀려 목적지 안쪽 1km(2분)만 남는다
         val items = listOf(jam(15.0, 4.0, 8.0), CongestionSegment(startDistanceM = 15 * KM, lengthM = 4 * KM, durationS = 480.0, roadName = "다른 구간"))
-        val ctx = RouteContext(cfg).apply { prepare(RouteState(guiding = true, remainDistanceM = 20 * KM, congestion = items), 100f) }
+        val ctx = RouteContext(cfg).apply { prepare(RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 20 * KM, congestion = items), 100f) }
         val (len, time) = ctx.jamTotals()
         approx(5 * KM, len, 1e-6)
         approx(480.0 + 120.0, time, 1e-6)
@@ -130,7 +130,7 @@ class AuditRouteTest {
             CongestionSegment(startDistanceM = -1 * KM, lengthM = 2 * KM, durationS = 600.0),
             CongestionSegment(startDistanceM = 0.5 * KM, lengthM = 1 * KM, durationS = 300.0, roadName = "다음 구간"),
         )
-        val inside = RouteContext(cfg).apply { prepare(RouteState(guiding = true, remainDistanceM = 100 * KM, congestion = passed), 100f) }
+        val inside = RouteContext(cfg).apply { prepare(RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 100 * KM, congestion = passed), 100f) }
         assertEquals(1, inside.jamN, "같은 속도로 이어진 구간은 하나로")
         approx(0.0, inside.jamStart[0], 1e-9)
         approx(2 * KM, inside.jamEnd[0], 1e-6, "들어와 있는 항목의 남은 1km + 그 끝에 이어 놓은 1km")

@@ -195,7 +195,10 @@ class NaviTracker(
             return
         }
         // 같은 경로인데 목적지를 못 읽었다: 지난 값을 그대로 두고(liveRoute가 계속 줄여 쓴다) 5초 뒤 다시 읽는다
-        if (!usable) return
+        if (!usable) {
+            clearCongestionConfidence()
+            return
+        }
         val p = NaviPoll.checkProgress(prevRemainM, prevRemainOdometerM, remain, odoAt, prev.odometerTrusted)
         if (p.rerouted) {
             newEpoch(prev, status, dest, remain, odoAt, "rerouted (remain ${prevRemainM?.toInt()} -> ${remain!!.toInt()} m)")
@@ -235,7 +238,7 @@ class NaviTracker(
             NaviSnapshot(
                 epoch = epoch,
                 mode = status.mode,
-                route = if (dest != null) routeState(status, dest, remain, odoAt) else RouteState(guiding = true, congestion = congestion.update(status.congestion, null, odoAt)),
+                route = routeState(status, dest, remain, odoAt),
                 routeOdometerM = odoAt,
                 destination = dest,
                 tbtOdometerM = odoAt,
@@ -257,7 +260,17 @@ class NaviTracker(
      * 지금 것으로 계속 내보냈다 (서비스 감사 SV-N5). 그 전까지는 지난 스냅샷을 둔다: 잠깐의 실패에 엔진 입력이 깜박이지 않게.
      * [startedAt]: 실패한 조회를 보낸 때. 무응답(호출마다 20초)과 빠른 실패(5초마다)를 같은 시간으로 재려고 실패 수가 아니라 시간으로 본다.
      */
+    /** 경로/TBT는 기존 만료 규칙으로 유지하되, 조회에 실패한 정체 위치로 새 결정을 만들지 않는다. */
+    private fun clearCongestionConfidence() {
+        val s = state.value
+        val r = s.route ?: return
+        if (r.congestionBasisKnown || r.congestion.isNotEmpty()) {
+            publish(s.copy(route = r.copy(congestion = emptyList(), congestionBasisKnown = false)))
+        }
+    }
+
     private fun routeFailed(startedAt: Long, now: Long) {
+        clearCongestionConfidence()
         val since = routeFailingSince ?: startedAt.also { routeFailingSince = it }
         if (routeUnknown || now - since < ROUTE_STALE_MS) return
         routeUnknown = true
@@ -281,14 +294,18 @@ class NaviTracker(
         publish(NaviSnapshot(epoch = epoch, mode = mode, route = route, routeOdometerM = odo, tbtOdometerM = odo, tbtEpoch = epoch))
     }
 
-    private fun routeState(status: NaviRouteStatus, dest: NaviDestination, remain: Double?, odoAt: Double) = RouteState(
-        guiding = true,
-        remainDistanceM = remain,
-        remainTimeS = dest.remainTimeS.takeIf { it.isFinite() && it >= 0.0 },
-        congestion = congestion.update(status.congestion, remain, odoAt),
-        // 엔진이 '서 있는 동안 새 목적지를 정했는지'를 목적지로 가린다 (재탐색은 같은 목적지, 출발 전 한마디). 좌표 (0, 0)·NaN은 엔진이 모름으로 본다
-        destination = RouteDestination(dest.name, dest.lat, dest.lon),
-    )
+    private fun routeState(status: NaviRouteStatus, dest: NaviDestination?, remain: Double?, odoAt: Double): RouteState {
+        val jams = congestion.update(status.congestion, remain, odoAt, available = status.congestionAvailable)
+        return RouteState(
+            guiding = true,
+            remainDistanceM = remain,
+            remainTimeS = dest?.remainTimeS?.takeIf { it.isFinite() && it >= 0.0 },
+            congestion = jams.segments,
+            congestionBasisKnown = jams.basisKnown,
+            // 재탐색은 같은 목적지. 출발 전 한마디는 목적지 변화로 가린다.
+            destination = dest?.let { RouteDestination(it.name, it.lat, it.lon) },
+        )
+    }
 
     /** 목적지가 바뀌었는지. 좌표를 알면 좌표로(100m 넘게), 모르면 이름으로 */
     private fun destinationMoved(a: NaviDestination?, b: NaviDestination?): Boolean {

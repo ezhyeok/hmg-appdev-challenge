@@ -86,6 +86,8 @@ data class NaviCongestion(
 data class NaviRouteStatus(
     val mode: NaviMode,
     val congestion: List<NaviCongestion> = emptyList(),
+    /** trafficStatus가 없거나 변환에서 항목을 잃었으면 false. 빈 수신 목록과 구별한다. */
+    val congestionAvailable: Boolean = false,
 )
 
 /** DestinationInfo 중 코치가 쓰는 것 (거리 m, 시간 초) */

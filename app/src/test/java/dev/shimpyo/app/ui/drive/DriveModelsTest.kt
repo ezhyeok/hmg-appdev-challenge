@@ -160,7 +160,7 @@ class DriveModelsTest {
         assertEquals("혹시 졸리세요?", shortQuestion(checkIn))
         assertEquals("1시간 35분째 운전 중이에요", promptLead(checkIn))
         // 숫자 안의 점(3.5km)에서 문장을 자르지 않는다
-        val info = Prompt("i", PromptKind.INFO, "다음 화장실은 3.5km 앞 옥산휴게소예요. 쉬지 않고 운전할 수 있는 시간은 약 40분이에요.", null, Long.MAX_VALUE)
+        val info = Prompt("i", PromptKind.INFO, "다음 화장실은 3.5km 앞 옥산휴게소예요. 휴식 권고까지는 약 40분이에요.", null, Long.MAX_VALUE)
         assertEquals("다음 화장실은 3.5km 앞 옥산휴게소예요.", shortQuestion(info))
         // 질문 문장이 길면 종류별 짧은 질문
         val longQ = checkIn.copy(speech = "지금은 졸음이 오기 쉬운 시간이에요. 오늘 많이 피곤하시면 잠깐 쉬었다 가시는 게 어떨까요, 혹시 졸리세요?")
@@ -345,10 +345,34 @@ class DriveModelsTest {
     }
 
     @Test
+    fun estimateBasisDistinguishesDefaultsPersonalRecordsAndActualRequests() {
+        val elapsed = Reason("RESTROOM_ELAPSED", "운전자 기준, 마지막 화장실 후 30분 지났어요")
+        assertEquals("기본 간격 기준", restroomReason(listOf(elapsed), "운전자"))
+        assertEquals("기록 3번 반영", restroomReason(listOf(elapsed, Reason("RESTROOM_PERSONAL", "운전자의 지난 기록 3번을 반영했어요")), "운전자"))
+        assertEquals("운전자 요청", restroomReason(listOf(elapsed, Reason("RESTROOM_VOICED", "운전자가 화장실이 필요하다고 했어요")), "운전자"))
+        assertEquals("기본 간격 기준", restroomGauge(running.copy(restroom = Gauge(50, Level.OK))).reason)
+        assertTrue("화장실 예상".length <= dev.shimpyo.app.ui.theme.DriveLimits.MAX_CHIP_CHARS)
+        assertTrue("휴식 권고까지".length <= dev.shimpyo.app.ui.theme.DriveLimits.MAX_CHIP_CHARS)
+        assertTrue("기본 간격 기준".length <= dev.shimpyo.app.ui.theme.DriveLimits.MAX_CHIP_CHARS)
+    }
+
+    @Test
+    fun earlyQuestionStillExplainsTheGapWhileGaugeShowsAnEstimate() {
+        val s = stop("a", "안성휴게소", 3.0)
+        val reason = Reason("LAST_CHANCE_GAP", "이곳을 지나면 다음 화장실까지 1시간 3분 걸려요")
+        val state = running.copy(restroom = Gauge(50, Level.OK),
+            prompt = Prompt("gap", PromptKind.LAST_CHANCE, "안성휴게소를 지나면 1시간 3분 동안 화장실이 없어요. 들를까요?", s, Long.MAX_VALUE, reasons = listOf(reason)),
+            promptReasons = listOf(reason), next = rec(s, reason))
+        assertEquals("기본 간격 기준", restroomGauge(state).reason)
+        assertEquals(listOf("공백 1시간 3분"), stopCard(state, driving = true).chips)
+    }
+
+    @Test
     fun gaugeBarUsesPersonalIntervalWhenSet() {
         val me = Occupant("me", OccupantType.ADULT, intervalOverrideMin = 60.0)
         val s = CoachUiState(serviceRunning = true, occupants = listOf(me), restroom = Gauge(50, Level.OK, drivenBy = "me"))
         assertEquals(50f / 60f, restroomGauge(s).fraction!!, 0.01f)
+        assertEquals("설정 간격 기준", restroomGauge(s).reason)
     }
 
     @Test
@@ -369,7 +393,7 @@ class DriveModelsTest {
             next = rec(stop("a", "안성휴게소", 5.0)),
         )
         assertFalse(stopCard(s, driving = true).chips.any { "방광" in it })
-        assertEquals("민감 탑승자 기준", restroomGauge(s).reason)
+        assertEquals("기본 간격 기준", restroomGauge(s).reason)
     }
 
     @Test

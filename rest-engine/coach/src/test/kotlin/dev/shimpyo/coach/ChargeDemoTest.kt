@@ -20,6 +20,7 @@ class ChargeDemoTest {
         assertEquals("charge", rig.state.demo)
         rig.run(3_000)
         assertEquals(EnergyKind.ELECTRIC, rig.state.energy)
+        assertTrue("대본의 정체 기준은 명시적으로 알려져 있다", rig.state.congestionBasisKnown)
         val next = checkNotNull(rig.state.next)
         assertEquals("oksan", next.stop.id)
         assertTrue(next.reasons.any { it.code == "RANGE_LAST_CHANCE" })

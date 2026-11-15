@@ -190,6 +190,7 @@ class DemoRun private constructor(
             remainDistanceM = remain,
             remainTimeS = remainTimeS(remain, travelled),
             congestion = congestion,
+            congestionBasisKnown = true, // 시연은 경로상의 정체 좌표·빈 목록을 대본이 확정한다
             // 시연 후보는 직선 60km 안의 시설이라 경로 거리 55km까지만 다 들어 있다. 그 뒤를 목적지까지의 공백으로 보지 않게
             candidatesUntilM = DEMO_CANDIDATES_UNTIL_M,
             // 시연의 목적지는 하나다: 시연 차는 P에서도 경로를 따라 움직여 남은 거리가 계속 바뀌는데, 목적지를 모르면 엔진이 그것을

@@ -83,6 +83,7 @@ data class CoachUiState(
     val remainDistanceM: Double? = null,
     val remainTimeS: Double? = null,
     val congestion: List<CongestionSegment> = emptyList(),
+    val congestionBasisKnown: Boolean = false,
     /** 경로 앞쪽 화장실 기회 (계획 화면 타임라인). 매초 달린 만큼 거리를 줄여 올린다 */
     val ahead: List<StopCandidate> = emptyList(),
     /** 앞쪽 후보를 아직 못 구한 이유 (빈 목록을 '화장실 없음'으로 보이지 않게) */

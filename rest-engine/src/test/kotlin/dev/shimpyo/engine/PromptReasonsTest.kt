@@ -24,7 +24,7 @@ class PromptReasonsTest {
     private val t0 = kst(2026, 11, 11, 10, 0)
     private val km = 1_000.0
     private val v100 = 100 / 3.6
-    private val route = RouteState(guiding = true, remainDistanceM = 200 * km, remainTimeS = 200 * km / v100, nextManeuverDistanceM = 50 * km)
+    private val route = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 200 * km, remainTimeS = 200 * km / v100, nextManeuverDistanceM = 50 * km)
 
     private fun family(sinceMin: Int = 30) = CoachEngine(
         profile = TripProfile(

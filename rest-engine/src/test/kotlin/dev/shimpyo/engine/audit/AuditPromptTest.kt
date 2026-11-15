@@ -55,9 +55,8 @@ class AuditPromptTest {
     }
 
     @Test
-    fun askingHowLongWhileALastChanceIsPendingDoesNotCancelIt() {
-        // 회귀(감사 P1): 사용자 응답이 활성 질문을 '무시함'으로 내리고 20분 쉼을 걸어, 마지막 기회를 듣고 "얼마나 남았어?"라고 물으면
-        // 진입로 전에 다시 묻지 않았다
+    fun askingHowLongKeepsRecommendationWithoutRepeatingTheSpokenQuestion() {
+        // 사용자 응답은 바로 하고 추천은 남긴다. 심사 #10: 이미 들은 같은 장소/이유의 선제 질문을 반복하지 않는다.
         val sim = holidaySim()
         val first = sim.step()
         val lc = assertNotNull(first.prompt)
@@ -66,7 +65,8 @@ class AuditPromptTest {
         assertEquals(PromptKind.INFO, info.prompt?.kind)
         var reasked = false
         sim.driveUntilPos(4.45 * KM - 2.0 * KM) { o -> if (o.prompt?.kind == PromptKind.LAST_CHANCE && o.prompt?.id != lc.id) reasked = true }
-        assertTrue(reasked, "INFO 답 뒤 진입로 2km 전까지 마지막 기회를 다시 물어야 한다")
+        assertEquals(false, reasked, "이미 들은 같은 장소/이유의 질문은 반복하지 않는다")
+        assertEquals(lc.stop?.id, sim.last?.next?.stop?.id, "추천 카드는 유지한다")
     }
 
     @Test
@@ -124,7 +124,7 @@ class AuditPromptTest {
     // ---------------- 쉼 경계 ----------------
 
     @Test
-    fun unansweredCooldownReleasesAtExactlyTwentyMinutesAfterExpiry() {
+    fun unansweredCooldownReleasesForANewReasonAtExactlyTwentyMinutesAfterExpiry() {
         val cfg = CoachConfig()
         val p = PromptPolicy(cfg, Random(1))
         val t0 = kst(2026, 11, 11, 10, 0)
@@ -136,7 +136,10 @@ class AuditPromptTest {
         val justBefore = expiry + 20 * MIN - SEC
         assertNull(p.decide(listOf(c), justBefore, justBefore, false, none, PersonalMemory()))
         val at = expiry + 20 * MIN
-        assertEquals(PromptKind.CHECK_IN, p.decide(listOf(c), at, at, false, none, PersonalMemory())?.kind)
+        assertNull(p.decide(listOf(c), at, at, false, none, PersonalMemory()), "같은 이유는 한 시간 반복 금지")
+        val changed = PromptPolicy.Candidate(PromptKind.CHECK_IN, "운전 패턴 변화", level = Level.SOON,
+            reasons = listOf(dev.shimpyo.engine.Reason("FATIGUE_STYLE", "새 운전 패턴 변화")))
+        assertEquals(PromptKind.CHECK_IN, p.decide(listOf(changed), at, at, false, none, PersonalMemory())?.kind)
     }
 
     @Test
@@ -150,7 +153,10 @@ class AuditPromptTest {
         val later = t0 + 2 * MIN
         assertNull(p.decide(listOf(soon), later, later, false, none, PersonalMemory()), "거절 뒤 쉼")
         val now = PromptPolicy.Candidate(PromptKind.CHECK_IN, "졸리세요?", level = Level.NOW)
-        assertNotNull(p.decide(listOf(now), later, later, false, none, PersonalMemory()), "단계가 오르면 바로")
+        assertNull(p.decide(listOf(now), later, later, false, none, PersonalMemory()), "NOW도 같은 이유 반복 금지")
+        val changed = PromptPolicy.Candidate(PromptKind.CHECK_IN, "새로운 졸음 신호", level = Level.NOW,
+            reasons = listOf(dev.shimpyo.engine.Reason("FATIGUE_STRONG", "새로운 강한 권고")))
+        assertNotNull(p.decide(listOf(changed), later, later, false, none, PersonalMemory()), "새 이유로 단계가 오르면 바로")
     }
 
     // ---------------- 시계 역행 ----------------

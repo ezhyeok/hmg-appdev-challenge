@@ -217,6 +217,7 @@ internal class EffectSim(private val stops: List<StopDef>, private val routeLen:
                 )
             }
             val route = RouteState(
+                congestionBasisKnown = true, // 모의 경로가 정체 좌표를 확정한다
                 guiding = true, remainDistanceM = (routeLen - x) * 1000.0, remainTimeS = traffic.hours(x, routeLen) * 3600.0,
                 congestion = jamsAhead,
             )

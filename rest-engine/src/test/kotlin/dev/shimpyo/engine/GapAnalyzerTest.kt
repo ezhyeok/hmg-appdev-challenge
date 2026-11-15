@@ -19,7 +19,7 @@ class GapAnalyzerTest {
         val jamTime = jams.sumOf { it.durationS }
         val rt = (destM - jamLen) / (100 / 3.6) + jamTime
         return RouteContext(cfg).apply {
-            prepare(RouteState(guiding = true, remainDistanceM = destM, remainTimeS = rt, congestion = jams.toList()), 100f)
+            prepare(RouteState(congestionBasisKnown = true, guiding = true, remainDistanceM = destM, remainTimeS = rt, congestion = jams.toList()), 100f)
         }
     }
 

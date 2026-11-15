@@ -98,8 +98,8 @@ fun DriveScreen(
                 val r = restroomGauge(state)
                 val f = fatigueGauge(state)
                 val cell = if (tall) Modifier.weight(1f).fillMaxHeight() else Modifier.weight(1f)
-                HumanGauge("화장실", ShimpyoIcons.Wc, r.minutes, r.level, r.fraction, r.tick, r.reason, layout.compact, cell, tall = tall)
-                HumanGauge("피로", ShimpyoIcons.Rest, f.minutes, f.level, f.fraction, f.tick, f.reason, layout.compact, cell, tall = tall)
+                HumanGauge("화장실 예상", ShimpyoIcons.Wc, r.minutes, r.level, r.fraction, r.tick, r.reason, layout.compact, cell, tall = tall)
+                HumanGauge(if (layout.compact) "휴식 권고" else "휴식 권고까지", ShimpyoIcons.Rest, f.minutes, f.level, f.fraction, f.tick, f.reason, layout.compact, cell, tall = tall)
             }
             energyReadout(state)?.let { energy ->
                 Row(Modifier.fillMaxWidth().padding(top = Dimens.Space.s), verticalAlignment = Alignment.CenterVertically,

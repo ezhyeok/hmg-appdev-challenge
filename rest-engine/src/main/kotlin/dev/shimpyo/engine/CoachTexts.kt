@@ -234,7 +234,7 @@ open class CoachTexts {
             else "화장실 여유는 약 ${duration(restroomMin)}이에요."
         }
         if (nextStop != null && nextDistanceM != null) parts += "다음 화장실은 ${distance(nextDistanceM)} 앞 $nextStop${copula(nextStop)}."
-        if (fatigueMin != null) parts += "쉬지 않고 운전할 수 있는 시간은 약 ${duration(fatigueMin)}이에요."
+        if (fatigueMin != null) parts += "휴식 권고까지는 약 ${duration(fatigueMin)}이에요."
         return if (parts.isEmpty()) "아직 계산할 정보가 없어요." else parts.joinToString(" ")
     }
 

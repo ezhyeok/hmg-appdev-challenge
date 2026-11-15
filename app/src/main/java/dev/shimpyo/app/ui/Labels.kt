@@ -66,8 +66,8 @@ object Labels {
 
     fun readout(minutes: Int?): Readout = when {
         minutes == null -> Readout("--", "분")
-        minutes >= 120 -> Readout("2", "시간+")
-        else -> Readout(minutes.toString(), "분")
+        minutes >= 120 -> Readout("약 2", "시간+")
+        else -> Readout("약 $minutes", "분")
     }
 
     fun levelWord(level: Level): String = when (level) {

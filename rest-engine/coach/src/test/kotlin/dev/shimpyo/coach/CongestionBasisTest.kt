@@ -19,6 +19,30 @@ class CongestionBasisTest {
     private fun basis(total: Double = 100_000.0, originKnown: Boolean = true) = CongestionBasis().apply { start(total, originKnown) }
 
     @Test
+    fun confidenceDistinguishesUnknownUnavailableAndKnownEmpty() {
+        val b = basis()
+        assertTrue(!b.update(emptyList(), 100_000.0, 0.0).basisKnown)
+        b.update(listOf(jam(20_000.0)), 100_000.0, 0.0)
+        b.update(listOf(jam(19_000.0)), 99_000.0, 1_000.0)
+        assertTrue(b.update(listOf(jam(18_000.0)), 98_000.0, 2_000.0).basisKnown)
+        assertTrue(b.update(emptyList(), 98_000.0, 2_000.0).basisKnown)
+        assertTrue(!b.update(emptyList(), 98_000.0, 2_000.0, available = false).basisKnown)
+    }
+
+    @Test
+    fun originBasisNeedsAnOriginEvenWhenTheListIsEmptyAndRecoversAfterRerouting() {
+        val b = basis()
+        b.update(listOf(jam(20_000.0)), 100_000.0, 0.0)
+        b.update(listOf(jam(20_000.0)), 99_000.0, 1_000.0)
+        assertTrue(b.update(listOf(jam(20_000.0)), 98_000.0, 2_000.0).basisKnown)
+        b.start(60_000.0, originKnown = false)
+        assertTrue(!b.update(emptyList(), 60_000.0, 3_000.0).basisKnown)
+        b.start(50_000.0, originKnown = true)
+        assertTrue(b.update(listOf(jam(10_000.0)), 49_000.0, 4_000.0).basisKnown)
+        assertEquals(9_000.0, b.startFromCar(10_000.0, 49_000.0)!!, 0.0)
+    }
+
+    @Test
     fun offsetsThatShrinkWithTheCarAreFromTheCar() {
         val b = basis()
         b.update(listOf(jam(20_000.0)), remainM = 100_000.0, odometerM = 0.0)
@@ -26,7 +50,7 @@ class CongestionBasisTest {
         assertEquals("한 표로는 정하지 않는다", Basis.UNKNOWN, b.basis)
         b.update(listOf(jam(18_000.0)), remainM = 98_000.0, odometerM = 2_000.0)
         assertEquals(Basis.FROM_CAR, b.basis)
-        assertEquals(18_000.0, b.update(listOf(jam(18_000.0)), 98_000.0, 2_000.0).single().startDistanceM, 1e-9)
+        assertEquals(18_000.0, b.update(listOf(jam(18_000.0)), 98_000.0, 2_000.0).segments.single().startDistanceM, 1e-9)
     }
 
     @Test
@@ -38,7 +62,7 @@ class CongestionBasisTest {
         assertEquals(Basis.FROM_ORIGIN, b.basis)
         // 출발지에서 20km, 내비가 2km 나아갔으니 차에서 18km
         assertEquals(18_000.0, b.startFromCar(20_000.0, 98_000.0)!!, 1e-9)
-        assertEquals(18_000.0, b.update(listOf(jam(20_000.0)), 98_000.0, 2_000.0).single().startDistanceM, 1e-9)
+        assertEquals(18_000.0, b.update(listOf(jam(20_000.0)), 98_000.0, 2_000.0).segments.single().startDistanceM, 1e-9)
     }
 
     @Test
@@ -54,14 +78,15 @@ class CongestionBasisTest {
     }
 
     @Test
-    fun inconsistentChangesDecideNothingAndOffsetsStayAsGiven() {
+    fun inconsistentChangesDoNotPublishUnlocatedJams() {
         val b = basis()
         b.update(listOf(jam(20_000.0)), 100_000.0, 0.0)
         b.update(listOf(jam(19_500.0)), 99_000.0, 1_000.0) // 이동의 절반만 줄었다 (정체가 자랐다)
         b.update(listOf(jam(19_000.0)), 98_000.0, 2_000.0)
         assertEquals(Basis.UNKNOWN, b.basis)
         assertEquals(0 to 0, b.votes)
-        assertEquals("판정 전에는 현재 위치 기준으로 본다", 19_000.0, b.update(listOf(jam(19_000.0)), 98_000.0, 2_000.0).single().startDistanceM, 1e-9)
+        assertTrue(b.update(listOf(jam(19_000.0)), 98_000.0, 2_000.0).segments.isEmpty())
+        assertNull(b.startFromCar(19_000.0, 98_000.0))
     }
 
     @Test
@@ -136,7 +161,7 @@ class CongestionBasisTest {
         // 앱이 길안내 중간에 켜졌다: 출발지에서 얼마나 왔는지 모른다
         b.start(60_000.0, originKnown = false)
         assertNull(b.startFromCar(30_000.0, 60_000.0))
-        assertTrue("위치를 정할 수 없는 정체는 엔진에 넣지 않는다", b.update(listOf(jam(30_000.0)), 60_000.0, 3_000.0).isEmpty())
+        assertTrue("위치를 정할 수 없는 정체는 엔진에 넣지 않는다", b.update(listOf(jam(30_000.0)), 60_000.0, 3_000.0).segments.isEmpty())
     }
 
     @Test
@@ -151,6 +176,9 @@ class CongestionBasisTest {
     @Test
     fun brokenItemsAreDroppedAndPassedJamsFiltered() {
         val b = basis()
+        b.update(listOf(jam(20_000.0)), 102_000.0, 0.0)
+        b.update(listOf(jam(19_000.0)), 101_000.0, 1_000.0)
+        b.update(listOf(jam(18_000.0)), 100_000.0, 2_000.0)
         val out = b.update(
             listOf(
                 jam(Double.NaN),
@@ -162,7 +190,7 @@ class CongestionBasisTest {
             100_000.0,
             0.0,
         )
-        assertEquals(listOf(-500.0, 8_000.0), out.map { it.startDistanceM })
-        assertEquals("깨진 소요 시간은 0", 0.0, out.last().durationS, 0.0)
+        assertEquals(listOf(-500.0, 8_000.0), out.segments.map { it.startDistanceM })
+        assertEquals("깨진 소요 시간은 0", 0.0, out.segments.last().durationS, 0.0)
     }
 }

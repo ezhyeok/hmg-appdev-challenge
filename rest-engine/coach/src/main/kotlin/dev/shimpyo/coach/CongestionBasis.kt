@@ -13,7 +13,7 @@ import kotlin.math.min
  * 같은 구간(도로명 + 시작 교차로)을 처음 본 뒤 내비 남은 거리가 1km 이상 줄었을 때
  * - offset도 그만큼(±30%) 줄었으면 '현재 위치 기준'(FROM_CAR) 한 표,
  * - 거의 그대로(이동 거리의 20% 안)면 '출발지 기준'(FROM_ORIGIN) 한 표.
- * 한쪽이 두 표 이상, 다른 쪽보다 두 표 넘게 앞서면 정한다. 정하기 전에는 현재 위치 기준으로 본다(예전과 같다).
+ * 한쪽이 두 표 이상, 다른 쪽보다 두 표 넘게 앞서면 정한다. 정하기 전에는 위치 기반 정체 판단을 보류한다.
  *
  * 예전 판정의 구멍(데이터 감사 #4)과 막는 방법:
  * - 전체 경로 거리를 첫 정체를 본 때 잡았다 → 길안내 시작·재탐색 때([start]) 잡는다.
@@ -28,6 +28,9 @@ import kotlin.math.min
  */
 class CongestionBasis {
     enum class Basis { UNKNOWN, FROM_CAR, FROM_ORIGIN }
+
+    /** 빈 segments만으로 '정체 없음'을 단정하지 않는다. 수신·기준·출발점이 모두 유효해야 basisKnown이다. */
+    data class Result(val segments: List<CongestionSegment>, val basisKnown: Boolean)
 
     var basis = Basis.UNKNOWN
         private set
@@ -64,12 +67,13 @@ class CongestionBasis {
      * 경로 상태를 받을 때마다 부른다: 판정에 쓰고, 차 기준 정체 구간으로 바꾼다. 깨진 항목(NaN)은 버리고,
      * 이미 지나간 구간과 위치를 정할 수 없는 구간(출발지 기준인데 출발지를 모름)도 뺀다.
      */
-    fun update(items: List<NaviCongestion>, remainM: Double?, odometerM: Double): List<CongestionSegment> {
+    fun update(items: List<NaviCongestion>, remainM: Double?, odometerM: Double, available: Boolean = true): Result {
+        if (!available) return Result(emptyList(), false)
         val remain = remainM?.takeIf { it.isFinite() && it >= 0.0 }
         if (originKnown && totalRouteM == null && remain != null) totalRouteM = remain
         val valid = items.filter { it.offsetM.isFinite() && it.lengthM.isFinite() && it.lengthM >= 0.0 }
         if (basis == Basis.UNKNOWN && remain != null) valid.forEach { observe(keyOf(it), it.offsetM, remain, odometerM) }
-        return valid.mapNotNull { c ->
+        val located = valid.mapNotNull { c ->
             val start = startFromCar(c.offsetM, remain) ?: return@mapNotNull null
             CongestionSegment(
                 startDistanceM = start,
@@ -81,6 +85,8 @@ class CongestionBasis {
                 endName = c.endName,
             )
         }.filter { it.startDistanceM + it.lengthM > 0.0 }
+        val known = startFromCar(0.0, remain) != null && valid.size == items.size
+        return Result(located, known)
     }
 
     /**
@@ -88,7 +94,8 @@ class CongestionBasis {
      * 출발지 기준인데 출발지나 남은 거리를 모르면 null (위치를 정할 수 없다).
      */
     fun startFromCar(offsetM: Double, remainM: Double?): Double? {
-        if (basis != Basis.FROM_ORIGIN) return offsetM
+        if (basis == Basis.UNKNOWN) return null
+        if (basis == Basis.FROM_CAR) return offsetM
         val total = totalRouteM ?: return null
         if (!originKnown || remainM == null) return null
         return offsetM - (total - remainM)

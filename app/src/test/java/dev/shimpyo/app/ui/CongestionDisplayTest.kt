@@ -41,7 +41,12 @@ class CongestionDisplayTest {
         val items = measured.split(' ').map { it.split('/').map(String::toDouble) }.mapNotNull { (off, len, delay, avr) ->
             NaviCongestion.fromNavi(off, len, delay, avr, "HEAVY", "", "", "")
         }
-        return CongestionBasis().update(items, remainM = 383_000.0, odometerM = 0.0)
+        // 이 시험은 통과 시간/표시를 검증하므로 차 기준을 합성 관측 두 번으로 먼저 확인한다.
+        // 실제 기기 로그만으로 offset 기준까지 확인했다는 뜻은 아니다.
+        val basis = CongestionBasis()
+        for (i in 0..2) basis.update(listOf(NaviCongestion(20_000.0 - i * 1_000.0, 1_000.0, 60.0, "", "", "", "")),
+            remainM = 100_000.0 - i * 1_000.0, odometerM = i * 1_000.0)
+        return basis.update(items, remainM = 383_000.0, odometerM = 2_000.0).segments
     }
 
     private fun opp(id: String, km: Double) = StopCandidate(

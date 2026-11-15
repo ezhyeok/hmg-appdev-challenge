@@ -42,7 +42,7 @@ internal fun routeCtx(
     val rt = (destM - jamLen) / V100 + jamTime
     return RouteContext(cfg).apply {
         prepare(
-            RouteState(guiding = true, remainDistanceM = destM, remainTimeS = rt, congestion = jams.toList(), candidatesUntilM = horizonM),
+            RouteState(congestionBasisKnown = true, guiding = true, remainDistanceM = destM, remainTimeS = rt, congestion = jams.toList(), candidatesUntilM = horizonM),
             100f,
         )
     }

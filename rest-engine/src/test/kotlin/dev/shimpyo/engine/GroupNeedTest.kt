@@ -109,7 +109,7 @@ class GroupNeedTest {
 
     /** 3.5km 앞 휴게소 뒤로 화장실이 [everyKm]마다 있는 길 (시속 100km, 목적지 200km 앞) */
     private fun drive(e: CoachEngine, everyKm: Double, seconds: Int = 60): List<CoachOutput> {
-        val route = RouteState(guiding = true, remainDistanceM = 200 * km, remainTimeS = 7_200.0, nextManeuverDistanceM = 100 * km)
+        val route = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 200 * km, remainTimeS = 7_200.0, nextManeuverDistanceM = 100 * km)
         val cands = generateSequence(3.5) { it + everyKm }.takeWhile { it < 200.0 }
             .mapIndexed { i, d -> stop("s$i", d * km, name = "${i + 1}번 휴게소") }.toList()
         return (0 until seconds).map { s -> e.update(CoachInput(now = t0 + s * SEC, gear = Gear.DRIVE, speedKph = 100f, route = route, candidates = cands)) }
@@ -140,7 +140,7 @@ class GroupNeedTest {
     // ------------------------------------------------------------ 묶음 이유는 '한 사람만 봤다면 묻지 않았을' 때만 (닫힘 검증 E5c)
 
     private val v100 = 100 / 3.6
-    private val open = RouteState(guiding = true, remainDistanceM = 200 * km, remainTimeS = 200 * km / v100, nextManeuverDistanceM = 100 * km)
+    private val open = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 200 * km, remainTimeS = 200 * km / v100, nextManeuverDistanceM = 100 * km)
 
     private fun CoachEngine.at(route: RouteState, cands: List<StopCandidate>): CoachOutput =
         (0 until 3).map { s -> update(CoachInput(now = t0 + s * SEC, gear = Gear.DRIVE, speedKph = 100f, route = route, candidates = cands)) }.last()
@@ -164,7 +164,7 @@ class GroupNeedTest {
         // 150km 앞 정체 전 휴게소(s4), 한 사람 판정은 80km 앞 공백 전 휴게소(s2). 묶음 때문에 '앞당겨진' 것이 아닌데 s4에 '2명이 타서'가 붙었다
         val destM = 300 * km
         val jam = CongestionSegment(startDistanceM = 151 * km, lengthM = 20 * km, durationS = 2_400.0)
-        val route = RouteState(guiding = true, remainDistanceM = destM, remainTimeS = (destM - 20 * km) / v100 + 2_400.0, congestion = listOf(jam), nextManeuverDistanceM = 100 * km)
+        val route = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = destM, remainTimeS = (destM - 20 * km) / v100 + 2_400.0, congestion = listOf(jam), nextManeuverDistanceM = 100 * km)
         val cands = listOf(stop("s0", 30 * km), stop("s1", 50 * km), stop("s2", 80 * km), stop("s3", 110 * km), stop("s4", 150 * km), stop("s5", 180 * km))
         val one = engine(adults(1), sinceMin = 60).at(route, cands)
         val two = engine(adults(2), sinceMin = 60).at(route, cands)
@@ -185,7 +185,7 @@ class GroupNeedTest {
         val destM = 400 * km
         for (s in 0 until 3 * 3600) {
             val cands = (1..9).map { it to it * 40 * km - posM }.filter { it.second > 0 }.map { (i, d) -> stop("s$i", d) }
-            val r = RouteState(guiding = true, remainDistanceM = destM - posM, remainTimeS = (destM - posM) / v100, nextManeuverDistanceM = 100 * km)
+            val r = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = destM - posM, remainTimeS = (destM - posM) / v100, nextManeuverDistanceM = 100 * km)
             val o = e.update(CoachInput(now = t, gear = Gear.DRIVE, speedKph = 100f, route = r, candidates = cands))
             val p = o.prompt
             if (p != null && p.kind == PromptKind.LAST_CHANCE && target == null) {
@@ -240,7 +240,7 @@ class GroupNeedTest {
         val people = adults(4)
         val e = engine(people, sinceMin = 70)
         val cands = generateSequence(8.0) { it + 40.0 }.takeWhile { it < 200.0 }.mapIndexed { i, d -> stop("s$i", d * km, name = "${i + 1}번 휴게소") }.toList()
-        val route = RouteState(guiding = true, remainDistanceM = 200 * km, remainTimeS = 7_200.0, nextManeuverDistanceM = 100 * km)
+        val route = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 200 * km, remainTimeS = 7_200.0, nextManeuverDistanceM = 100 * km)
         var t = t0
         val first = e.update(CoachInput(now = t, gear = Gear.DRIVE, speedKph = 100f, route = route, candidates = cands))
         assertEquals(listOf("LAST_CHANCE_GAP", "LAST_CHANCE_GROUP"), first.lastChanceCodes())
@@ -260,7 +260,7 @@ class GroupNeedTest {
         // 계획은 PLAN_NOW "지금 쉬어야 할 때예요"였다(묶음 마감 63분이 이미 지났다). 어른 8명은 50분, 둘은 90분에 같은 일이 생겼다
         val e = engine(adults(4), sinceMin = 70)
         val cands = (1..22).map { stop("s$it", it * 17.5 * km, name = "휴게소$it") }
-        val route = RouteState(guiding = true, remainDistanceM = 400 * km, remainTimeS = 400 * km / v100)
+        val route = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 400 * km, remainTimeS = 400 * km / v100)
         val input = CoachInput(now = t0, gear = Gear.PARK, speedKph = 0f, route = route, candidates = cands)
         val out = e.update(input)
         assertEquals(Level.OK, out.restroom.level)
@@ -276,7 +276,7 @@ class GroupNeedTest {
     fun aFullCarPlansAsManyStopsAsOnePersonWould() {
         // 화장실이 자주 있는 길(17.5km마다)의 400km: 어른 한 명이든 여덟이든 정차 2번(구간 상한 112분). 묶음 마감(8명 48분)으로 세우면 5번이었다
         val cands = (1..22).map { stop("s$it", it * 17.5 * km, name = "휴게소$it") }
-        val route = RouteState(guiding = true, remainDistanceM = 400 * km, remainTimeS = 400 * km / v100)
+        val route = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 400 * km, remainTimeS = 400 * km / v100)
         fun stops(n: Int): List<String> {
             val e = engine(adults(n), sinceMin = 0)
             return e.plan(CoachInput(now = t0, gear = Gear.PARK, speedKph = 0f, route = route, candidates = cands)).stops.map { it.stop.id }

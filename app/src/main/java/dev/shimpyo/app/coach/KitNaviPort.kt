@@ -38,22 +38,24 @@ class KitNaviPort(private val navi: NaviKit) : NaviPort {
     override suspend fun routeStatus(): NaviRouteStatus {
         val s = navi.routeState()
         s.trafficStatus?.let(::logCongestion)
+        val raw = s.trafficStatus?.congestionItemList
+        // trafficCongestionTime은 늘어난 시간이다. 통과 시간은 거리/평균 속도로 변환한다.
+        val congestion = raw.orEmpty().mapNotNull { c ->
+            NaviCongestion.fromNavi(
+                offsetM = c.offset,
+                lengthM = c.distance,
+                delayS = c.trafficCongestionTime.toDouble(),
+                avrSpeedKph = c.avrSpeed,
+                type = c.trafficCongestionType.name,
+                roadName = c.roadName,
+                startName = c.startCrossName,
+                endName = c.endCrossName,
+            )
+        }
         return NaviRouteStatus(
             mode = runCatching { NaviMode.valueOf(s.naviMode.name) }.getOrDefault(NaviMode.UNKNOWN),
-            // trafficCongestionTime은 지나는 시간이 아니라 분 단위로 반올림한 늘어난 시간이다(최소 1분, 2026-11-12 실측).
-            // 엔진이 쓰는 '지나는 시간'은 거리 ÷ 평균 속도(avrSpeed, km/h)로 구한다 (NaviCongestion.crossingS)
-            congestion = s.trafficStatus?.congestionItemList.orEmpty().mapNotNull { c ->
-                NaviCongestion.fromNavi(
-                    offsetM = c.offset,
-                    lengthM = c.distance,
-                    delayS = c.trafficCongestionTime.toDouble(),
-                    avrSpeedKph = c.avrSpeed,
-                    type = c.trafficCongestionType.name,
-                    roadName = c.roadName,
-                    startName = c.startCrossName,
-                    endName = c.endCrossName,
-                )
-            },
+            congestion = congestion,
+            congestionAvailable = raw != null && congestion.size == raw.size,
         )
     }
 

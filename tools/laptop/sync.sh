@@ -18,7 +18,7 @@ case "$DEST" in repo|repo-[a-z0-9]*) ;; *) echo "LAPTOP_REPO는 repo 또는 repo
 TMP="$(mktemp -d)"
 TAR="sync-$DEST.tar"
 STAGE="sync-stage-$DEST"
-tar -C "$ROOT" --exclude=.git --exclude=./docs --exclude='*/build' --exclude='*/.gradle' --exclude=local.properties --exclude='./*.md' --exclude='./*.docx' -cf "$TMP/$TAR" .
+tar -C "$ROOT" --exclude=.git --exclude=./docs --exclude=./apk --exclude=./build --exclude='*/build' --exclude='*/.gradle' --exclude=local.properties --exclude='./*.md' --exclude='./*.docx' -cf "$TMP/$TAR" .
 scp -q "$TMP/$TAR" "hmg-laptop:hmg-appdev-challenge/$TAR"
 rm -rf "$TMP"
 ssh hmg-laptop "Set-Location \$env:USERPROFILE\\hmg-appdev-challenge; if (Test-Path $STAGE) { Remove-Item -Recurse -Force $STAGE }; New-Item -ItemType Directory -Force $STAGE, $DEST | Out-Null; tar -xf $TAR -C $STAGE; Remove-Item $TAR; robocopy $STAGE $DEST /MIR /XD build .gradle .kotlin /XF local.properties /NFL /NDL /NJH /NJS /NP | Out-Null; \$rc = \$LASTEXITCODE; Remove-Item -Recurse -Force $STAGE; if (\$rc -ge 8) { 'robocopy failed: ' + \$rc; exit 1 }; 'synced to $DEST (mirrored)'"

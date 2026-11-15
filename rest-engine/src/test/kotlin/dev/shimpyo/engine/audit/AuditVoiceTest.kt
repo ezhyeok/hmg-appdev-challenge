@@ -28,7 +28,7 @@ import kotlin.test.assertTrue
 /** 음성 의도: 사용자가 말한 것에는 바로 답한다 (README 3-8). 탑승자 조합별 해석 */
 class AuditVoiceTest {
     private val start = kst(2026, 11, 11, 10, 0)
-    private val route = RouteState(guiding = true, remainDistanceM = 200 * KM, remainTimeS = 200 * KM / V100, nextManeuverDistanceM = 50 * KM)
+    private val route = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 200 * KM, remainTimeS = 200 * KM / V100, nextManeuverDistanceM = 50 * KM)
     private val cands = listOf(stop("a", 6 * KM, name = "가휴게소"), stop("b", 30 * KM, name = "나휴게소"))
 
     private fun familyEngine() = CoachEngine(

@@ -9,7 +9,8 @@ internal class Opportunity(val stop: StopCandidate, val distanceM: Double, val a
  * 정체 밖은 자유 속도 v로, 정체 구간 안은 '정체 통과 시간 × 지나간 비율'로 센다.
  *   도착(d) = (d − 앞쪽 정체 길이) / v + 앞쪽 정체 통과 시간
  * v는 내비의 남은 거리·시간에서 정체 몫을 뺀 값(정체 밖 평균 속도). 모르면 현재 속도(30km/h 이상일 때),
- * 그것도 없으면 고속도로 평균 속도.
+ * 그것도 없으면 고속도로 평균 속도. 정체 기준을 모르면 구간을 놓거나 전체 ETA로 자유 속도를 역산하지 않고
+ * 현재/기본 속도로 후보 시간을 추정한다. 목적지 ETA와 후보별 내비 ETA는 그대로 쓴다.
  *
  * 정체 목록 정리 ([buildJams]): 내비는 한 정체를 여러 항목으로 쪼개고, 같은 항목을 두 번 보내거나 목적지 너머까지 보낼 수 있다.
  * - 같은 항목이 두 번 온 것(시작·길이·통과 시간·도로명·시작/끝 이름이 모두 같다)은 한 번만 센다. 예전에는 더해서 +20분이었다(감사 R12).
@@ -35,6 +36,9 @@ internal class RouteContext(private val config: CoachConfig) {
     var jamEnd = DoubleArray(jamCap)
         private set
     var jamDur = DoubleArray(jamCap)
+        private set
+
+    var congestionBasisKnown = false
         private set
 
     // 정체 목록을 정리할 때 쓰는 작업 배열 (재사용): 남긴 항목의 원래 위치
@@ -73,7 +77,8 @@ internal class RouteContext(private val config: CoachConfig) {
         val rt = route?.remainTimeS
         destM = if (rd != null && rd.isFinite() && rd > 0.0) rd else Double.NaN
         destS = if (rt != null && rt.isFinite() && rt > 0.0) rt else Double.NaN
-        buildJams(route?.congestion.orEmpty())
+        congestionBasisKnown = route?.congestionBasisKnown == true
+        buildJams(if (congestionBasisKnown) route?.congestion.orEmpty() else emptyList())
         var jamLen = 0.0
         var jamTime = 0.0
         for (i in 0 until jamN) {
@@ -82,7 +87,7 @@ internal class RouteContext(private val config: CoachConfig) {
         }
 
         var v = Double.NaN
-        if (!destM.isNaN() && !destS.isNaN()) {
+        if (congestionBasisKnown && !destM.isNaN() && !destS.isNaN()) {
             val freeLen = destM - jamLen
             val freeTime = destS - jamTime
             if (freeLen > 0.0 && freeTime > 0.0) v = freeLen / freeTime

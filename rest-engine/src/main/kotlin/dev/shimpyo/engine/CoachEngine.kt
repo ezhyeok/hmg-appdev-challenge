@@ -178,6 +178,10 @@ class CoachEngine(
         // 신호를 잃으면 이전 잔량을 근거로 묻던 자동 질문도 거둔다. 사용자가 직접 요청한 주유 응답은 유지한다.
         policy.active?.takeIf { q -> !q.userInitiated && q.reasons.any { it.code == "RANGE_LAST_CHANCE" || it.code == "ENERGY_BUNDLE" } }
             ?.takeIf { input.rangeKm == null || energyKind != input.energy }?.let { policy.withdraw(it.kind) }
+        // 정체 기준을 잃으면 이전 위치를 단정하는 질문도 거둔다. TBT 공백/일반 권고는 아래에서 다시 계산한다.
+        if (input.route?.congestionBasisKnown != true) {
+            policy.active?.takeIf { it.reasons.any(::usesCongestionPosition) }?.let { policy.withdraw(it.kind) }
+        }
         energyKind = input.energy
         usableRangeM = input.rangeKm?.let { (it - config.energyReserveKm(input.energy)) * 1000.0 }
 
@@ -1122,6 +1126,9 @@ class CoachEngine(
         promptOwners += owner
     }
 
+    private fun usesCongestionPosition(reason: Reason): Boolean =
+        reason.code == "LAST_CHANCE_CONGESTION" || reason.code == "FATIGUE_LAST_CHANCE_CONGESTION"
+
     private fun recommend(
         ctx: PurposeContext,
         urgentList: List<RankedStop>?,
@@ -1139,7 +1146,8 @@ class CoachEngine(
     ): Recommendation? {
         askedStop(speed)?.let { return it }
         accepted?.let { a ->
-            return rec(a.stop, a.purposes, listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())) + a.reasons)
+            return rec(a.stop, a.purposes, listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())) +
+                if (route.congestionBasisKnown) a.reasons else a.reasons.filterNot(::usesCongestionPosition))
         }
         urgentList?.firstOrNull()?.let { r ->
             return rec(urgentStop(r.stop, speed), purposesFor(r.stop, Purpose.RESTROOM, ctx), r.why)

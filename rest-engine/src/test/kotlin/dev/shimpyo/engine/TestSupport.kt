@@ -93,7 +93,7 @@ internal class HighwaySim(
             jamTime += j.durationS * coveredLen / j.lengthM
         }
         val remainTime = (remain - jamLen) / (cruiseKph / 3.6) + jamTime
-        return RouteState(guiding = true, remainDistanceM = remain, remainTimeS = remainTime, congestion = segs, nextManeuverDistanceM = 20_000.0)
+        return RouteState(congestionBasisKnown = true, guiding = true, remainDistanceM = remain, remainTimeS = remainTime, congestion = segs, nextManeuverDistanceM = 20_000.0)
     }
 
     fun candidates(): List<StopCandidate> = stops.filter { it.posM > posM }.map { it.template.copy(routeDistanceM = it.posM - posM) }

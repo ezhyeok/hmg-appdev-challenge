@@ -47,7 +47,7 @@ import kotlin.test.assertTrue
 class AuditDecisionsTest {
     private val cfg = CoachConfig()
     private val t0 = kst(2026, 11, 11, 10, 0)
-    private val route = RouteState(guiding = true, remainDistanceM = 200 * KM, remainTimeS = 200 * KM / V100, nextManeuverDistanceM = 50 * KM)
+    private val route = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 200 * KM, remainTimeS = 200 * KM / V100, nextManeuverDistanceM = 50 * KM)
 
     // ---------------- P9 시간당 상한: 낮은 질문이 마지막 기회를 막지 못한다 ----------------
 
@@ -63,16 +63,15 @@ class AuditDecisionsTest {
 
     @Test
     fun lowPriorityPromptsDoNotStarveALastChance() {
-        // 정한 규칙: 시간당 상한(3)은 자기와 같거나 높은 우선순위 질문만 센다. 환기·상태 확인·휴식이 한 시간에 셋 나왔어도
-        // WATCH 단계의 마지막 기회는 묻는다 (예전에는 NOW만 상한에서 빠져, 한 시간 동안 막혔다)
+        // 일반 질문 두 번 뒤 마지막 기회용 한 번을 남긴다.
         val p = PromptPolicy(cfg, Random(1))
         var t = t0
-        for (k in listOf(PromptKind.FRESH_AIR, PromptKind.CHECK_IN, PromptKind.REST_SUGGESTION)) {
+        for (k in listOf(PromptKind.FRESH_AIR, PromptKind.CHECK_IN)) {
             val q = assertNotNull(p.ask(PromptPolicy.Candidate(k, k.name, level = Level.SOON), t), k.name)
             p.onResult(q.id, true, t + SEC, PersonalMemory())
             t += 2 * MIN
         }
-        assertEquals(PromptKind.LAST_CHANCE, p.ask(lc("a", 2_100.0), t)?.kind, "낮은 질문 셋 뒤에도 마지막 기회")
+        assertEquals(PromptKind.LAST_CHANCE, p.ask(lc("a", 2_100.0), t)?.kind, "일반 질문 두 번 뒤 예약된 마지막 기회")
     }
 
     @Test
@@ -148,7 +147,7 @@ class AuditDecisionsTest {
     fun badNumbersNeverReachArrivalsOrGauges() {
         // 정한 규칙: 입력 경계(InputSanitizer)에서 NaN·무한대는 '모름', 그런 값이 든 정체 항목은 뺀다
         val bad = RouteState(
-            guiding = true, remainDistanceM = Double.NaN, remainTimeS = Double.POSITIVE_INFINITY, nextManeuverDistanceM = Double.NaN,
+            guiding = true, congestionBasisKnown = true, remainDistanceM = Double.NaN, remainTimeS = Double.POSITIVE_INFINITY, nextManeuverDistanceM = Double.NaN,
             candidatesUntilM = Double.POSITIVE_INFINITY,
             congestion = listOf(
                 CongestionSegment(startDistanceM = Double.NaN, lengthM = 5 * KM, durationS = 600.0),
@@ -200,7 +199,7 @@ class AuditDecisionsTest {
         // 묻는다: 8명 중 누군가 그 16분 안에 필요해질 확률이 약 0.67이기 때문이다. 감사가 짚은 것은 '게이지가 넉넉한데 왜
         // 묻는지 알 수 없다'였으므로, 묶음 때문에 앞당긴 질문에는 그 이유(LAST_CHANCE_GROUP)를 함께 낸다.
         // (한 사람 기준 마감으로 바꿨을 때는 어른 둘의 명절 위기 비율이 12.0 → 14.1%로 올랐다)
-        val short = RouteState(guiding = true, remainDistanceM = 60 * KM, remainTimeS = 60 * KM / V100, nextManeuverDistanceM = 50 * KM)
+        val short = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 60 * KM, remainTimeS = 60 * KM / V100, nextManeuverDistanceM = 50 * KM)
         val cands = listOf(stop("a", 3.5 * KM, name = "가휴게소"), stop("b", 30 * KM, name = "나휴게소"))
         val people = adults(8)
         val e = CoachEngine(
@@ -353,7 +352,7 @@ class AuditDecisionsTest {
     fun feedingAndPetRequestsAreAnsweredEvenWithoutAMatchingOccupant() {
         // 정한 규칙(감사 V4): 말한 것에는 바로 답한다. 탑승자 목록에 아기·반려견이 없어도 다음 쉴 곳을 알려 준다
         val cands = listOf(stop("a", 6 * KM, name = "가휴게소"))
-        val near = RouteState(guiding = true, remainDistanceM = 30 * KM, remainTimeS = 30 * KM / V100, nextManeuverDistanceM = 50 * KM)
+        val near = RouteState(guiding = true, congestionBasisKnown = true, remainDistanceM = 30 * KM, remainTimeS = 30 * KM / V100, nextManeuverDistanceM = 50 * KM)
         for (purpose in listOf(Purpose.FEEDING, Purpose.PET)) {
             val e = CoachEngine(profile = TripProfile(listOf(adult("driver")), tripStart = t0 - 30 * MIN), random = Random(7))
             e.update(CoachInput(now = t0, gear = Gear.DRIVE, speedKph = 100f, route = near, candidates = cands))
@@ -389,7 +388,7 @@ class AuditDecisionsTest {
                 jamTime += j.durationS * left / j.lengthM
             }
             val r = RouteState(
-                guiding = true, remainDistanceM = destM - posM, remainTimeS = (destM - posM - jamLeft) / V100 + jamTime,
+                guiding = true, congestionBasisKnown = true, remainDistanceM = destM - posM, remainTimeS = (destM - posM - jamLeft) / V100 + jamTime,
                 congestion = ahead, nextManeuverDistanceM = 100 * KM,
             )
             posM += V100

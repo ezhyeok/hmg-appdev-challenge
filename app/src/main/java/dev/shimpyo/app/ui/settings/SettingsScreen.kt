@@ -98,6 +98,9 @@ fun SettingsScreen(
         ListGroup {
             SettingRow("버전", icon = ShimpyoIcons.Info, trailing = { Text(versionName, style = PleosType.BodyLarge, color = ShimpyoTheme.colors.textSecondary) })
             ListDivider()
+            SettingRow("게이지와 권고 기준", icon = ShimpyoIcons.Info,
+                subtitle = "숫자는 안전 운전 한계가 아닌 추정이에요. 화장실 게이지는 가장 급한 한 사람의 필요 확률 50% 기준, 마지막 기회는 누군가 필요할 확률 30% 기준이에요. 여유가 보여도 다음 정차 기회가 멀면 먼저 권해요. 개인 기록이 없으면 기본 간격을 써요. 휴식 게이지는 연속 운전·수면·운전 패턴에 따른 권고 시점이에요.")
+            ListDivider()
             LicensesRow()
         }
         StatusFooter(status)

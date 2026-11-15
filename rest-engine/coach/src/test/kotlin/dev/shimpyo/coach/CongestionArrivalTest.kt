@@ -46,12 +46,17 @@ class CongestionArrivalTest {
      * 급해 순위(UrgentRanker)는 정체를 보지 않으므로 이 경로로 잰다
      */
     private fun arrivalS(old: Boolean): Double {
-        val segments = CongestionBasis().update(items(old), remainM = 383_000.0, odometerM = 0.0)
+        // 이 시험은 통과 시간/표시를 검증하므로 차 기준을 합성 관측 두 번으로 먼저 확인한다.
+        // 실제 기기 로그만으로 offset 기준까지 확인했다는 뜻은 아니다.
+        val basis = CongestionBasis()
+        for (i in 0..2) basis.update(listOf(NaviCongestion(20_000.0 - i * 1_000.0, 1_000.0, 60.0, "", "", "", "")),
+            remainM = 100_000.0 - i * 1_000.0, odometerM = i * 1_000.0)
+        val converted = basis.update(items(old), remainM = 383_000.0, odometerM = 2_000.0)
         val now = 1_794_417_158_000L
         val engine = CoachEngine(profile = TripProfile(listOf(Occupant("driver", OccupantType.ADULT)), tripStart = now - 30 * 60_000L), random = Random(42))
         val input = CoachInput(
             now = now, gear = Gear.DRIVE, speedKph = 90f,
-            route = RouteState(guiding = true, remainDistanceM = 383_000.0, congestion = segments),
+            route = RouteState(guiding = true, remainDistanceM = 383_000.0, congestion = converted.segments, congestionBasisKnown = converted.basisKnown),
             candidates = listOf(giheung),
             intent = VoiceIntent.OccupantNeed(null, Purpose.RESTROOM),
         )
