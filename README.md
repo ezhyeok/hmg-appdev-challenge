@@ -46,6 +46,7 @@ adb shell am start -n dev.shimpyo.app/.MainActivity --es demo off       # 시연
 | 항목 | 값 |
 |---|---|
 | 에뮬레이터 | Pleos Connect Emulator v2.1.0, API 34, RAM 4GB, GPU 가속 권장 |
+| 화면 규격 | 2560×1440 가로, 160dpi (에뮬레이터 AVD `hw.lcd.width/height/density`). 앱은 가로 두 창 배치에서 동작을 확인했다 |
 | SDK | Vehicle 2.3.2, NaviHelper 3.0.5, TextToSpeech 3.3.1, SpeechToText 3.3.1, FusedLocation 1.1.3, LLM 2.1.3.2 |
 | 권한 | Manifest의 `pleos.car.permission.*` 선언. 차속(`android.car.permission.CAR_SPEED`)과 위치(`pleos.car.permission.FUSED_LOCATION`)는 실행 중 허용 |
 | 네트워크 | 내비 경로 계산에 필요 |
