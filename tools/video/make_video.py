@@ -117,7 +117,21 @@ def clip_frames(seg):
         if last is None:
             last = nxt[1] if nxt else Image.new("RGB", (W, H))
         img = last if last.size == (W, H) else last.resize((W, H), Image.LANCZOS)
+        if seg.get("mask"):
+            img = masked(img, seg["mask"], seg.get("mask_label", ""))
         yield overlay(img, seg.get("caption"), seg.get("sub"), seg.get("badge"))
+
+
+def masked(img, box, label):
+    """다른 앱 창처럼 시연과 무관한 영역을 가린다 (box = 출력 좌표 [x0, y0, x1, y1])."""
+    img = img.copy()
+    d = ImageDraw.Draw(img)
+    d.rectangle(box, fill=(238, 240, 243))
+    if label:
+        f = font(REG, 26)
+        w = d.textlength(label, font=f)
+        d.text(((box[0] + box[2] - w) / 2, (box[1] + box[3]) / 2 - 16), label, font=f, fill=(110, 116, 125))
+    return img
 
 
 def main(spec_path, out_path):

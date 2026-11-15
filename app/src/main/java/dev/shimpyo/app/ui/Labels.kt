@@ -256,8 +256,8 @@ object Labels {
         "LAST_CHANCE_GAP" -> durationIn(r.text)?.takeIf { it > 0 }?.let { chipWithDuration("공백 ", it, "") } ?: "공백 전 마지막"
         "LAST_CHANCE_PREFERENCE" -> "기준보다 긴 공백"
         // 졸음의 마지막 기회 (엔진 FatigueLastChanceTest): 맥락 줄이 '쉼터 공백 전'·'정체 전 마지막 쉼터'를 말하므로 칩은 피로가 언제 바닥나는지
-        "FATIGUE_LAST_CHANCE_GAP" -> durationIn(r.text.substringAfter("쉬실 때는 ", ""))?.let { chipWithDuration("쉴 때 ", it, " 뒤") } ?: "피로 한계 전"
-        "FATIGUE_LAST_CHANCE_CONGESTION" -> "정체 중 피로 한계"
+        "FATIGUE_LAST_CHANCE_GAP" -> durationIn(r.text.substringAfter("쉬실 때는 ", ""))?.let { chipWithDuration("쉴 때 ", it, " 뒤") } ?: "휴식 권고 전"
+        "FATIGUE_LAST_CHANCE_CONGESTION" -> "정체 중 휴식 권고"
         // 게이지(가장 급한 한 사람)는 넉넉한데 여럿이 타서 앞당겨 묻는 경우: 왜 묻는지 보인다 (엔진 GroupNeedTest, 감사 O6)
         "LAST_CHANCE_GROUP" -> firstNumber(r.text, "명")?.let { "${it}명이 타서" } ?: "여럿이 타서"
         "NEXT_REST" -> "휴식 권유"

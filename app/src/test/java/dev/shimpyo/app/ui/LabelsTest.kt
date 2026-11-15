@@ -41,6 +41,9 @@ class LabelsTest {
         Reason("CABIN_RECIRC", t.reasonCabinRecirc(30)),
         Reason("LAST_CHANCE_CONGESTION", t.reasonLastChanceCongestion(60)),
         Reason("LAST_CHANCE_GAP", t.reasonLastChanceGap(50)),
+        Reason("FATIGUE_LAST_CHANCE_GAP", t.reasonFatigueLastChanceGap(57, 30)),
+        Reason("FATIGUE_LAST_CHANCE_GAP", ""),
+        Reason("FATIGUE_LAST_CHANCE_CONGESTION", t.reasonFatigueLastChanceCongestion(60)),
         Reason("LAST_CHANCE_PREFERENCE", t.reasonLastChancePreference(50, 45)),
         Reason("LAST_CHANCE_GROUP", t.reasonLastChanceGroup(4)),
         Reason("NEXT_ACCEPTED", t.reasonNextAccepted()),
@@ -117,6 +120,13 @@ class LabelsTest {
         assertNull(Labels.durationIn("정체"))
         // 나이 숫자("7살")는 시간으로 읽지 않는다
         assertEquals(46, Labels.durationIn(t.reasonRestroomElapsed("7살 아이", 46)))
+    }
+
+    @Test
+    fun fatigueLastChanceChipsDescribeRestAdviceTiming() {
+        assertEquals("휴식 권고 전", Labels.shortReason(Reason("FATIGUE_LAST_CHANCE_GAP", "")))
+        assertEquals("정체 중 휴식 권고", Labels.shortReason(Reason("FATIGUE_LAST_CHANCE_CONGESTION", t.reasonFatigueLastChanceCongestion(60))))
+        assertEquals("쉴 때 30분 뒤", Labels.shortReason(Reason("FATIGUE_LAST_CHANCE_GAP", t.reasonFatigueLastChanceGap(57, 30))))
     }
 
     @Test

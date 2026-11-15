@@ -6,7 +6,7 @@
 
 제출 파일: `apk/차곡_쉼표_release.apk`. 바이너리 Manifest 확인값은 `dev.shimpyo.app`, 버전 `0.1`, versionCode `1`이다.
 
-- SHA-256: `4bd85506a17ea422129fdeb17ebe66f56923c0468a9c6db2ef5924a528df99fd`
+- SHA-256: `33d69275409df730ab96765c421873f80c7c1d3c8de4c2c7b74838ff86d9bbca`
 - 이 저장소의 현재 소스(`91d75c1`)로 2026-11-15 노트북에서 만든 release 빌드다. APK를 다시 만들면 해시를 갱신한다.
 - 서명 유효성은 SDK의 `apksigner verify --verbose`로 별도 확인할 수 있다.
 

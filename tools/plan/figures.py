@@ -232,7 +232,7 @@ def fig_gauge():
     b.append(T(x0 + 16 + w_ + 8, 33, "다음 화장실·휴식까지 남은 시간", 14, 700, INK))
     cw = (W - x0 - 16 * 2 - 16) / 2.0
     b.append(gauge_card(x0 + 16, 50, cw, 150, "화장실", "39", "분", 39 / 105.0, 20 / 105.0, "7살 아이 기준", "확인 단계"))
-    b.append(gauge_card(x0 + 32 + cw, 50, cw, 150, "피로", "72", "분", 72 / 120.0, 20 / 120.0, "연속 운전 0:48",
+    b.append(gauge_card(x0 + 32 + cw, 50, cw, 150, "휴식 권고", "72", "분", 72 / 120.0, 20 / 120.0, "연속 운전 0:48",
                         "여유 단계"))
     # stage strip (restroom gauge)
     sy = 228
@@ -324,7 +324,7 @@ def fig_architecture():
     b.append(R(ex, cy, ew, ch, 14, TINT, ACCENT, 1.5))
     b.append(T(ex + 14, cy + 26, "rest-engine", 14, 800, ACCENT_D))
     b.append(T(ex + 14, cy + 44, "판단 엔진 · 순수 Kotlin", 12, 500, INK2))
-    items = ["화장실 필요 모델", "운전 스타일 편차", "피로 모델", "마지막 기회", "급해 순위", "피트스톱 플래너", "묻는 타이밍"]
+    items = ["화장실 필요 모델", "운전 스타일 편차", "휴식 권고 모델", "마지막 기회", "급해 순위", "피트스톱 플래너", "묻는 타이밍"]
     for i, s_ in enumerate(items):
         b.append(R(ex + 14, cy + 62 + i * 26, ew - 28, 21, 10, WHITE))
         b.append(T(ex + 26, cy + 77 + i * 26, s_, 11.5, 600, INK2))
@@ -381,7 +381,7 @@ def fig_engine():
     for x, w, name in cols:
         b.append(T(x, 24, name, 13.5, 800, INK2))
         b.append(L(x, 33, x + w, 33, ACCENT if name != "입력" else LINE2, 2))
-    inputs = ["탑승자 프로필 · 정차 기록", "조향 · 차속 · 제동", "연속 운전 · 기상 · 수면", "경로 앞 기회 · 정체",
+    inputs = ["탑승자 프로필 · 정차 기록", "조향 · 차속 · 제동", "연속 운전 · 기상 · 수면", "경로 앞 기회 · 정체 · 차 잔여거리",
               "주변 후보 · 경로 시간", "다음 회전 · 대화 이력", "음성 발화 · ‘졸려’"]
     for i, s in enumerate(inputs):
         y = 46 + i * 44
@@ -397,10 +397,10 @@ def fig_engine():
     ys = [46, 140, 234]
     st = [("화장실 필요 모델", ["와이블 생존모형 (k = 2.5)", "개인 기록으로 베이즈 갱신"]),
           ("운전 스타일 편차", ["주행 초반 개인 기준선", "강건 z점수 + EWMA"]),
-          ("피로 모델", ["2시간 휴식 리듬 + 졸림 곡선", "‘혹시 졸리세요?’ 대답 우선"])]
+          ("휴식 권고 모델", ["2시간 휴식 리듬 + 졸림 곡선", "‘혹시 졸리세요?’ 대답 우선"])]
     for i, (t, ls) in enumerate(st):
         b.append(comp(204, ys[i], 214, 82, i + 1, t, ls))
-    pl = [("마지막 기회", ["정체 반영 도착 시간 vs", "판단 마감(30%) · 커버리지"]),
+    pl = [("마지막 기회", ["정체 도착 시간 · 사람 마감", "차 가용 거리 · 경로 확인 범위"]),
           ("급해 순위", ["총 소요 + 영업·주차", "야간 안전·교환대 가점"]),
           ("피트스톱 플래너", ["경로 순서 동적 계획법", "정차 수·시간 최소화"])]
     for i, (t, ls) in enumerate(pl):
@@ -518,7 +518,7 @@ def _chip(x, y, s, size=30, fill=SURF2, color=INK, h=60):
 def screen_drive():
     o = [_header("주행")]
     o.append(_gauge(40, 136, "화장실", "39", "분", 39 / 90.0, 20 / 90.0, "아이 기준"))
-    o.append(_gauge(432, 136, "피로", "72", "분", 72 / 120.0, 20 / 120.0, "연속 0:48"))
+    o.append(_gauge(432, 136, "휴식 권고", "72", "분", 72 / 120.0, 20 / 120.0, "연속 0:48"))
     o.append(R(40, 400, 760, 452, 32, WHITE, ACCENT, 4))
     o.append(T(80, 460, "정체 전 마지막 화장실", 28, 600, INK3))
     o.append(T(80, 520, "안성휴게소 (부산 방향)", 40, 800, INK))
@@ -566,7 +566,7 @@ def screen_urgent():
 def screen_parked():
     o = [_header("주행", menu=True, mic=False, parked=True)]
     o.append(_gauge(40, 136, "화장실", "88", "분", 0.98, 20 / 90.0, "방금 들름"))
-    o.append(_gauge(432, 136, "피로", None, None, 0.7, None, "10분이면 회복", text_value="휴식 7분째"))
+    o.append(_gauge(432, 136, "휴식 권고", None, None, 0.7, None, "10분이면 회복", text_value="휴식 7분째"))
     o.append(R(40, 400, 760, 300, 32, WHITE, "#E2E3E6", 2))
     o.append(T(80, 460, "다음 계획", 28, 600, INK3))
     o.append(T(80, 520, "옥산휴게소 (부산 방향)", 40, 800, INK))
@@ -791,11 +791,11 @@ def fig_hero(screen=None):
     colw = W - 12 - x0
     b.append(TS(x0, 44, [("차에는 주행가능거리,", 800, INK)], 23))
     b.append(TS(x0, 74, [("사람에게는 ", 800, INK), ("쉼표", 800, ACCENT)], 23))
-    sub = wrap("운전자 휴식·탑승자 화장실 권유 시점을 추정하는 차량용 코치", 15.5, colw)
+    sub = wrap("휴식 권고·화장실 권유 마감을 차량 문맥과 함께 보는 코치", 15.5, colw)
     b.append(ML(x0, 102, sub, 15.5, 21, 500, INK3))
-    props = [("Rest", "권유 시점 전 마지막 쉼터", "경로 위 쉼터·정체를 내비에서 읽어, 쉴 곳이 끊기기 전에 먼저 묻는다"),
-             ("Group", "탑승자별 화장실·피로 게이지", "아이·어르신·임신부마다 다른 시간, 기본 간격과 기록으로 추정, 정확도는 미검증"),
-             ("Mic", "한 번의 수락", "수락하면 경유지 추가, 실제 마이크 종단 검증은 별도")]
+    props = [("Rest", "휴식 권고 전 마지막 쉼터", "탑승자별 마감과 순정 내비의 TBT·정체를 함께 본다"),
+             ("Group", "사람·차의 조건 함께", "차 잔여거리와 기어·도어·조향 문맥을 같은 정차 결정에 쓴다"),
+             ("Mic", "질문 하나, 정차 한 번", "주행 제한에 맞게 묻고, 같은 곳의 화장실·휴식·주유를 묶는다")]
     y = 102 + 21 * (len(sub) - 1) + 28
     for i, (ic, title, desc) in enumerate(props):
         b.append(C(x0 + 19, y + 24, 19, TINT))
@@ -982,11 +982,11 @@ def fig_loop():
         b.append('<path d="M -11 -10 L 11 0 L -11 10 z" fill="%s" transform="translate(%.1f %.1f) rotate(%.1f)"/>'
                  % (ACCENT, px, py, ang))
     nodes = [
-        (180, "감지", "기어·도어·조향·차속, Pleos 내비의 경로·정체",
+        (180, "감지", "기어·도어·조향·차속·잔여거리, 순정 내비의 경로·정체",
          ["getTBTInfo · getRouteStateInfo", "GEAR_SELECTION · 도어·조향"]),
-        (252, "추정", "탑승자별 화장실·휴식 권유 시점",
+        (252, "추정", "화장실 권유 마감·휴식 권고 시점",
          ["와이블 생존모형 · 베이즈 갱신", "Three-Process Model"]),
-        (324, "판단", "경로 위 화장실 공백, 마지막 기회, 주행 부담을 줄이려 정한 규칙",
+        (324, "판단", "사람 권유 마감·경로 공백·차 가용 거리로 정차지 선택, 주행 제한 반영",
          ["requestTrip (진행 방향)", "CarUxRestrictions"]),
         (36, "묻고 실행", "음성으로 묻고 수락하면 경유지(마이크 종단 미검증)",
          ["TTS·STT · addWaypoint", "requestRoute"]),
