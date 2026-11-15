@@ -7,6 +7,24 @@ import org.junit.Test
 /** 넘치면 덜 중요한 줄부터 뺀다 (UI 감사 #10: compact 세로 윈도에서 급해 결과 카드 아래 줄이 잘렸다) */
 class FitColumnTest {
 
+    @Test fun compactEnergyCardKeepsContextAndNameBeforeDistanceAndChips() {
+        // WF portrait 800: header112 + margins/gaps80 + gauges210 + energy50 + actions200 = 652.
+        // stop card148 - padding48 = 100. Context40 + gap8 + name52 must remain intact.
+        val rows = listOf(100, 46, 72) // identity; distance incl. gap; chips incl. gap
+        val keep = fitRows(rows, 0, maxHeight = 100, required = 1)
+        assertEquals(listOf(true, false, false), keep)
+        assertEquals(100, stackHeight(rows, keep, 0))
+        assertEquals(listOf(true, true, false), fitRows(rows, 0, maxHeight = 150, required = 1))
+    }
+
+    @Test fun portrait17EnergyCardFitsEvenTwoChipRows() {
+        // 840x1184: stop card376 - padding64 = 312. Two chip rows132 + leading gap24.
+        val rows = listOf(104, 46, 156)
+        val keep = fitRows(rows, 0, maxHeight = 312, required = 1)
+        assertTrue(keep.all { it })
+        assertTrue(stackHeight(rows, keep, 0) <= 312)
+    }
+
     // 급해 결과 카드의 줄 높이(dp ≈ px, 1x): 이름 48, 시간 40, 소요 구성 38, 배지·여기로 60. 간격 8 (compact)
     private val card = listOf(48, 40, 38, 60)
     private val urgentPriority = listOf(0, 1, 3, 2)

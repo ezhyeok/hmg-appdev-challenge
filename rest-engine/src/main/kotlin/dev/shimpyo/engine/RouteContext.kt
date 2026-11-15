@@ -51,6 +51,8 @@ internal class RouteContext(private val config: CoachConfig) {
     /** 정차 후보를 넣은 경로 거리 한계 (RouteState.candidatesUntilM). 목적지까지 다 넣었거나 모르면 NaN */
     var horizonM = Double.NaN
         private set
+    var energyHorizonM = Double.NaN
+        private set
 
     /** 목적지까지 남은 거리·시간. 모르면 NaN */
     var destM = Double.NaN
@@ -92,12 +94,21 @@ internal class RouteContext(private val config: CoachConfig) {
         vFreeMps = v.coerceIn(MIN_V, MAX_V)
         val h = route?.candidatesUntilM
         horizonM = if (h != null && h.isFinite() && h >= 0.0 && (destM.isNaN() || h < destM)) h else Double.NaN
+        val eh = route?.energyCandidatesUntilM ?: h
+        energyHorizonM = if (eh != null && eh.isFinite() && eh >= 0.0 && (destM.isNaN() || eh < destM)) eh else Double.NaN
     }
 
     /** 후보 목록이 빠짐없다고 볼 수 있는 경로 거리 끝: 자른 곳(horizonM), 아니면 목적지. 둘 다 모르면 무한대 */
     val knownEndM: Double
         get() = when {
             !horizonM.isNaN() -> horizonM
+            !destM.isNaN() -> destM
+            else -> Double.POSITIVE_INFINITY
+        }
+
+    val knownEnergyEndM: Double
+        get() = when {
+            !energyHorizonM.isNaN() -> energyHorizonM
             !destM.isNaN() -> destM
             else -> Double.POSITIVE_INFINITY
         }

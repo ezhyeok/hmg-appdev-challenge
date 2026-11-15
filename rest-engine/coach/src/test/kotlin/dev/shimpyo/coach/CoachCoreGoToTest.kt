@@ -108,7 +108,7 @@ class CoachCoreGoToTest {
         rig.command(UiCommand.GoTo(stop))
         rig.runUntil(10_000) { rig.state.goToResult?.outcome == GoToOutcome.WAYPOINT_ADDED } ?: error("다시 시도 결과 없음")
         rig.run(2_000)
-        assertEquals("다시 시도로 넣은 곳은 엔진이 아는 '들르기로 한 곳'이다", listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
+        assertEquals("다시 시도로 넣은 곳은 엔진이 아는 '들르기로 한 곳'이다", "NEXT_ACCEPTED", rig.state.next?.reasons?.firstOrNull()?.code)
         assertEquals(listOf(stop.id), rig.accepted.notes.map { it.stopId })
     }
 
@@ -131,7 +131,7 @@ class CoachCoreGoToTest {
         rig.run(60_000)
         assertEquals("한 번만", 1, rig.accepted.notes.size)
         assertEquals("엔진의 추천이 고른 곳이다", "oksan", rig.state.next?.stop?.id)
-        assertEquals(listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
+        assertEquals("NEXT_ACCEPTED", rig.state.next?.reasons?.firstOrNull()?.code)
         assertEquals("그곳으로 가는 동안 다른 정차를 묻지 않는다: ${rig.voice.asked.drop(asked)}", asked, rig.voice.asked.size)
     }
 
@@ -150,7 +150,7 @@ class CoachCoreGoToTest {
         val asked = rig.voice.asked.size
         rig.run(150_000)
         assertEquals("2분 30초 뒤에도 엔진의 추천은 고른 곳이다", "oksan", rig.state.next?.stop?.id)
-        assertEquals(listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
+        assertEquals("NEXT_ACCEPTED", rig.state.next?.reasons?.firstOrNull()?.code)
         assertEquals("그곳으로 가는 동안 다른 정차를 묻지 않는다: ${rig.voice.asked.drop(asked)}", asked, rig.voice.asked.size)
     }
 
@@ -190,7 +190,7 @@ class CoachCoreGoToTest {
         rig.command(UiCommand.Answer(asked.id, true))
         rig.runUntil(10_000) { rig.state.goToResult != null } ?: error("결과 없음")
         rig.run(2_000)
-        assertEquals(listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
+        assertEquals("NEXT_ACCEPTED", rig.state.next?.reasons?.firstOrNull()?.code)
         val note = rig.accepted.notes.single()
         assertEquals(asked.stop!!.id, note.stopId)
         assertTrue("엔진이 추천하던 목적을 넘긴다: ${note.purposes}", Purpose.RESTROOM in note.purposes)

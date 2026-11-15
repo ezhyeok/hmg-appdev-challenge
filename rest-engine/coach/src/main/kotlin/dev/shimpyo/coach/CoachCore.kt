@@ -770,7 +770,7 @@ class CoachCore(private val d: CoachDeps) {
             UrgentFlow.Step.SEARCH -> {
                 val real = d.positions.current.value?.fix
                 val f = CoreRules.searchFix(pos, real, travel.heading)!!
-                val near = d.stops.near(f.lat, f.lon, f.heading, UrgentFlow.RADIUS_M, CoreRules.PARKABLE_KINDS, now = input.now, limit = UrgentFlow.MAX)
+                val near = d.stops.nearRestrooms(f.lat, f.lon, f.heading, UrgentFlow.RADIUS_M, CoreRules.PARKABLE_KINDS, now = input.now, limit = UrgentFlow.MAX)
                 // 화면 목록과 엔진의 급해 질문이 같은 곳을 1등으로 고르도록 같은 후보(경로 후보 + 가까운 화장실)로 순위를 매긴다
                 val ranked = try {
                     a.engine.urgent(input.copy(candidates = CoreRules.withExtras(input.candidates, near, pos), intent = null))

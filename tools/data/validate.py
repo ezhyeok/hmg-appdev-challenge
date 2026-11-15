@@ -18,6 +18,7 @@ REQUIRED = {
     "restrooms.json": {"id": str, "n": str, "t": str, "lat": float, "lon": float, "ga": int},
     "restrooms_nocoord.json": {"id": str, "n": str, "t": str},
     "parkables.json": {"id": str, "k": str, "pk": int, "n": str, "lat": float, "lon": float},
+    "ev_chargers.json": {"id": str, "n": str, "lat": float, "lon": float, "dc": int, "kw": float, "useTime": str, "src": str},
 }
 ENUMS = {
     ("restrooms.json", "t"): {"p", "o", "s", "m", "u"},
@@ -26,6 +27,7 @@ ENUMS = {
     ("rest_areas.json", "k"): {"general", "truck", "simple"},
     ("rest_areas.json", "src"): {"kec", "osm"},
     ("drowsy_shelters.json", "src"): {"kec", "osm"},
+    ("ev_chargers.json", "src"): {"keco"},
 }
 FLAGS = {"wc", "nr", "ev", "gas", "lpg", "ph", "food", "shop", "h24", "pv", "dp", "bell", "cctv", "dis", "pk"}
 # 'HH:MM-HH:MM'; closing may pass midnight ('05:00-24:20' = 00:20 next day), so hours go up to 47
@@ -155,6 +157,13 @@ def main():
                 errs.append(f"row {i}: duplicate id {r['id']}")
             ids.add(r.get("id"))
             errs += hours_problems(fn, i, r)
+            if fn == "ev_chargers.json":
+                if r.get("dc", 0) < 1 or r.get("ev") != 1 or not math.isfinite(r.get("kw", -1)) or r.get("kw", -1) < 0:
+                    errs.append(f"row {i}: invalid fast-charger facilities")
+                if "at" in r:
+                    target = next((s for s in roadside_rows if s["id"] == r["at"]), None)
+                    if target is None or common.haversine_m(r["lat"], r["lon"], target["lat"], target["lon"]) > 151:
+                        errs.append(f"row {i}: invalid EV attachment")
         if fn in ("rest_areas.json", "drowsy_shelters.json"):
             roadside_rows += rows
         bad += len(errs)

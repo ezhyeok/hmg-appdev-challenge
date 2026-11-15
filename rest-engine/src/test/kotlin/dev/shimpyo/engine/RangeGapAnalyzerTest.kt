@@ -3,6 +3,19 @@ package dev.shimpyo.engine
 import kotlin.test.*
 
 class RangeGapAnalyzerTest {
+    @Test fun energyCoverageDoesNotBorrowTheLongerRestroomCoverage() {
+        val route = RouteContext(CoachConfig()).apply { prepare(RouteState(true, remainDistanceM = 200_000.0,
+            candidatesUntilM = 100_000.0, energyCandidatesUntilM = 8_000.0), 100f) }
+        val opps = ArrayList<Opportunity>()
+        route.opportunities(listOf(stop("ev", 4_500.0, facilities = Facilities(evCharger = true))), opps) { true }
+        assertEquals(100_000.0, route.knownEndM)
+        assertEquals(8_000.0, route.knownEnergyEndM)
+        assertNull(GapAnalyzer(CoachConfig()).analyzeRange(opps, route, 40_000.0))
+        val tight = assertNotNull(GapAnalyzer(CoachConfig()).analyzeRange(opps, route, 6_000.0))
+        assertTrue(tight.gapLowerBound)
+        assertFalse(tight.endIsDestination)
+        assertEquals(8_000.0, tight.rangeEndM)
+    }
     private val config = CoachConfig()
     private fun analyze(usable: Double?, distances: List<Double>, end: Double? = 200_000.0, horizon: Double? = null, jam: Boolean = false): GapAnalyzer.LastChance? {
         val route = RouteContext(config).apply { prepare(RouteState(true, remainDistanceM = end, candidatesUntilM = horizon,

@@ -339,14 +339,30 @@ class StopRepositoryTest {
 
     @Test
     fun loadCost() {
-        val bytes = File("../../app/src/main/assets/data/stops.bin").readBytes()
-        repeat(3) { StopRepository { StopTable.decode(bytes) }.also { r -> runBlocking { r.ensureLoaded() } } }
-        val t0 = System.nanoTime()
-        val t = StopTable.decode(bytes)
-        val t1 = System.nanoTime()
-        StopRepository { t }.also { r -> runBlocking { r.ensureLoaded() } }
-        val t2 = System.nanoTime()
-        println("stops.bin ${bytes.size / 1_000_000.0} MB: decode+검사 ${(t1 - t0) / 1_000_000} ms, 색인(격자·지도 맞춤·이름 키) ${(t2 - t1) / 1_000_000} ms (JVM)")
+        val files = (System.getenv("SHIMPYO_STOP_BENCHMARK") ?: "../../app/src/main/assets/data/stops.bin")
+            .split(File.pathSeparator).map { File(it).readBytes() }
+        fun measure(bytes: ByteArray): Triple<Double, Double, Double> {
+            val t0 = System.nanoTime()
+            val t = StopTable.decode(bytes)
+            val t1 = System.nanoTime()
+            StopRepository { t }.also { r -> runBlocking { r.ensureLoaded() } }
+            val t2 = System.nanoTime()
+            return Triple((t1 - t0) / 1e6, (t2 - t1) / 1e6, (t2 - t0) / 1e6)
+        }
+        val first = files.map { measure(it).third }
+        repeat(3) { for (bytes in files) measure(bytes) }
+        val samples = files.map { ArrayList<Triple<Double, Double, Double>>() }
+        repeat(7) { round ->
+            // 두 파일을 같은 JVM에서 교대로 재면 서버 부하/JIT 순서 효과가 줄어든다.
+            val order = if (round % 2 == 0) files.indices.toList() else files.indices.reversed()
+            for (i in order) samples[i] += measure(files[i])
+        }
+        for (i in files.indices) {
+            val rows = samples[i]
+            println("stops.bin ${files[i].size} bytes: first decode+index ${"%.1f".format(first[i])} ms; " +
+                "warm medians (3 warmups, 7 interleaved samples): decode ${"%.1f".format(rows.map { it.first }.sorted()[3])} ms, " +
+                "index ${"%.1f".format(rows.map { it.second }.sorted()[3])} ms, total ${"%.1f".format(rows.map { it.third }.sorted()[3])} ms (JVM)")
+        }
     }
 
     // ------------------------------------------------------------ 도우미

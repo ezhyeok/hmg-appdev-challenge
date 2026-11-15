@@ -4,6 +4,8 @@ import dev.shimpyo.app.ui.Labels
 import dev.shimpyo.app.ui.components.ShimpyoIcons
 import dev.shimpyo.app.ui.theme.DriveLimits
 import dev.shimpyo.coach.CoachUiState
+import dev.shimpyo.coach.GoToOutcome
+import dev.shimpyo.coach.GoToResult
 import dev.shimpyo.engine.*
 import org.junit.Assert.*
 import org.junit.Test
@@ -16,6 +18,85 @@ class EnergyDriveModelsTest {
     private val wc = Reason("LAST_CHANCE_CONGESTION", texts.reasonLastChanceCongestion(60))
     private val rest = Reason("FATIGUE_LAST_CHANCE_GAP", texts.reasonFatigueLastChanceGap(80, 40))
     private val state = CoachUiState(serviceRunning = true, energy = EnergyKind.ELECTRIC, rangeKm = 58.8)
+
+    @Test fun acceptedEnergyStopKeepsPurposesAndDecisionChipsThroughNavigationConfirmation() {
+        for (kind in listOf(EnergyKind.ELECTRIC, EnergyKind.FUEL, null)) {
+            val word = if (kind == EnergyKind.ELECTRIC) "충전" else "주유"
+            val reason = range.copy(text = texts.reasonRangeLastChance(11.5, 20, kind, false, false, 20.0))
+            val reasons = listOf(wc, reason)
+            val rec = Recommendation(stop, setOf(Purpose.RESTROOM, Purpose.FUEL), reasons)
+            val asked = state.copy(energy = kind, next = rec, promptReasons = reasons,
+                prompt = Prompt("q", PromptKind.LAST_CHANCE, texts.energyLastChance(stop.name, rec.purposes, kind), stop, Long.MAX_VALUE))
+            val before = stopCard(asked, true)
+            val accepted = asked.copy(prompt = null, promptReasons = emptyList(),
+                next = rec.copy(reasons = listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())) + reasons))
+            val chosen = stopCard(accepted, true)
+            assertEquals("화장실·$word · 들르기로 한 곳", chosen.context)
+            assertEquals(before.chips, chosen.chips)
+            assertNull(chosen.askingLevel)
+            val pending = stopCard(accepted.copy(goToPending = stop), true)
+            assertEquals("화장실·$word · 내비에 넣는 중…", pending.context)
+            assertEquals(before.chips, pending.chips)
+            for (outcome in listOf(GoToOutcome.WAYPOINT_ADDED, GoToOutcome.ROUTE_STARTED, GoToOutcome.ON_ROUTE, GoToOutcome.SEARCH_OPENED)) {
+                val result = GoToResult(stop, outcome, 1L)
+                val navigating = accepted.copy(goToResult = result)
+                val card = stopCard(navigating, true)
+                assertEquals("화장실·$word · ${goToContext(outcome).removePrefix("경로 위 · ")}", card.context)
+                assertEquals(before.chips, card.chips)
+                assertTrue(cardShowsGoTo(navigating, true, result))
+            }
+        }
+    }
+
+    @Test fun acceptedPurposesRemainVisibleWithoutEnergyReasonAndNeverComeFromAnotherStop() {
+        val rec = Recommendation(stop, setOf(Purpose.REST, Purpose.FUEL), listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())))
+        val accepted = state.copy(next = rec)
+        assertEquals("휴식·충전 · 들르기로 한 곳", stopCard(accepted, true).context)
+        val other = stop.copy(id = "other", name = "다른 휴게소")
+        val pending = stopCard(accepted.copy(goToPending = other), true)
+        assertEquals(GOTO_PENDING_CONTEXT, pending.context)
+        assertTrue(pending.chips.isEmpty())
+        val restOnly = stopCard(state.copy(next = rec.copy(purposes = setOf(Purpose.REST))), true)
+        assertEquals("휴식 · 들르기로 한 곳", restOnly.context)
+        assertEquals(ShimpyoIcons.Rest, restOnly.icon)
+    }
+
+    @Test fun restrictedChipLengthNeverTruncatesARangeClaimIntoADifferentMeaning() {
+        val rec = Recommendation(stop, setOf(Purpose.FUEL), listOf(range, wc))
+        val card = stopCard(state.copy(next = rec), true, maxChars = 10)
+        assertTrue(card.chips.all { it.length <= 10 })
+        assertFalse(card.chips.any { it.endsWith("…") })
+        assertTrue("정체 1시간" in card.chips)
+    }
+
+    @Test fun directEnergyRequestMatchesSpokenPurposeWithoutLastChanceOrBundleReasons() {
+        for (kind in listOf(EnergyKind.ELECTRIC, EnergyKind.FUEL, null)) {
+            val word = if (kind == EnergyKind.ELECTRIC) "충전" else "주유"
+            val prompt = Prompt("fuel", PromptKind.REST_SUGGESTION, texts.fuelSuggestion(stop.name, 3800.0, kind), stop, Long.MAX_VALUE)
+            // 질문이 떠 있는 동안 다음 추천이 다른 곳으로 넘어가도 질문의 문장을 따른다.
+            val card = stopCard(state.copy(energy = kind, prompt = prompt, next = null), true)
+            assertEquals("${word}할 곳", card.context)
+            assertEquals(ShimpyoIcons.GasStation, card.icon)
+            assertTrue(card.chips.isEmpty())
+        }
+        val restPrompt = Prompt("rest", PromptKind.REST_SUGGESTION, texts.restSuggestionWanted(stop.name, 3800.0), stop, Long.MAX_VALUE)
+        assertEquals("쉬어 갈 곳", stopCard(state.copy(prompt = restPrompt), true).context)
+        val namedMeal = stop.copy(name = "식사동 충전소")
+        assertEquals("쉬어 갈 곳", stopCard(state.copy(prompt = restPrompt.copy(
+            stop = namedMeal, speech = texts.restSuggestionWanted(namedMeal.name, 3800.0))), true).context)
+        assertEquals("식사할 곳", stopCard(state.copy(prompt = restPrompt.copy(
+            speech = texts.mealSuggestion(stop.name, 3800.0))), true).context)
+    }
+
+    @Test fun bundleQuestionKeepsHumanPurposeWhenRecommendationMovesOn() {
+        for (human in listOf(Purpose.RESTROOM, Purpose.REST)) {
+            val purposes = setOf(human, Purpose.FUEL)
+            val prompt = Prompt("bundle", PromptKind.REST_SUGGESTION, texts.energyBundle(stop.name, purposes, EnergyKind.ELECTRIC), stop, Long.MAX_VALUE)
+            val card = stopCard(state.copy(prompt = prompt, next = null,
+                promptReasons = listOf(Reason("ENERGY_BUNDLE", texts.reasonEnergyBundle(EnergyKind.ELECTRIC)))), true)
+            assertEquals("${if (human == Purpose.RESTROOM) "화장실" else "휴식"}·충전 함께", card.context)
+        }
+    }
 
     /** 도착 시 잔여 거리: 차의 현재 잔량이나 선택한 정차지부터의 간격과 혼동하지 않는다. */
     @Test fun rangeChipShowsRangeLeftAtTheNextEnergyStop() {

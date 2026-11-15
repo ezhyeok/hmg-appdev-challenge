@@ -31,6 +31,55 @@ import org.junit.Test
  */
 class CandidateProviderTest {
 
+    @Test fun nationwideEnergyRowsReachTheEngineWithTbtAndWithoutIt() = runTest {
+        val base = stop("city-ev", "시청 급속충전소", 4.0, kind = StopKind.OTHER, restroom = false)
+        val ev = base.copy(c = base.c.copy(facilities = dev.shimpyo.engine.Facilities(restroom = false, evCharger = true)))
+        for (navi in listOf(guiding(emptyList()), notGuiding)) {
+            val oracle = FakeTripEstimator(TripAnswer.Route(4_500.0, 300.0, true))
+            val fx = Fx(this, listOf(ev), oracle)
+            fx.provider.refresh(Road.car(), navi, CandidatePolicy.REAL)
+            assertEquals(listOf("city-ev"), fx.ids)
+            assertFalse(fx.snap.list.single().facilities.restroom)
+            assertEquals(4_500.0, fx.snap.list.single().routeDistanceM!!, 0.01)
+            assertEquals(60_000.0, fx.snap.energyUntilM!!, 0.01)
+            assertTrue(oracle.calls.size <= CandidateTuning.ORACLE_MAX)
+            if (navi.guiding) {
+                val route = fx.provider.withHorizon(navi.route, navi, 0.0)!!
+                assertNull(route.candidatesUntilM)
+                assertEquals(60_000.0, route.energyCandidatesUntilM!!, 0.01)
+            }
+        }
+    }
+
+    @Test fun unmeasuredEnergyRowsShortenOnlyTheEnergyCoverage() = runTest {
+        val base = stop("gas", "시내 주유소", 4.0, kind = StopKind.GAS_STATION, restroom = false)
+        val gas = base.copy(c = base.c.copy(facilities = dev.shimpyo.engine.Facilities(restroom = false, fuel = true)))
+        val fx = Fx(this, listOf(gas))
+        val navi = guiding(emptyList())
+        fx.provider.refresh(Road.car(), navi, CandidatePolicy.REAL)
+        assertTrue(fx.snap.list.isEmpty())
+        assertNull(fx.snap.untilM)
+        assertTrue(fx.snap.energyUntilM!! in 3_900.0..4_100.0)
+        val otherRoute = navi.copy(epoch = navi.epoch + 1)
+        val route = fx.provider.withHorizon(otherRoute.route, otherRoute, 0.0)!!
+        assertEquals(0.0, route.candidatesUntilM!!, 0.0)
+        assertEquals(0.0, route.energyCandidatesUntilM!!, 0.0)
+    }
+
+    @Test fun energyAndHighwayCandidatesShareTheSameRequestBudget() = runTest {
+        val energies = (1..10).map { i ->
+            val base = stop("ev$i", "충전소$i", i.toDouble(), kind = StopKind.OTHER, restroom = false)
+            base.copy(c = base.c.copy(facilities = dev.shimpyo.engine.Facilities(restroom = false, evCharger = true)))
+        }
+        val oracle = FakeTripEstimator(TripAnswer.Route(4_500.0, 300.0, true))
+        val fx = Fx(this, nine + energies, oracle)
+        fx.provider.refresh(Road.car(), notGuiding, CandidatePolicy.REAL)
+        assertEquals(CandidateTuning.ORACLE_MAX, oracle.calls.size)
+        assertTrue(fx.ids.any { it.startsWith("ev") })
+        assertTrue(fx.ids.any { it.startsWith("s") })
+        assertTrue(fx.snap.energyUntilM!! < fx.snap.untilM!!)
+    }
+
     private class Fx(scope: TestScope, rows: List<StopRow>, val oracle: FakeTripEstimator = FakeTripEstimator()) {
         val clock = ElapsedClock { scope.testScheduler.currentTime }
         val odometer = Odometer(clock).also { it.advance(0f) }
@@ -220,7 +269,7 @@ class CandidateProviderTest {
         assertEquals(CandidatesState.READY, s.state)
         assertTrue(s.list.isEmpty())
         assertNull("목적지까지 TBT가 닿았으니 정말 없다", s.untilM)
-        assertEquals("반경 검색을 하지 않는다", 0, fx.stops.aheadCalls)
+        assertEquals("TBT와 별도로 에너지 종류만 반경 검색한다", 1, fx.stops.aheadCalls)
         assertTrue(fx.oracle.calls.isEmpty())
     }
 
@@ -529,7 +578,9 @@ class CandidateProviderTest {
         assertNull(fx.provider.withHorizon(null, navi, 0.0))
 
         fx.provider.refresh(Road.car(), guiding(opps.take(3)), CandidatePolicy.REAL)
-        assertSame("완전한 목록이면 그대로", route, fx.provider.withHorizon(route, guiding(opps.take(3)), 0.0))
+        val complete = fx.provider.withHorizon(route, guiding(opps.take(3)), 0.0)!!
+        assertNull("화장실은 완전한 TBT 범위", complete.candidatesUntilM)
+        assertEquals("에너지는 별도 반경 검색 범위", 60_000.0, complete.energyCandidatesUntilM!!, 0.0)
     }
 
     // ------------------------------------------------------------ 갱신 루프: epoch, 주기, 초기화
@@ -598,7 +649,7 @@ class CandidateProviderTest {
         advanceTimeBy(CandidatePolicy.REAL.periodMs - 2_000)
         assertEquals("바뀐 것이 없으면 주기 전에는 다시 만들지 않는다", after, fx.stops.aheadCalls)
         advanceTimeBy(3_000)
-        assertEquals("주기마다", after + 1, fx.stops.aheadCalls)
+        assertEquals("주기마다 휴게시설과 에너지 검색 한 번씩", after + 2, fx.stops.aheadCalls)
         job.cancel()
     }
 

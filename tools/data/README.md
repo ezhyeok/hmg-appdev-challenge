@@ -1,7 +1,7 @@
-# tools/data — 오프라인 정차 후보 데이터 (휴게소·졸음쉼터·화장실·주유소·주차장)
+# tools/data — 오프라인 정차 후보 데이터 (휴게소·졸음쉼터·화장실·주유소·주차장·급속충전소)
 
 앱(`app/src/main/assets/data/`)에 넣는 JSON을 만드는 스크립트다. 공공데이터와 OpenStreetMap을
-내려받아(`fetch.py`) 정제·지오코딩·교차검증한 뒤 내보낸다(`build.py`). API 키나 회원가입은 쓰지 않는다.
+내려받아(`fetch.py`) 정제·지오코딩·교차검증한 뒤 내보낸다(`build.py`). 기존 자료 수집은 키 없이 실행한다. 전기차 충전소 API만 별도의 gitignored 서비스키를 쓴다(아래 참조).
 다운로드 기준일: **2026-11-11** (OSM Overpass 스냅샷 2026-11-11T00:09~00:14Z).
 
 ## 실행
@@ -65,7 +65,7 @@ OSM 출처 필드 `src`/`osm`으로 구분된다).
 ## 출력 파일 (`app/src/main/assets/data/`)
 
 **앱이 실제로 읽는 것은 `stops.bin`이다.** JSON을 다시 만들었으면 `./gradlew -p rest-engine buildStopTable`로
-`stops.bin`(형식 2: 정차 후보 60,084행의 열 단위 이진 표 + 고속도로 선형, 5.05 MB)을 다시 만든다. 변환 규칙은
+`stops.bin`(형식 2: 열 단위 이진 표 + 고속도로 선형)을 다시 만든다. 전국 에너지 확장 전에는 60,084행·5,052,748바이트였고 확장 후 수치는 아래 전국 에너지 절에 기록한다. 변환 규칙은
 `rest-engine/src/main/kotlin/dev/shimpyo/engine/stops/StopRows.kt` 하나이고, `StopTableTest`가 JSON 전 행과
 `stops.bin`을 비교한다(둘이 어긋나면 실패). JSON 파일은 공개 데이터 원본으로 저장소에 두되 APK에는 넣지 않는다
 (`app/build.gradle.kts`의 `ignoreAssetsPattern`). 예전처럼 앱이 JSON을 직접 읽으면 에뮬레이터에서 18초 동안 GC가 돌았다.
@@ -367,3 +367,131 @@ p90 104 m, 최대 381 m. 졸음쉼터는 253곳 중 237곳이 짝지어졌다(�
 | `road_samples.py` | 테스트 자료: OSM 차로 위 흔들린 위치(지도 맞춤 정확도, `MotorwayIndexTest`) |
 | `replay_positions.py` | 테스트 자료: 경부선 39곳·대신·동광주 접근 위치(실제 차로 위, `StopRepositoryTest`) |
 
+
+
+## 전국 차량 에너지 데이터 (2026-11-15)
+
+### 한국환경공단 전기자동차 충전소 정보
+
+- 출처: [공공데이터포털 15076352](https://www.data.go.kr/data/15076352/openapi.do), 제공기관 **한국환경공단**.
+- 서비스 `EvCharger`, 오퍼레이션 `getChargerInfo`, `numOfRows=9999`, `dataType=JSON`.
+- 이용허락범위(2026-11-15 데이터셋 페이지 원문): **“제3자 권리 포함 : 저작권 표시, 공공저작물 : 출처표시 (제 1유형)”**.
+  [공공누리 제1유형](https://www.kogl.or.kr/info/licenseType1.do). 앱의 정확한 출처 문구는 `meta.json`과
+  설정 화면의 출처 목록(`app/src/main/java/dev/shimpyo/app/ui/settings/SettingsScreen.kt`)에 있다.
+- 코드표: 저장소 루트의 `한국환경공단_전기자동차 충전소 정보_OpenAPI활용가이드_v1.25.docx` (gitignored),
+  Python `zipfile`로 `word/document.xml`을 읽어 확인했다.
+
+```bash
+# 키는 tools/data/.datagokr-key 하나에만 보관(600). 명령 인자/환경변수로 넘기거나 출력하지 않는다.
+python3 -I -B tools/data/ev_chargers.py
+# 이후 실행은 원본 페이지 캐시를 재사용. 아래는 네트워크 사용을 금지하는 재집계 명령이다.
+python3 -I -B tools/data/ev_chargers.py --offline
+python3 -I -B tools/data/test_ev_chargers.py
+./gradlew -p rest-engine buildStopTable
+./gradlew -p rest-engine test :coach:test
+```
+
+기존 `build.py`로 휴게시설 JSON을 다시 만들었다면 EV 집계를 다시 실행한 뒤 `buildStopTable`을 실행한다.
+페이지 원본 429,672,953바이트(약 430MB)는 `tools/data/raw/ev-NNNN.json`에 보관하며 `tools/data/.gitignore`가 제외한다. 캐시가 있는 페이지는
+다시 받지 않는다. 매 신규 요청 전 0.5초 쉬고 오류는 최대 5번 지수 지연으로 재시도한다. 응답 코드·페이지 번호·
+전체 페이지의 `totalCount` 일치와 최종 행 수를 검사한다. 전체 수가 도중 바뀌면 새 `--raw` 디렉터리에서 재수집한다.
+갱신은 `--raw tools/data/raw/YYYY-MM-DD`처럼 새 디렉터리로 한다(기존 캐시와 섞지 않기). 이후 재집계에도 같은 `--raw`를 지정한다. 키가 반사된 응답은 저장하지 않고, 예외/HTTP URL/응답 본문은
+로그에 출력하지 않는다. `ev-summary.json`에는 키 없는 고정 endpoint·페이지별 바이트/행 수/sha256/수집시각·제외 통계만 담는다.
+JSON은 APK에서 제외되고 앱에는 `stops.bin`만 들어간다. 키/가이드/원본 캐시는 assets 밖에 있다.
+
+집계 규칙:
+
+- `statId`별로 묶고 `(statId, chgerId)` 중복을 제거한다. `delYn=Y`, `limitYn=Y`, ID 누락,
+  유한하지 않은 좌표 또는 공통 한국 bbox(위도 33–38.75, 경도 124.5–132) 밖은 제외한다.
+- DC 급속: `01` DC차데모, `03` DC차데모+AC3상, `04` DC콤보, `05` DC차데모+DC콤보,
+  `06` DC차데모+AC3상+DC콤보, `10` DC콤보+NACS. `09` NACS는 AC 겸용 규격이라 출력 50kW 이상인 경우만 포함한다.
+- 제외: `02` AC완속, `07` AC3상 전용, `08` **DC콤보(완속)**, `11` **DC콤보2(버스전용)**,
+  미상 코드 및 출력 미확인/50kW 미만 NACS. 이들을 가진 충전소도 일반차 DC 급속기가 하나 있으면 남긴다.
+- 좌표는 남은 급속기의 중앙값(소수 6자리). 한 station 안에서 급속기 좌표가 중앙값에서 150m 넘게 벌어지면
+  임의 중간 지점을 만들지 않고 그 station을 제외한다.
+- `ev_chargers.json`: `id=ev<statId>`, `n`, `lat/lon`, `ev=1`, `dc`(급속기 수), `kw`(급속기 최대 출력),
+  `useTime`(중복 제거한 원문 시간), `a`(주소), `src=keco`. 모든 급속기 시간이 명확히 24시간이면 `h24=1`,
+  단일 단순 시간대면 `oh=HH:MM-HH:MM`. 요일/입주민 등 조건이 붙은 문구를 무조건 24시간으로 해석하지 않는다.
+- 기존 휴게소·졸음쉼터와 이름이 일치하고 150m 안이면 `at=<기존 id>`를 붙인다. 명시된 목적지 방향도 확인한다.
+  이 행은 새 점을 만들지 않고 `loadRecords`에서 기존 시설의 `evCharger`만 켠다. 기존 화장실·차로·영업시간은 보존한다. 운영사 접두어 워터/SK엔크린/HK하이웨이/E1은 이름 비교에서 제외한다.
+  서로 다른 사업자의 같은 station 부지는 원천 `statId`를 보존한다(휴게시설 외 임의 이름 유사도 병합은 하지 않는다).
+- 독립 충전소는 `StopKind.OTHER`, `evCharger=true`, `restroom=false`다. 원본의 `stat`은 실시간에 가까운
+  상태 스냅샷일 뿐이므로 필터나 APK 가용 상태로 쓰지 않는다. 운영사·시설 코드·주차료·이용제한 사유·편의제공 여부 등은
+  원본 캐시에 남긴다. 이 값들로 화장실을 추론하지 않는다.
+- 기존 휴게소 JSON의 EV 플래그는 원천 기록으로만 보존한다. 바이너리에서는 DC 급속이 확인된 `at` 연결만 EV로
+  켠다. 종전 EV 휴게소 212곳 중 급속 연결이 확인되지 않은 15곳의 EV 플래그는 끈다(휴게소 후보 자체는 보존). `dc`, `kw`, 원문 이용시간은 공개 JSON에 남기고 이진 표에는 경로 판단용 시설 플래그/시간표만 싣는다.
+
+### 주유소·화장실 분리와 실제 후보 로딩
+
+`parkables.json`의 주유소/LP가스 11,767곳 가운데 화장실 근거가 없던 **7,092곳**도 이제 에너지 전용 후보가 된다.
+`fuel=true`, `restroom=(wc==1)`이며 화장실 증거를 만들지 않는다. 수소 79곳은 기존처럼 일반 내연기관 연료로
+취급하지 않는다(현재 엔진에 수소 연료 구분이 없다). 졸음쉼터도 누락된 `wc`를 참으로 추론하지 않는다.
+
+- 긴급 순위, 주변 화장실, 화장실 마지막 기회는 `facilities.restroom`을 필수로 확인한다.
+  긴급 반경 검색은 **limit 적용 전**에 화장실 필터를 적용해 에너지 후보가 실제 화장실을 밀어내지 않게 한다.
+- TBT는 휴게소·졸음쉼터만 알려 주므로 `CandidateProvider`가 전국 주유소·충전소도 앞쪽 60km에서 조회한다.
+  별도 에너지 격자 색인으로 공중화장실을 훑지 않는다. 실제 후보는 내비 `requestTrip`이 접근 거리를 확인한 것만 보충한다.
+  기존 갱신당 최대 6회/15초 예산을 공유한다. 반경 경로에서는 에너지 데이터가 있을 때 휴게시설과 요청 슬롯을 나눈다.
+- 미조회/측정 실패/반대 방향인 첫 시설에서 에너지 범위를 자른다(`energyCandidatesUntilM`). 화장실 TBT 범위와
+  별도이므로 촘촘한 충전소가 화장실 공백 판단을 지우거나, TBT가 길다는 이유로 미조회 에너지 공백을 단정하지 않는다.
+- **접근 경로 거리 확인은 현재 목적지 경로 위라는 증명이 아니다.** 원뿔 반경 검색의 한계(굽은 길·나들목 우회)는 남는다.
+  목적지 경로 선형과 경유 우회량으로 엄밀히 검증하는 것은 후속 작업이다. 시연의 기존 고정 후보 정책은 그대로다.
+
+### 크기·성능·검증
+
+시설 비트 플래그, 열 배열, 중복 시간표, UTF-8 이름 blob의 기존 버전 2 형식을 유지한다.
+현재 후보 좌표는 원본 정밀도를 보존하는 Float64이고 고속도로 선형은 Float32다(후보 좌표가 정수 양자화된 형식은 아니다).
+새 충전소 JSON 좌표는 소수 6자리로 제한한다. 모든 원천 충전기 레코드/상태를 바이너리에 싣지 않고 DC 급속 station만 싣는다.
+
+성능은 서버 JVM의 `StopRepositoryTest.loadCost`에서 decode+검사+격자/지도맞춤/이름 색인 전체를 측정한다.
+파일 읽기는 측정 밖이며 첫 회와 3회 워밍업 뒤 7회 중앙값을 기록한다. `SHIMPYO_STOP_BENCHMARK`에 경로를 `:`(Windows는 `;`)로 나열하면 같은 JVM에서 순서를 번갈아 비교한다.
+서버 aarch64 Linux/JDK 17 결과이므로 기존 에뮬레이터의 약 680ms와 직접 비교하지 않는다. 에뮬레이터 재측정은 미실시다.
+
+```bash
+SHIMPYO_STOP_BENCHMARK=/tmp/shimpyo-stops-before.bin:/absolute/path/to/app/src/main/assets/data/stops.bin ./gradlew -p rest-engine :coach:test --tests dev.shimpyo.coach.StopRepositoryTest.loadCost --rerun
+./gradlew -p rest-engine :coach:test --tests dev.shimpyo.coach.StopRepositoryTest.loadCost --rerun
+```
+
+정합성: `StopTableTest`는 JSON 전 행/시설/좌표/시간표/고속도로와 바이너리를 비교한다. 집계 테스트는 작은 로컬 fixture만
+쓰며 네트워크가 없다. 추가 회귀 테스트는 에너지 전용 주유소·충전소의 긴급/주변/화장실 마지막 기회 제외, range 마지막 기회
+포함, 검색 limit 전 필터, 일반 충전소의 실제 후보 전달, 공유 요청 예산 및 에너지 범위 분리를 검사한다.
+
+**실시간 충전기 상태는 범위 밖**이다. 향후에는 서버 relay에서 키를 보관하고 상태/갱신시각/캐시 TTL을 내려줘야 한다.
+단말/APK에 공공데이터 서비스키를 넣는 구현은 하지 않는다.
+
+
+최종 수집/집계 건수 (2026-11-15, `ev-summary.json`):
+
+| 항목 | 수 |
+|---|---:|
+| 수집 페이지 / 충전기 행 (`totalCount`와 일치) | 53 / 528,836 |
+| 원천 충전소 (`statId` 고유값, 제한/삭제 포함) | 101,109 |
+| 남긴 공개 DC 급속 충전소 / 급속기 | 20,813 / 44,888 |
+| 독립 에너지 후보로 추가한 충전소 | 20,321 |
+| 기존 휴게시설에 합친 충전소 / 해당 기존 후보 | 492 / 231 |
+| 유효·제한 없는 충전소 중 DC 급속이 없는 곳 | 36,055 |
+| 위 항목 중 완속 전용 (`02`/`08`만) | 35,796 |
+| 삭제 / 이용자 제한으로 제외한 충전기 | 4,036 / 337,343 |
+| 한국 bbox 밖 좌표로 제외한 충전기 | 1 |
+| 화장실 근거 없이 새로 포함한 주유소·LPG충전소 | 7,092 |
+| 최종 stops.bin 후보 | 87,497 |
+
+비공개·삭제·무효 좌표·일반차 DC 급속 없는 EV 시설 이외에 크기 때문에 추가로 버린 전국 시설은 없다.
+같은 부지에 여러 사업자 station이 있어 원천 충전소 492곳을 기존 후보 231곳에 합쳤다.
+검사에서 북위 38.98209의 잘못된 좌표 한 곳을 발견해 공통 한국 bbox로 제외했다.
+
+
+| 지표 | 확장 전 | 확장 후 |
+|---|---:|---:|
+| 후보 행 | 60,084 | 87,497 |
+| stops.bin 바이트 | 5,052,748 | 7,223,285 |
+| JVM decode+검사 중앙값 | 2.7ms | 7.2ms |
+| JVM 전체 색인 생성 중앙값 | 25.6ms | 35.5ms |
+| JVM 전체 로딩 중앙값 | **28.3ms** | **40.7ms** |
+
+같은 JVM에서 번갈아 측정한 결과(`benchmark-summary.json`). 크기는 2,170,537바이트(+43.0%), 중앙 로딩 시간은
+12.4ms 증가했다. 별도 프로세스 실행은 서버 부하/JIT 차이 때문에 편차가 커서 비교 표에는 사용하지 않았다.
+테스트 명령은 `./gradlew -p rest-engine test :coach:test`. 이 서버에서는 Kotlin 데몬의 홈 쓰기 제한을 피해
+`-Pkotlin.compiler.execution.strategy=in-process '-Dorg.gradle.jvmargs=-Xmx1536m -XX:MaxMetaspaceSize=768m'`을 붙였다.
+
+최종 검증 결과: rest-engine 472개, coach 672개 테스트 통과(실패/오류 0); Python fixture 7개 통과; 데이터 형식·좌표·중복·차로·EV 연결 검사 문제 0.

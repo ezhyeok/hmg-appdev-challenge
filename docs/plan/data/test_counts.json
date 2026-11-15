@@ -1,21 +1,21 @@
 {
   "engine": {
-    "tests": 466,
+    "tests": 472,
     "failures": 0,
     "skipped": 0,
-    "suites": 42
+    "suites": 43
   },
   "coach": {
-    "tests": 667,
+    "tests": 672,
     "failures": 0,
     "skipped": 0,
-    "suites": 53
+    "suites": 54
   },
   "app": {
-    "tests": 232,
+    "tests": 240,
     "failures": 0,
     "skipped": 0,
-    "suites": 29
+    "suites": 30
   },
   "kit": {
     "tests": 25,
@@ -23,6 +23,6 @@
     "skipped": 0,
     "suites": 4
   },
-  "passed": 1390,
-  "commit": "3b9b7ea"
+  "passed": 1409,
+  "commit": "9d3439f"
 }

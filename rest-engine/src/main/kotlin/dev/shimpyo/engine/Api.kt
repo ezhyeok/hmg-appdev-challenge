@@ -144,6 +144,8 @@ data class RouteState(
     val candidatesUntilM: Double? = null,
     /** 길안내 목적지 (이름·좌표). 서 있는 동안 새 목적지를 정했는지 가리는 데 쓴다(출발 전 한마디). 모르면 null */
     val destination: RouteDestination? = null,
+    /** 전국 에너지 후보 검색의 별도 범위. null이면 candidatesUntilM을 따른다. TBT만으로 시내 충전소 공백을 단정하지 않는다. */
+    val energyCandidatesUntilM: Double? = null,
 )
 
 /** 길안내 목적지. 좌표를 모르면 lat·lon이 null */

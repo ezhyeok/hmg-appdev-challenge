@@ -5,11 +5,26 @@ import java.io.File
 /** 데이터 폴더의 JSON(tools/data가 만든 것)을 [StopRows] 규칙으로 변환한 행들. [StopFile] 순서를 지킨다 */
 internal fun loadRecords(dataDir: File): List<StopRecord> {
     val out = ArrayList<StopRecord>(70_000)
+    val attachments = HashSet<String>()
     for (file in StopFile.entries) {
         File(dataDir, file.fileName).reader(Charsets.UTF_8).use { r ->
-            FlatJson.forEachObject(r) { row -> StopRows.map(file, row)?.let(out::add) }
+            FlatJson.forEachObject(r) { row ->
+                if (file == StopFile.EV_CHARGERS && row["at"] is String && (row["dc"] as? Number)?.toInt()?.let { it > 0 } == true) {
+                    attachments += row["at"] as String
+                }
+                StopRows.map(file, row)?.let(out::add)
+            }
         }
     }
+    for (i in out.indices) {
+        val record = out[i]
+        if (attachments.remove(record.candidate.id)) {
+            val c = record.candidate
+            require(c.kind == dev.shimpyo.engine.StopKind.HIGHWAY_REST_AREA || c.kind == dev.shimpyo.engine.StopKind.DROWSY_SHELTER)
+            out[i] = record.copy(candidate = c.copy(facilities = c.facilities.copy(evCharger = true)))
+        }
+    }
+    require(attachments.isEmpty()) { "EV attachment targets missing: $attachments; rebuild ev_chargers.json" }
     return out
 }
 

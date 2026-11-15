@@ -1,0 +1,13 @@
+{
+  "date": "2026-11-15",
+  "environment": "aarch64 Linux, OpenJDK 17, shared server; file read excluded",
+  "method": "same JVM, 3 warmups per file, 7 alternating samples per file; total = decode + validation + all indexes",
+  "before_rows": 60084,
+  "after_rows": 87497,
+  "before_bytes": 5052748,
+  "after_bytes": 7223285,
+  "measurements": [
+    "stops.bin 5052748 bytes: first decode+index 193.8 ms; warm medians (3 warmups, 7 interleaved samples): decode 2.7 ms, index 25.6 ms, total 28.3 ms (JVM)",
+    "stops.bin 7223285 bytes: first decode+index 83.2 ms; warm medians (3 warmups, 7 interleaved samples): decode 7.2 ms, index 35.5 ms, total 40.7 ms (JVM)"
+  ]
+}

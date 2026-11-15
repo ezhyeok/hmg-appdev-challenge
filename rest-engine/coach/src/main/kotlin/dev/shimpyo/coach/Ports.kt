@@ -110,6 +110,9 @@ interface StopIndex {
     fun ahead(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>): List<StopCandidate>
     /** 급해 모드: 가까운 순 [limit]곳. 지금 문을 연 곳만 */
     fun near(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, now: Long, limit: Int): List<StopCandidate>
+    /** 급해 모드: 화장실 근거를 확인한 뒤 limit를 적용한다 (에너지 전용 후보가 목록을 채우지 않게). */
+    fun nearRestrooms(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, now: Long, limit: Int): List<StopCandidate> =
+        near(lat, lon, heading, radiusM, kinds, now, Int.MAX_VALUE).filter { it.facilities.restroom }.take(limit)
     /** TBT 이름으로 공공데이터 행을 찾는다. [heading]을 주면 반대 차로 행은 뺀다 */
     fun matchByName(name: String, kind: StopKind, lat: Double, lon: Double, maxStraightM: Double, heading: Float? = null): List<StopCandidate>
     /** 차가 고속도로 차로 위인지 (지도 맞춤, MotorwayIndex: 차로 선형 가까이이고 방향이 맞다). 표를 읽기 전이나 모르면 false */

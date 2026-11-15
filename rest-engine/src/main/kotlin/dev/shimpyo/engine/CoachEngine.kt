@@ -82,6 +82,8 @@ class CoachEngine(
         /** 여럿이 타서 앞당겨진 마지막 기회였는지: 그곳에 서면 모두 '적어도 그만큼 버텼다'로만 배운다 (RestroomNeedModel.onRestroomStop) */
         val groupDriven: Boolean,
         val atMono: Long,
+        /** 들르기를 결정할 때의 이유. NEXT_ACCEPTED로 상태가 바뀌어도 카드의 근거는 유지한다. */
+        val reasons: List<Reason> = emptyList(),
     ) {
         var missingSince: Long = NONE
     }
@@ -975,6 +977,7 @@ class CoachEngine(
                     accepted = Accepted(
                         stop.id, stop, rec.purposes.ifEmpty { setOf(Purpose.RESTROOM) },
                         suggested = rec.kind != PromptKind.URGENT_RESULT, groupDriven = rec.groupDriven, mono,
+                        reasons = rec.reasons.toList(),
                     )
                 } else if (rec.kind == PromptKind.REST_SUGGESTION) {
                     restWantedAt = mono
@@ -1136,7 +1139,7 @@ class CoachEngine(
     ): Recommendation? {
         askedStop(speed)?.let { return it }
         accepted?.let { a ->
-            return rec(a.stop, a.purposes, listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())))
+            return rec(a.stop, a.purposes, listOf(Reason("NEXT_ACCEPTED", texts.reasonNextAccepted())) + a.reasons)
         }
         urgentList?.firstOrNull()?.let { r ->
             return rec(urgentStop(r.stop, speed), purposesFor(r.stop, Purpose.RESTROOM, ctx), r.why)

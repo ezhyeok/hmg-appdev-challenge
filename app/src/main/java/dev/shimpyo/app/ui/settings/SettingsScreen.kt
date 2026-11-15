@@ -205,6 +205,10 @@ private val ATTRIBUTION = listOf(
     "공중화장실·비상벨·CCTV·주유소 등: 행정안전부 지방행정 인허가·생활편의 데이터(LOCALDATA)",
     "휴게소·졸음쉼터: 한국도로공사, 전국휴게소정보·졸음쉼터 표준데이터 (공공데이터포털)",
     "주차장: 전국주차장정보표준데이터, 각 지방자치단체 (공공데이터포털)",
+    "전기자동차 충전소 정보: 한국환경공단 (공공데이터포털), 제3자 권리 포함 : 저작권 표시, 공공저작물 : 출처표시 (제 1유형)",
+    "원문: https://www.data.go.kr/data/15076352/openapi.do",
+    "공공누리 제1유형: https://www.kogl.or.kr/info/licenseType1.do",
+    "충전소 정보는 정적 위치·급속 DC 설비 자료이며, 실시간 사용 가능·고장·대기 정보가 아니에요.",
     "© OpenStreetMap contributors, ODbL 1.0 (openstreetmap.org/copyright): 고속도로 선형, 민자고속도로 휴게소·졸음쉼터, 주유소·LPG충전소, 공중화장실 일부",
     "아이콘: Google Material Symbols, Apache License 2.0",
 )

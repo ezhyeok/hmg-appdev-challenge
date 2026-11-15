@@ -235,6 +235,7 @@ def main():
         json.dump(rep, f, ensure_ascii=False, indent=1)
     print(f"[{time.time()-t0:5.0f}s] wrote {counts} total {rep['output_total_mb']} MB; report {rep_path}")
     # 앱은 JSON이 아니라 같은 규칙으로 만든 stops.bin을 읽는다 (rest-engine StopRows/StopTable)
+    print("next: python3 -I -B tools/data/ev_chargers.py --offline   (refresh EV attachments + attribution from cached pages)")
     print("next: ./gradlew -p rest-engine buildStopTable   (stops.bin; StopTableTest fails until it matches the JSON)")
 
 

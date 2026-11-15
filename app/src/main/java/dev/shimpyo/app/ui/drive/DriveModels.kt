@@ -36,7 +36,7 @@ data class GaugeModel(val minutes: Int?, val level: Level?, val fraction: Float?
 @Immutable
 data class EnergyReadout(val value: String, val unit: String, val label: String)
 
-/** 차가 보내 준 실제 남은 거리. 이유 칩의 '예비 거리 제외' 숫자와 구분하며 모르면 숨긴다. */
+/** 차가 보내 준 실제 남은 거리. 이유 칩은 다음 에너지 기회 도착 시의 잔여 거리이며, 현재 잔량을 모르면 숨긴다. */
 fun energyReadout(state: CoachUiState): EnergyReadout? {
     val km = state.rangeKm?.takeIf { state.serviceRunning && it.isFinite() && it >= 0.0 } ?: return null
     val label = when (state.energy) {
@@ -204,7 +204,7 @@ fun stopCard(state: CoachUiState, driving: Boolean, maxChars: Int = DriveLimits.
     val card = when {
         !state.serviceRunning -> serviceCard(state)
         prompt != null -> promptCard(prompt, state, maxChips, who)
-        pending != null -> pendingGoToCard(pending, state)
+        pending != null -> pendingGoToCard(pending, state, maxChips, who)
         failed != null -> failedGoToCard(failed)
         !driving && state.parked && livePlan(state).isNotEmpty() -> planCard(state, maxChips)
         state.next != null -> recommendationCard(state.next!!, state, maxChips, who)
@@ -214,6 +214,8 @@ fun stopCard(state: CoachUiState, driving: Boolean, maxChars: Int = DriveLimits.
         context = limitChars(card.context, maxChars),
         title = limitChars(card.title, maxChars),
         meta = card.meta?.let { limitChars(it, maxChars) },
+        // '못 닿음'·'남음'이 잘려 거리 숫자만 남는 칩은 내보내지 않는다.
+        chips = card.chips.filter { it.length <= maxChars },
     )
 }
 
@@ -249,8 +251,10 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     }
     val codes = reasons.map { it.code }
     val purposes = next?.takeIf { it.stop.id == stop?.id }?.purposes.orEmpty()
+    val fuelRequest = prompt.kind == PromptKind.REST_SUGGESTION &&
+        (prompt.speech.contains("에서 충전할 수 있어요. 들를까요?") || prompt.speech.contains("에서 주유할 수 있어요. 들를까요?"))
     val energyContext = energyContext(codes, prompt.speech, state.energy, purposes)
-    val energyOnly = hasRangeLastChance(codes, prompt.speech) && !hasRestroomLastChance(codes, prompt.speech) &&
+    val energyOnly = fuelRequest || hasRangeLastChance(codes, prompt.speech) && !hasRestroomLastChance(codes, prompt.speech) &&
         !hasFatigueLastChance(codes, prompt.speech) && Purpose.RESTROOM !in purposes && Purpose.REST !in purposes
     // 졸음만의 마지막 기회 (엔진 FatigueLastChanceTest): 화장실이 아니라 쉼터를 묻는다. 단계·아이콘·칩이 피로의 것이다
     val fatigueOnly = prompt.kind == PromptKind.LAST_CHANCE && fatigueLastChanceOnly(codes, prompt.speech)
@@ -259,7 +263,11 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     val level = if (energyOnly) Level.SOON else (if (restroomKind) state.restroom?.level else state.fatigue?.level) ?: Level.WATCH
     val context = energyContext ?: when (prompt.kind) {
         PromptKind.LAST_CHANCE -> restroomQuestionContext(codes, prompt.speech)
-        PromptKind.REST_SUGGESTION -> if ("NEXT_MEAL" in codes || prompt.speech.contains("식사")) "식사할 곳" else "쉬어 갈 곳"
+        PromptKind.REST_SUGGESTION -> when {
+            fuelRequest -> if (prompt.speech.contains("에서 충전할 수 있어요.")) "충전할 곳" else "주유할 곳"
+            "NEXT_MEAL" in codes || prompt.speech.contains("에서 식사할 수 있어요.") -> "식사할 곳"
+            else -> "쉬어 갈 곳"
+        }
         PromptKind.URGENT_RESULT -> "가장 빠른 화장실"
         // 상태 확인은 운전 패턴 편차 때문일 수도, 연속 운전 시간·졸음 시간대 때문일 수도 있다 (CoachTexts.checkIn)
         PromptKind.CHECK_IN -> if (prompt.speech.contains("패턴")) "운전 패턴 변화" else "졸음 확인"
@@ -270,7 +278,11 @@ private fun promptCard(prompt: Prompt, state: CoachUiState, maxChips: Int, who: 
     }
     val icon = when (prompt.kind) {
         PromptKind.FRESH_AIR -> ShimpyoIcons.Air
-        PromptKind.CHECK_IN, PromptKind.REST_SUGGESTION -> if (context == "식사할 곳") ShimpyoIcons.Restaurant else ShimpyoIcons.Rest
+        PromptKind.CHECK_IN, PromptKind.REST_SUGGESTION -> when {
+            energyOnly -> ShimpyoIcons.GasStation
+            context == "식사할 곳" -> ShimpyoIcons.Restaurant
+            else -> ShimpyoIcons.Rest
+        }
         PromptKind.LAST_CHANCE -> if (energyOnly) ShimpyoIcons.GasStation else if (fatigueOnly) ShimpyoIcons.Rest else ShimpyoIcons.Wc
         PromptKind.INFO -> ShimpyoIcons.Info
         else -> ShimpyoIcons.Wc
@@ -319,8 +331,11 @@ private fun energyContext(codes: List<String>, speech: String, energy: EnergyKin
     if (!last && "ENERGY_BUNDLE" !in codes) return null
     val human = buildList {
         if (Purpose.RESTROOM in purposes || hasRestroomLastChance(codes, speech) || "NEXT_NEAREST_RESTROOM" in codes ||
-            "NEXT_REQUESTED_RESTROOM" in codes || "NEXT_NEARBY_RESTROOM" in codes) add("화장실")
-        if (Purpose.REST in purposes || hasFatigueLastChance(codes, speech) || "NEXT_REST" in codes) add("휴식")
+            "NEXT_REQUESTED_RESTROOM" in codes || "NEXT_NEARBY_RESTROOM" in codes || "화장실 다녀올까요?" in speech ||
+            "화장실도 다녀오고" in speech) add("화장실")
+        // 마지막 주유·충전 질문은 주유만 묻는 경우에도 '충전하는 동안 쉬어 갈까요?'로 끝난다. 그 문장으로 휴식 목적을 만들지 않고,
+        // 목적을 모르는 함께 들르기 질문(추천이 지나간 뒤)에서만 문장으로 휴식을 읽는다
+        if (Purpose.REST in purposes || hasFatigueLastChance(codes, speech) || "NEXT_REST" in codes || (!last && "쉬어 갈까요?" in speech)) add("휴식")
         add(if (energy == EnergyKind.ELECTRIC) "충전" else "주유")
     }.joinToString("·")
     return "$human ${if (last) CONTEXT_RANGE else CONTEXT_ENERGY_BUNDLE}"
@@ -401,13 +416,14 @@ const val GOTO_PENDING_CONTEXT = "내비에 넣는 중…"
  * 그동안 '들르기로 한 곳'이나 지난 실패 카드가 아니라 진행을 보이고 [다시 시도]를 두지 않는다 (닫힘 검증 UI-N2).
  * 거리는 지금 값만: 같은 곳의 추천 → 앞쪽 후보. 없으면 위치만 둔다 (넣기 시작한 때의 거리를 지금 거리처럼 보이지 않는다)
  */
-private fun pendingGoToCard(stop: StopCandidate, state: CoachUiState): StopCardModel {
+private fun pendingGoToCard(stop: StopCandidate, state: CoachUiState, maxChips: Int, who: String?): StopCardModel {
     val live = state.next?.stop?.takeIf { it.id == stop.id } ?: state.ahead.firstOrNull { it.id == stop.id }
+    val next = state.next?.takeIf { it.stop.id == stop.id }
     return StopCardModel(
-        context = GOTO_PENDING_CONTEXT,
+        context = withPurposes(GOTO_PENDING_CONTEXT, next?.purposes.orEmpty(), state.energy),
         title = stop.name,
         meta = if (live != null) Labels.stopMeta(live) else Labels.stopPosition(stop),
-        chips = emptyList(),
+        chips = next?.let { recommendationCard(it, state, maxChips, who).chips }.orEmpty(),
         icon = ShimpyoIcons.Navigation,
         askingLevel = null,
     )
@@ -434,7 +450,9 @@ fun failedGoTo(state: CoachUiState): GoToResult? {
 fun cardShowsGoTo(state: CoachUiState, driving: Boolean, r: GoToResult): Boolean {
     val settled = if (state.goToPending?.id == r.stop.id) state.copy(goToPending = null) else state
     val card = stopCard(settled, driving)
-    return card.title == r.stop.name && card.context == goToContext(r.outcome, r.failure)
+    val expected = goToContext(r.outcome, r.failure)
+    val purposes = settled.next?.takeIf { it.stop.id == r.stop.id }?.purposes.orEmpty()
+    return card.title == r.stop.name && (card.context == expected || card.context == withPurposes(expected, purposes, state.energy))
 }
 
 /**
@@ -486,9 +504,9 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
     val result = state.goToResult?.takeIf { it.stop.id == next.stop.id && it.outcome != GoToOutcome.FAILED }
     val energyContext = energyContext(codes, "", state.energy, next.purposes)
     val context = when {
-        result != null -> goToContext(result.outcome)
+        result != null -> withPurposes(goToContext(result.outcome), next.purposes, state.energy)
         // 엔진은 '들르기'를 받은 순간 기록한다. 내비에 실제로 들어갔는지는 goToResult가 알려 준다
-        code == "NEXT_ACCEPTED" -> "들르기로 한 곳"
+        code == "NEXT_ACCEPTED" -> withPurposes("들르기로 한 곳", next.purposes, state.energy)
         energyContext != null -> energyContext
         code == "NEXT_REST" -> "쉬어 갈 곳"
         code == "NEXT_MEAL" -> "식사할 곳"
@@ -511,11 +529,18 @@ private fun recommendationCard(next: Recommendation, state: CoachUiState, maxChi
     val icon = when {
         Purpose.FUEL in next.purposes && !restroom && Purpose.REST !in next.purposes -> ShimpyoIcons.GasStation
         code == "NEXT_MEAL" || (Purpose.MEAL in next.purposes && !restroom) -> ShimpyoIcons.Restaurant
-        Purpose.FUEL in next.purposes && Purpose.REST in next.purposes && !restroom -> ShimpyoIcons.Rest
+        Purpose.REST in next.purposes && !restroom -> ShimpyoIcons.Rest
         code == "NEXT_REST" -> ShimpyoIcons.Rest
         else -> ShimpyoIcons.Wc
     }
     return StopCardModel(context, next.stop.name, Labels.stopMeta(next.stop), chips, icon, askingLevel = null)
+}
+
+/** 단독 화장실의 기존 맥락은 유지하고, 함께 들르는 목적·충전·주유·휴식은 안내 단계에도 남긴다. */
+private fun withPurposes(context: String, purposes: Set<Purpose>, energy: EnergyKind?): String {
+    if (purposes.isEmpty() || purposes == setOf(Purpose.RESTROOM)) return context
+    // 목적과 진입로 지시를 한 줄에 남긴다. '경로 위'는 거리 줄에서도 알린다.
+    return Labels.sortedPurposes(purposes).joinToString("·") { Labels.purposeName(it, energy) } + " · " + context.removePrefix("경로 위 · ")
 }
 
 /** 엔진 추천이 없을 때 경로 앞 첫 화장실 (마지막 기회를 지난 정체 속에서 '고르는 중'에 멈춰 보이지 않게) */

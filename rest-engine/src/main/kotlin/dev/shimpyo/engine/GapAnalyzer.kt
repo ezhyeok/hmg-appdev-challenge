@@ -58,20 +58,20 @@ internal class GapAnalyzer(private val config: CoachConfig) {
 
     /** SPEC 4.3b: 정체 시간과 독립인 거리 마감. 진입로를 놓친 곳은 제외하고, 아는 경로 안에서만 판정한다. */
     fun analyzeRange(opps: List<Opportunity>, route: RouteContext, usableM: Double?): LastChance? {
-        if (usableM == null || !usableM.isFinite() || route.knownEndM <= usableM) return null
-        val ahead = opps.withIndex().filter { it.value.distanceM >= config.askWindowNearM && it.value.distanceM <= route.knownEndM }
+        if (usableM == null || !usableM.isFinite() || route.knownEnergyEndM <= usableM) return null
+        val ahead = opps.withIndex().filter { it.value.distanceM >= config.askWindowNearM && it.value.distanceM <= route.knownEnergyEndM }
         val first = ahead.firstOrNull() ?: return null
         val tight = usableM <= first.value.distanceM
         val chosen = if (tight) first else ahead.lastOrNull { it.value.distanceM <= usableM } ?: return null
         val next = ahead.firstOrNull { it.index > chosen.index }?.value
-        val endM = next?.distanceM ?: route.knownEndM
+        val endM = next?.distanceM ?: route.knownEnergyEndM
         if (!endM.isFinite() || endM <= usableM || endM <= chosen.value.distanceM) return null
         val o = chosen.value
         return LastChance(o, chosen.index, Trigger.RANGE,
             route.arrivalAtDistance(endM) - route.arrivalAtDistance(o.distanceM), 0.0,
             gapM = endM - o.distanceM, rangeTight = tight,
-            gapLowerBound = next == null && !route.horizonM.isNaN(),
-            rangeEndM = endM, endIsDestination = next == null && route.horizonM.isNaN())
+            gapLowerBound = next == null && !route.energyHorizonM.isNaN(),
+            rangeEndM = endM, endIsDestination = next == null && route.energyHorizonM.isNaN())
     }
 
     fun analyze(

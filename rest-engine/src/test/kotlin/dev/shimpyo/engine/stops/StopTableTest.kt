@@ -11,6 +11,9 @@ import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import kotlin.test.assertFalse
+import kotlin.test.assertNotNull
+import kotlin.test.assertFailsWith
 
 /**
  * 앱이 읽는 stops.bin이 JSON 데이터와 같은 후보를 내는지 (품질 동일성). 앱은 예전에 JSON을 직접 읽었고,
@@ -41,8 +44,9 @@ class StopTableTest {
             assertEquals(r.candidate.lon, table.lon(i))
             for (t in times) assertEquals(referenceOpenNow(r.hours, t, seoul), table.openNow(i, t), "영업 여부 $i @ $t")
         }
-        // 예전 앱이 읽던 수 (기획서·README의 60,084곳)
-        assertEquals(60_084, table.size)
+        assertEquals(87_497, table.size, "60,084 + 주유소 7,092 + 독립 급속충전소 20,321")
+        assertTrue(records.any { it.candidate.facilities.evCharger && !it.candidate.facilities.restroom })
+        assertTrue(records.any { it.candidate.facilities.fuel && !it.candidate.facilities.restroom })
         // 고속도로 선형 (motorways.json)
         val lines = loadLines(dataDir)
         assertEquals(lines.size, table.lineCount)
@@ -61,6 +65,48 @@ class StopTableTest {
         assertTrue(highway.all { table.road(it) != null })
         assertEquals(highway.size, (0 until table.size).count { table.road(it) != null })
         assertEquals("경부고속도로", table.road((0 until table.size).first { table.name(it) == "안성휴게소" }))
+    }
+
+    @Test
+    fun energyRowsDoNotInventRestroomEvidence() {
+        val base = mapOf("id" to "fuel", "n" to "주유소", "lat" to 37.0, "lon" to 127.0, "k" to "fuel")
+        for (wc in listOf(null, 0, 1)) {
+            val c = assertNotNull(StopRows.map(StopFile.PARKABLES, base + ("wc" to wc))).candidate
+            assertTrue(c.facilities.fuel)
+            assertEquals(wc == 1, c.facilities.restroom)
+        }
+        val ev = assertNotNull(StopRows.map(StopFile.EV_CHARGERS, base + mapOf("dc" to 2, "h24" to 1)))
+        assertTrue(ev.candidate.facilities.evCharger)
+        assertFalse(ev.candidate.facilities.restroom)
+        assertTrue(ev.candidate.facilities.open24h)
+        assertNull(StopRows.map(StopFile.EV_CHARGERS, base + ("dc" to 0)))
+        assertNull(StopRows.map(StopFile.EV_CHARGERS, base + mapOf("dc" to 1, "at" to "existing")))
+        val decoded = StopTable.decode(StopTable.encode(listOf(ev)))
+        assertEquals(ev.candidate, decoded.candidate(0))
+        assertFalse(decoded.everydayUsable(0, 0L))
+        assertFalse(decoded.hasRestroom(0))
+        assertFalse(assertNotNull(StopRows.map(StopFile.SHELTERS, base)).candidate.facilities.restroom)
+        assertFalse(assertNotNull(StopRows.map(StopFile.REST_AREAS, base + ("ev" to 1))).candidate.facilities.evCharger,
+            "기존 EV 유무만으로 급속 충전을 추론하지 않는다; loadRecords가 급속 근거를 붙인다")
+    }
+
+    @Test
+    fun attachedStationsEnrichTheExistingRowAndMissingTargetsFailTheBuild() {
+        val dir = kotlin.io.path.createTempDirectory("ev-attachment-").toFile()
+        try {
+            for (file in StopFile.entries) File(dir, file.fileName).writeText("[]")
+            File(dir, StopFile.REST_AREAS.fileName).writeText("""[{"id":"rest","n":"휴게소","lat":37,"lon":127,"ev":0}]""")
+            val ev = File(dir, StopFile.EV_CHARGERS.fileName)
+            ev.writeText("""[{"id":"evA","at":"rest","dc":2}]""")
+            val row = loadRecords(dir).single().candidate
+            assertEquals("rest", row.id)
+            assertTrue(row.facilities.evCharger)
+            assertTrue(row.facilities.restroom)
+            ev.writeText("""[{"id":"evA","at":"missing","dc":2}]""")
+            assertFailsWith<IllegalArgumentException> { loadRecords(dir) }
+        } finally {
+            dir.deleteRecursively()
+        }
     }
 
     @Test

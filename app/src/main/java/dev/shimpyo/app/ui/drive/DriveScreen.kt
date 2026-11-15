@@ -211,7 +211,7 @@ private fun ActionRow(
 /**
  * 추천 카드. 질문 중에는 테두리를 그 게이지 단계 색 4dp로 바꾼다(평소 2dp card_stroke).
  * 누를 수 없다(주행 중 depth를 늘리지 않는다). 내용 묶음은 카드 세로 가운데에 두고,
- * 칩까지 들어갈 높이가 없으면(compact) 칩을 뺀다.
+ * 높이가 모자라면 칩 → 거리 줄 순서로 뺀다. 맥락·이름을 거리와 한 덩어리로 재면 작은 창에서 이름까지 잘린다.
  */
 @Composable
 fun StopCard(model: StopCardModel, compact: Boolean, modifier: Modifier = Modifier) {
@@ -224,7 +224,7 @@ fun StopCard(model: StopCardModel, compact: Boolean, modifier: Modifier = Modifi
         contentPadding = PaddingValues(if (compact) Dimens.Gauge.cardPaddingCompact else Dimens.Drive.stopCardPadding),
     ) {
         FitColumn(
-            gap = if (compact) Dimens.Space.s else Dimens.Space.l,
+            gap = 0.dp,
             rows = buildList {
                 add {
                     Column {
@@ -248,14 +248,20 @@ fun StopCard(model: StopCardModel, compact: Boolean, modifier: Modifier = Modifi
                             maxLines = if (model.sentence) DriveLimits.MAX_LINES else 1,
                             overflow = TextOverflow.Ellipsis,
                         )
-                        if (!model.meta.isNullOrEmpty()) {
-                            Spacer(Modifier.height(Dimens.Space.xs))
-                            Text(model.meta, style = DriveType.StopMeta, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                        }
                     }
                 }
-                // 칩까지 들어갈 높이가 없으면(compact) 칩을 뺀다
-                if (model.chips.isNotEmpty()) add { ChipFlow(maxLines = 2) { model.chips.forEach { ReasonChip(it) } } }
+                if (!model.meta.isNullOrEmpty()) add {
+                    Column {
+                        Spacer(Modifier.height(Dimens.Space.xs))
+                        Text(model.meta, style = DriveType.StopMeta, color = c.textSecondary, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    }
+                }
+                if (model.chips.isNotEmpty()) add {
+                    Column {
+                        Spacer(Modifier.height(if (compact) Dimens.Space.s else Dimens.Space.l))
+                        ChipFlow(maxLines = 2) { model.chips.forEach { ReasonChip(it) } }
+                    }
+                }
             },
         )
     }

@@ -79,7 +79,7 @@ class AuditPromptTest {
         sim.engine.onPromptResult(lc.id, true, sim.now)
         val out = sim.step()
         assertEquals("oksan", out.next?.stop?.id)
-        assertEquals("NEXT_ACCEPTED", out.next?.reasons?.single()?.code)
+        assertEquals(listOf("NEXT_ACCEPTED") + lc.reasons.map { it.code }, out.next?.reasons?.map { it.code })
     }
 
     @Test

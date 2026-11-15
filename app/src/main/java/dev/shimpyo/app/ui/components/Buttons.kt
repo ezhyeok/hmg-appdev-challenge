@@ -22,7 +22,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -141,7 +140,7 @@ fun UrgentButton(onClick: () -> Unit, modifier: Modifier = Modifier, compact: Bo
     val c = ShimpyoTheme.colors
     val interaction = remember { MutableInteractionSource() }
     val pressed by interaction.collectIsPressedAsState()
-    val bg = if (pressed) Color.Black.copy(alpha = 0.12f).compositeOver(c.urgentContainer) else c.urgentContainer
+    val bg = if (pressed) c.urgentPressedContainer else c.urgentContainer
     Row(
         modifier = modifier
             .heightIn(min = if (compact) Dimens.Drive.urgentHeightCompact else Dimens.Drive.urgentHeight)

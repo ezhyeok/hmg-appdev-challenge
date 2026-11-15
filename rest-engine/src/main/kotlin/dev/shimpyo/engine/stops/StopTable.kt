@@ -70,6 +70,7 @@ class StopTable private constructor(
     private val pointLons: FloatArray,
 ) {
     fun kind(i: Int): StopKind = KINDS[kinds[i].toInt()]
+    fun hasRestroom(i: Int): Boolean = flags[i] has F_RESTROOM
     fun lat(i: Int): Double = lats[i]
     fun lon(i: Int): Double = lons[i]
     fun id(i: Int): String = String(blob, idOffsets[i], idOffsets[i + 1] - idOffsets[i], Charsets.UTF_8)

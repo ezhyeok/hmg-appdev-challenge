@@ -14,18 +14,18 @@
 
 ## APK
 
-`apk/` 폴더의 `팀명_쉼표_release.apk` (release 빌드). 제출 전에 팀명을 넣어 만든다.
+[`apk/차곡_쉼표_release.apk`](apk/차곡_쉼표_release.apk) (release 빌드, 서명됨. 개인 참가이며 파일명의 팀명 자리는 활동명 ‘차곡’).
 
 ## 실행 방법
 
 1. Pleos Connect Emulator v2.1.0(API 34, Automotive)을 Cold boot로 실행합니다.
-2. APK를 설치합니다: `adb install -r apk/<파일명>.apk`
+2. APK를 설치합니다: `adb install -r apk/차곡_쉼표_release.apk`
 3. 앱을 실행하고 차속·위치·차량 에너지 권한을 허용합니다. 앱은 포그라운드 서비스로 계속 동작합니다.
 4. Virtual Console에서 기어·차속·도어·조향을 바꾸거나, 내비에서 목적지를 설정하면 게이지와 안내가 바뀝니다.
 
 ### 시연 모드
 
-시연 영상: [`docs/demo/shimpyo-demo.mp4`](docs/demo/shimpyo-demo.mp4) (2분 36초, 에뮬레이터 화면 녹화와 자막: 귀성길 마지막 화장실, 휴게소 정차, 일상의 출발 전 한마디. 다시 만들기: `tools/video/`).
+시연 영상: [`docs/demo/shimpyo-demo.mp4`](docs/demo/shimpyo-demo.mp4) (3분 13초, 에뮬레이터 화면 녹화와 자막: 귀성길 마지막 화장실, 전기차의 화장실·충전 마지막 기회, 휴게소 정차, 일상의 출발 전 한마디. 다시 만들기: `tools/video/`).
 
 에뮬레이터는 실제로 달리지 않아서 위치 이동과 정체 구간은 앱의 시연 모드로 넣습니다.
 

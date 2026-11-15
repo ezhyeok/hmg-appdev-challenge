@@ -53,7 +53,7 @@ class AuditEtaFillTest {
         assertEquals(PromptKind.LAST_CHANCE, lc.kind)
         assertNotNull(lc.stop?.etaS, "질문 카드에는 있다")
         val out = sim.step(intent = VoiceIntent.Accept(lc.id))
-        assertEquals("NEXT_ACCEPTED", out.next?.reasons?.single()?.code)
+        assertEquals(listOf("NEXT_ACCEPTED") + lc.reasons.map { it.code }, out.next?.reasons?.map { it.code })
         assertNotNull(out.next?.stop?.etaS, "수락한 곳 카드에도 엔진 도착 시간이 있어야 한다")
     }
 

@@ -18,6 +18,8 @@ data class CandidateSnap(
     val naviGuiding: Boolean = false,
     val state: CandidatesState = CandidatesState.LOADING_DATA,
     val source: CandidateSource = CandidateSource.NONE,
+    /** 전국 주유·급속충전 후보를 확인한 범위. null은 untilM과 같음. */
+    val energyUntilM: Double? = null,
 )
 
 /** 후보를 어디서 만들었는지 (기록·화면 설명·테스트용) */

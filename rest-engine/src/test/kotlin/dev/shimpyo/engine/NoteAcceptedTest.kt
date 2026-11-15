@@ -99,7 +99,8 @@ class NoteAcceptedTest {
         d.e.noteAccepted(a, setOf(Purpose.RESTROOM), d.now)
         val out = d.tick(listOf(a, b))
         assertNull(out.prompt, "같은 곳을 묻던 질문은 대답한 것이다")
-        assertEquals(listOf("NEXT_ACCEPTED"), out.codes())
+        assertEquals(listOf("NEXT_ACCEPTED") + q.reasons.map { it.code }, out.codes())
+        assertEquals(q.reasons, out.next!!.reasons.drop(1))
         assertEquals(1, d.e.memory().promptStats.values.sumOf { it.accepted }, "수락률 학습에 수락 1회 (물은 거리 구간)")
         assertEquals(0, d.e.memory().promptStats.values.sumOf { it.declined })
         // 뒤따라 온 같은 질문의 '응'(화면이 둘 다 보낸 경우)은 두 번 세지 않는다
@@ -189,7 +190,7 @@ class NoteAcceptedTest {
         assertEquals("a", out.prompt?.stop?.id)
         val after = d.tick(cands, intent = VoiceIntent.Accept(out.prompt!!.id))
         assertEquals("a", after.next?.stop?.id)
-        assertEquals(listOf("NEXT_ACCEPTED"), after.codes())
+        assertEquals(listOf("NEXT_ACCEPTED") + out.prompt!!.reasons.map { it.code }, after.codes())
     }
 
     @Test

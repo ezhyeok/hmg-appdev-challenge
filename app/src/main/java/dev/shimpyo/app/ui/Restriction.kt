@@ -77,4 +77,8 @@ fun coachNotice(state: CoachUiState, restriction: DriveRestriction): String? =
     noticeText(state.notice.takeIf { state.serviceRunning }, restriction)
 
 /** 주행 중 문구 길이 제한. 넘치면 말줄임표로 자른다 */
-fun limitChars(text: String, max: Int): String = if (text.length <= max || max < 2) text else text.take(max - 1) + "…"
+fun limitChars(text: String, max: Int): String = when {
+    max <= 0 -> ""
+    text.length <= max -> text
+    else -> text.take(max - 1) + "…"
+}

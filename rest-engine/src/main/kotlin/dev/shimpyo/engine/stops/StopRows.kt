@@ -10,6 +10,7 @@ enum class StopFile(val fileName: String) {
     SHELTERS("drowsy_shelters.json"),
     RESTROOMS("restrooms.json"),
     PARKABLES("parkables.json"),
+    EV_CHARGERS("ev_chargers.json"),
 }
 
 /**
@@ -30,6 +31,7 @@ object StopRows {
         StopFile.SHELTERS -> shelter(o)
         StopFile.RESTROOMS -> restroom(o)
         StopFile.PARKABLES -> parkable(o)
+        StopFile.EV_CHARGERS -> charger(o)
     }
 
     private fun restArea(o: Map<String, Any?>): StopRecord? {
@@ -39,7 +41,8 @@ object StopRows {
             facilities = Facilities(
                 restroom = true,
                 nursingRoom = o.bool("nr") == true,
-                evCharger = o.bool("ev") == true,
+                // 이전 휴게소 ev 필드는 급속/완속을 구분하지 않는다. loadRecords가 검증된 DC 급속만 붙인다.
+                evCharger = false,
                 fuel = o.bool("gas") == true || o.bool("lpg") == true,
                 food = o.bool("food") == true || o.bool("shop") == true,
                 open24h = o.bool("h24") ?: true,
@@ -56,7 +59,7 @@ object StopRows {
     private fun shelter(o: Map<String, Any?>): StopRecord? {
         val c = base(o) ?: return null
         // 졸음쉼터는 규정상 화장실·비상벨·CCTV를 갖춘다 (docs/research/ai-science.md 3-C). OSM에서 온 것은 모를 수 있다
-        val wc = o.bool("wc") ?: true
+        val wc = o.bool("wc") == true
         val candidate = StopCandidate(
             id = c.first, name = c.second, kind = StopKind.DROWSY_SHELTER, lat = c.third.first, lon = c.third.second,
             facilities = Facilities(restroom = wc, emergencyBell = true, cctv = true, open24h = true),
@@ -110,14 +113,24 @@ object StopRows {
             )
             return StopRecord(candidate, laneHeading = null, hours = hours)
         }
-        // 주유소: 화장실 근거(wc)가 있는 곳만 화장실 후보로 쓴다
-        if (o.bool("wc") != true) return null
+        // 화장실 근거가 없어도 에너지 후보다. 화장실 소비자는 시설 플래그를 반드시 확인한다.
         val candidate = StopCandidate(
             id = c.first, name = c.second, kind = StopKind.GAS_STATION, lat = c.third.first, lon = c.third.second,
-            facilities = Facilities(restroom = true, fuel = true, open24h = o.bool("h24") == true),
-            parkable = true,
+            facilities = Facilities(restroom = o.bool("wc") == true, fuel = true, open24h = o.bool("h24") == true),
+            parkable = o.bool("pk") != false,
         )
         return StopRecord(candidate, laneHeading = null, hours = StopHours(o.bool("h24"), null))
+    }
+
+    private fun charger(o: Map<String, Any?>): StopRecord? {
+        // at는 기존 휴게시설에 붙이는 행이다 (loadRecords가 처리). 독립 후보를 중복 생성하지 않는다.
+        if (o.str("at") != null || (o.num("dc") ?: 0.0) < 1) return null
+        val c = base(o) ?: return null
+        return StopRecord(
+            StopCandidate(c.first, c.second, StopKind.OTHER, c.third.first, c.third.second,
+                Facilities(restroom = false, evCharger = true, open24h = o.bool("h24") == true), parkable = true),
+            laneHeading = null, hours = StopHours(o.bool("h24"), range(o.str("oh"))),
+        )
     }
 
     // ------------------------------------------------------------ 도우미

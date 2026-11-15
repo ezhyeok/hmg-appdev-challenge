@@ -32,6 +32,7 @@ class ChargeDemoTest {
         assertTrue(rig.state.promptStop!!.routeDistanceM!! in 2_000.0..5_000.0)
         assertTrue(rig.state.rangeKm!! in 30.0..40.0)
         val rangeReason = rig.state.promptReasons.single { it.code == "RANGE_LAST_CHANCE" }.text
+        val decisionReasons = rig.state.promptReasons
         assertEquals("여기를 지나면 다음 충전할 곳에서 주행가능거리가 11km 남아요 (예비 20km 미만)", rangeReason)
         val leftKm = Regex("주행가능거리가 (\\d+)km 남아요").find(rangeReason)!!.groupValues[1].toInt()
         assertTrue(leftKm < CoachConfig().electricReserveKm)
@@ -41,5 +42,11 @@ class ChargeDemoTest {
         assertEquals("addWaypoint", rig.navi.commands.single().name)
         assertEquals(Gyeongbu.oksan.lat, rig.navi.commands.single().lat, 1e-9)
         assertEquals(1, rig.voice.asked.size)
+        rig.run(2_000)
+        val accepted = checkNotNull(rig.state.next)
+        assertEquals("oksan", accepted.stop.id)
+        assertEquals(setOf(Purpose.RESTROOM, Purpose.FUEL), accepted.purposes)
+        assertEquals(listOf("NEXT_ACCEPTED") + decisionReasons.map { it.code }, accepted.reasons.map { it.code })
+        assertEquals(decisionReasons, accepted.reasons.drop(1))
     }
 }

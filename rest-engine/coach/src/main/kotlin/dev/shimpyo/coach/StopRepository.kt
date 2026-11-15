@@ -38,6 +38,7 @@ class StopRepository(
         val table: StopTable,
         val all: GridIndex,
         val highway: GridIndex,
+        val energy: GridIndex,
         val motorways: MotorwayIndex,
         /** 고속도로 시설의 이름 키 (StopNames.key, 없으면 null). 이름 맞추기에서 매번 정규식을 돌리지 않게 */
         val keys: Array<String?>,
@@ -58,7 +59,8 @@ class StopRepository(
             val t = loadTable() ?: return@withContext 0
             val keys = arrayOfNulls<String>(t.size)
             for (i in 0 until t.size) if (t.kind(i) in HIGHWAY_KINDS) keys[i] = StopNames.key(t.name(i))
-            state = Loaded(t, GridIndex(t) { true }, GridIndex(t) { t.kind(it) in HIGHWAY_KINDS }, MotorwayIndex(t), keys, twins(t, keys))
+            state = Loaded(t, GridIndex(t) { true }, GridIndex(t) { t.kind(it) in HIGHWAY_KINDS },
+                GridIndex(t) { t.kind(it) in ENERGY_KINDS }, MotorwayIndex(t), keys, twins(t, keys))
             t.size
         }
     }
@@ -85,7 +87,7 @@ class StopRepository(
     override fun ahead(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>): List<StopCandidate> =
         ahead(lat, lon, heading, radiusM, kinds, maxAngle = 75.0)
 
-    fun ahead(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, maxAngle: Double): List<StopCandidate> {
+    fun ahead(lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, maxAngle: Double, now: Long = System.currentTimeMillis()): List<StopCandidate> {
         val l = state ?: return emptyList()
         val t = l.table
         val road = roadAt(l, lat, lon, heading)
@@ -111,7 +113,10 @@ class StopRepository(
         }
         // 같은 길 먼저, 그 안에서 가까운 순 (정렬은 안정적이라 거리가 같으면 색인 순서 그대로)
         hits.sortWith(compareBy<Hit>({ !it.onRoad }, { it.distanceM }))
-        return hits.map { t.candidate(it.row).copy(straightDistanceM = it.distanceM) }
+        return hits.map {
+            val c = t.candidate(it.row)
+            c.copy(straightDistanceM = it.distanceM, openNow = t.openNow(it.row, now) ?: c.openNow)
+        }
     }
 
     /**
@@ -122,6 +127,15 @@ class StopRepository(
     override fun near(
         lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>,
         now: Long, limit: Int,
+    ): List<StopCandidate> = near(lat, lon, heading, radiusM, kinds, now, limit, restroomOnly = false)
+
+    override fun nearRestrooms(
+        lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>, now: Long, limit: Int,
+    ): List<StopCandidate> = near(lat, lon, heading, radiusM, kinds, now, limit, restroomOnly = true)
+
+    private fun near(
+        lat: Double, lon: Double, heading: Float?, radiusM: Double, kinds: Set<StopKind>,
+        now: Long, limit: Int, restroomOnly: Boolean,
     ): List<StopCandidate> {
         val l = state ?: return emptyList()
         val t = l.table
@@ -131,6 +145,7 @@ class StopRepository(
         val hits = ArrayList<Hit>()
         indexFor(l, kinds).forEachIn(lat, lon, radiusM) { i ->
             if (t.kind(i) !in kinds) return@forEachIn
+            if (restroomOnly && !t.hasRestroom(i)) return@forEachIn
             val cLat = t.lat(i)
             val cLon = t.lon(i)
             val d = Geo.distanceM(lat, lon, cLat, cLon)
@@ -234,7 +249,11 @@ class StopRepository(
         if (heading == null) -1 else l.motorways.roadAt(lat, lon, heading.toDouble())
 
     private fun indexFor(l: Loaded, kinds: Set<StopKind>): GridIndex =
-        if (kinds.all { it in HIGHWAY_KINDS }) l.highway else l.all
+        when {
+            kinds.all { it in HIGHWAY_KINDS } -> l.highway
+            kinds.all { it in ENERGY_KINDS } -> l.energy
+            else -> l.all
+        }
 
     /**
      * 차로 방위가 있는 시설(휴게소·졸음쉼터)이 내 진행 방향과 90도 넘게 다르면 반대 차로다.
@@ -281,6 +300,7 @@ class StopRepository(
 
     companion object {
         private val HIGHWAY_KINDS = setOf(StopKind.HIGHWAY_REST_AREA, StopKind.DROWSY_SHELTER)
+        private val ENERGY_KINDS = setOf(StopKind.GAS_STATION, StopKind.OTHER)
         private const val M_PER_DEG = 111_195.0
         /** 이 거리 안은 방위가 흔들리므로 진행 방향 원뿔 대신 앞뒤만 본다 */
         const val CONE_FREE_M = 300.0

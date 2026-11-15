@@ -90,7 +90,7 @@ class UiSeamPinnedTest {
         rig.run(10_000)
         assertEquals("내비 명령은 한 번", 1, rig.navi.commands.size)
         assertEquals("다시 묻지 않는다", 1, rig.voice.asked.size)
-        assertEquals(listOf("NEXT_ACCEPTED"), rig.state.next?.reasons?.map { it.code })
+        assertEquals("NEXT_ACCEPTED", rig.state.next?.reasons?.firstOrNull()?.code)
     }
 
     // ------------------------------------------------------------ 마이크 (UI #12)

@@ -2,6 +2,7 @@ package dev.shimpyo.app.ui.theme
 
 import androidx.compose.runtime.Immutable
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.compositeOver
 
 /*
  * Pleos Connect 컬러 토큰.
@@ -276,7 +277,10 @@ class ShimpyoColors(
     /** 음성 듣는 중 표시, CCP 포커스 링 */
     val voiceActive: Color,
     val focusRing: Color,
-)
+) {
+    /** 눌림 때도 급해 버튼 글자가 4.5:1 이상이다(라이트 4.62, 다크 4.94). */
+    val urgentPressedContainer: Color = Color.Black.copy(alpha = 0.06f).compositeOver(urgentContainer)
+}
 
 private fun buildColors(dark: Boolean): ShimpyoColors {
     val b = if (dark) DarkBasic else LightBasic
@@ -404,8 +408,10 @@ private fun buildColors(dark: Boolean): ShimpyoColors {
         timelineTunnel = b.basic400,
         timelinePlannedStop = filledEnabled,
 
-        voiceActive = positive,
-        focusRing = positive,
+        // 파랑은 Basic 버튼의 눌림 바탕에서 3.3~3.8:1뿐이다. 음성 상태·CCP 링은 두 테마 모두 높은 대비로.
+        // 듣는 중 문구와 채워진 마이크 아이콘이 상태를 구분하므로 색에만 의존하지 않는다.
+        voiceActive = t1,
+        focusRing = t1,
     )
 }
 

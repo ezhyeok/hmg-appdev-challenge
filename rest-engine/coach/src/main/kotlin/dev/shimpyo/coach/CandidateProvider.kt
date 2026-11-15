@@ -165,11 +165,9 @@ class CandidateProvider(
         val r = route ?: return null
         if (!r.guiding) return r
         val s = _snapshot.value
-        val until = if (s.naviEpoch != navi.epoch || s.naviGuiding != navi.guiding) 0.0 else {
-            val u = s.untilM ?: return r
-            (u - navi.moved(s.odometerM, odometerM)).coerceAtLeast(0.0)
-        }
-        return r.copy(candidatesUntilM = until)
+        val same = s.naviEpoch == navi.epoch && s.naviGuiding == navi.guiding
+        fun advance(u: Double?): Double? = if (!same) 0.0 else u?.let { (it - navi.moved(s.odometerM, odometerM)).coerceAtLeast(0.0) }
+        return r.copy(candidatesUntilM = advance(s.untilM), energyCandidatesUntilM = advance(s.energyUntilM))
     }
 
     // ------------------------------------------------------------ TBT 경로
@@ -189,7 +187,8 @@ class CandidateProvider(
             if (!ids.add(base.id)) continue // 같은 시설이 두 번 오면 앞의 것만
             list += base.copy(routeDistanceM = o.routeDistanceM, directionOk = true, etaS = null)
         }
-        return CandidateSnap(list, odo, plan.untilM, state = CandidatesState.READY, source = CandidateSource.ROUTE)
+        val snap = CandidateSnap(list, odo, plan.untilM, state = CandidatesState.READY, source = CandidateSource.ROUTE)
+        return addEnergy(snap, energyRows(pos), pos, navi, budget)
     }
 
     /**
@@ -260,16 +259,52 @@ class CandidateProvider(
             // 시연: 내비에 묻지 않고 다 넘긴다 (시연 경로 위 시설과 거리는 CoachWorld가 정한다). etaS는 넣지 않는다
             ?: return CandidateSnap(raw.map { it.copy(etaS = null) }, odo, CandidateRules.nearbyHorizon(raw, null), state = CandidatesState.READY, source = CandidateSource.NEARBY)
         val budget = Budget(max, deadline)
+        val energy = energyRows(pos)
+        // 전국 에너지 후보가 있으면 같은 6회 예산에서 절반을 남긴다. 시연(null oracleMax)은 위에서 이미 반환했다.
+        val humanMax = if (energy.isEmpty()) max else max / 2
         // requestTrip은 후보마다 요청 시점의 위치에서 잰다: 요청 때 주행 거리를 같이 적어 두고 마지막에 같은 기준(base)으로 맞춘다
-        val measured = raw.take(max).map { c -> odometer.meters to (budget.refine(c, pos) ?: c.copy(etaS = null)) }
+        val measured = raw.take(humanMax).map { c -> odometer.meters to (budget.refine(c, pos) ?: c.copy(etaS = null)) }
         val base = odometer.meters
         val list = measured.mapNotNull { (at, c) ->
             if (c.directionOk == false) null else NaviPoll.advanceCandidates(listOf(c), navi.moved(at, base)).firstOrNull()
         }
         val sinceStart = navi.moved(odo, base)
-        val until = (CandidateRules.nearbyHorizon(raw, max) - sinceStart).coerceAtLeast(0.0)
+        val until = (CandidateRules.nearbyHorizon(raw, humanMax) - sinceStart).coerceAtLeast(0.0)
         val kept = CandidateRules.beforeDestination(list, plan.remainM?.let { it - sinceStart })
-        return CandidateSnap(kept, base, until, state = CandidatesState.READY, source = CandidateSource.NEARBY)
+        return addEnergy(CandidateSnap(kept, base, until, state = CandidatesState.READY, source = CandidateSource.NEARBY), energy, pos, navi, budget)
+    }
+
+    private fun energyRows(pos: Fix): List<StopCandidate> =
+        stops.ahead(pos.lat, pos.lon, pos.heading, AHEAD_RADIUS_M, ENERGY_KINDS)
+            .filter { it.parkable && it.openNow != false && (it.facilities.fuel || it.facilities.evCharger) }
+            .sortedBy { it.straightDistanceM }
+
+    /**
+     * TBT는 휴게시설만 주므로 전국 에너지 시설을 별도로 보충한다. requestTrip이 확인한 거리만 넣으며 기존 요청 예산을 공유한다.
+     * 빠진/못 잰 첫 시설의 직선거리에서 에너지 범위를 자른다. 화장실 범위와 섞으면 에너지 밀도가 화장실 공백을 지워 버린다.
+     * 한계: requestTrip은 시설까지 접근 경로를 확인할 뿐, 현재 목적지 경로 위라는 보장은 없다 (반경 검색과 같은 방위 원뿔).
+     */
+    private suspend fun addEnergy(snap: CandidateSnap, raw: List<StopCandidate>, pos: Fix, navi: NaviSnapshot, budget: Budget): CandidateSnap {
+        val ids = snap.list.mapTo(HashSet()) { it.id }
+        val extra = ArrayList<Pair<Double, StopCandidate>>()
+        var horizon = minOf(AHEAD_RADIUS_M, snap.untilM ?: AHEAD_RADIUS_M)
+        for ((i, c) in raw.withIndex()) {
+            if (c.id in ids) continue
+            val at = odometer.meters
+            val measured = if (i < CandidateTuning.ORACLE_MAX) budget.refine(c, pos) else null
+            if (measured?.routeDistanceM?.let { it.isFinite() && it > 0 } == true && measured.directionOk != false) {
+                extra += at to measured
+            } else {
+                horizon = minOf(horizon, c.straightDistanceM ?: 0.0)
+            }
+        }
+        val base = odometer.meters
+        val moved = navi.moved(snap.odometerM, base)
+        val list = NaviPoll.advanceCandidates(snap.list, moved) + extra.flatMap { (at, c) ->
+            NaviPoll.advanceCandidates(listOf(c), navi.moved(at, base))
+        }
+        return snap.copy(list = CandidateRules.beforeDestination(list, navi.liveRoute(base)?.remainDistanceM), odometerM = base,
+            untilM = snap.untilM?.let { (it - moved).coerceAtLeast(0.0) }, energyUntilM = (horizon - moved).coerceAtLeast(0.0))
     }
 
     // ------------------------------------------------------------ 도우미
@@ -328,5 +363,6 @@ class CandidateProvider(
 
     private companion object {
         val NO_ROUTE = NaviSnapshot()
+        val ENERGY_KINDS = setOf(StopKind.GAS_STATION, StopKind.OTHER)
     }
 }

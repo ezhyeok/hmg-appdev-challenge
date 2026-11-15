@@ -1,0 +1,18 @@
+[
+ {"statId":"A","chgerId":"1","statNm":"안성휴게소","chgerType":"04","lat":"37","lng":"127","output":"100","useTime":"24시간 이용가능"},
+ {"statId":"A","chgerId":"2","statNm":"안성휴게소","chgerType":"06","lat":"37","lng":"127","output":"200","useTime":"24시간 이용가능"},
+ {"statId":"A","chgerId":"2","statNm":"안성휴게소","chgerType":"06","lat":"37","lng":"127","output":"200","useTime":"24시간 이용가능"},
+ {"statId":"A","chgerId":"3","chgerType":"02","lat":"37","lng":"127","output":"7"},
+ {"statId":"A","chgerId":"4","chgerType":"04","lat":"37","lng":"127","output":"400","limitYn":"Y"},
+ {"statId":"A","chgerId":"5","chgerType":"04","lat":"37","lng":"127","output":"400","delYn":"Y"},
+ {"statId":"B","chgerId":"1","statNm":"시청 주차장","chgerType":"01","lat":"37","lng":"127","output":"50","useTime":"09:00~18:00","stat":"3"},
+ {"statId":"C","chgerId":"1","chgerType":"04","lat":"0","lng":"0"},
+ {"statId":"C","chgerId":"2","chgerType":"04","lat":"NaN","lng":"127"},
+ {"statId":"D","chgerId":"1","chgerType":"08","lat":"36","lng":"127","output":"7"},
+ {"statId":"E","chgerId":"1","chgerType":"07","lat":"36","lng":"127","output":"43"},
+ {"statId":"F","chgerId":"1","chgerType":"04","lat":"36","lng":"127","output":"50","useTime":"평일 24시간"},
+ {"statId":"G","chgerId":"1","chgerType":"04","lat":"35","lng":"127"},
+ {"statId":"G","chgerId":"2","chgerType":"04","lat":"38","lng":"127"},
+ {"statId":"H","chgerId":"1","chgerType":"11","lat":"36","lng":"127","output":"200"},
+ {"statId":"N","chgerId":"1","chgerType":"09","lat":"36","lng":"127","output":"250"}
+]

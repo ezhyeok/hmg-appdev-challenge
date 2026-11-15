@@ -50,6 +50,9 @@ class RestrictionTest {
     fun limitCharsKeepsShortTextAndEllipsizesLong() {
         assertEquals("안성휴게소", limitChars("안성휴게소", 10))
         assertEquals("가나다라…", limitChars("가나다라마바", 5))
+        assertEquals("…", limitChars("안성휴게소", 1))
+        assertEquals("", limitChars("안성휴게소", 0))
+        assertEquals("", limitChars("안성휴게소", -1))
     }
 
     @Test

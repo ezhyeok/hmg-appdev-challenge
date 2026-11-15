@@ -116,7 +116,7 @@ class CoachEngineTest {
         assertEquals("LAST_CHANCE_GAP", first.next?.reasons?.single()?.code)
         val ok = e.at(t0 + SEC, candidates = cands, intent = VoiceIntent.Accept(first.prompt!!.id))
         assertEquals("a", ok.next?.stop?.id)
-        assertEquals("NEXT_ACCEPTED", ok.next?.reasons?.single()?.code)
+        assertEquals(listOf("NEXT_ACCEPTED") + first.prompt!!.reasons.map { it.code }, ok.next?.reasons?.map { it.code })
         assertNull(ok.prompt)
         // 그곳에 서서 문을 열고 4분
         var t = t0 + 2 * MIN
